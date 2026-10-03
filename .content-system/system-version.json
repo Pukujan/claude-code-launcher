@@ -1,0 +1,26 @@
+{
+  "schema_version": "content-generation.adapter.v1",
+  "system": "content-generation-modules",
+  "helper_repository": "https://github.com/Pukujan/content-generation-modules",
+  "helper_version": "0.5.12",
+  "helper_commit": "6831f91e165b62d719c05eb492f7375fa932b560",
+  "helper_pin_note": "FULL CGM 0.5.12 required: all eight modules. Validate with the pinned scripts/validate_content_system.py; apply writing routing at agent boot.",
+  "modules": [
+    "brand-foundation",
+    "content-context",
+    "writing-direction",
+    "human-sounding-writing",
+    "human-output-naming",
+    "visual-direction",
+    "image-generation",
+    "html-demo"
+  ],
+  "authoritative_project_files": [
+    "PROJECT.md",
+    "AGENTS.md",
+    "checkpoints/CURRENT.md",
+    "HANDOFF.md"
+  ],
+  "review_outputs": [],
+  "adoption_status": "adapter pinned; narrative evidence will be appended through accepted issues/PRs"
+}

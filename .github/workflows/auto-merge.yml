@@ -1,0 +1,38 @@
+name: auto-merge
+
+# Arms squash auto-merge on every same-repo pull request, so an agent push that
+# opens or updates a PR needs no manual merge step and no review approval.
+# Fork pull requests are skipped: their workflow runs get a read-only token that
+# cannot arm auto-merge, and this job never needs to run for them.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  arm:
+    name: arm auto-merge
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enable squash auto-merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          armed=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" \
+            --json autoMergeRequest --jq 'if .autoMergeRequest then "yes" else "no" end')
+          if [ "$armed" = "yes" ]; then
+            echo "Auto-merge is already armed for PR #$PR."
+            exit 0
+          fi
+          gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --squash --auto
