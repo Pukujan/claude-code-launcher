@@ -1,0 +1,16 @@
+# Secrets stay on each machine. Only .env.example is tracked.
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Logs
+logs/
+*.log

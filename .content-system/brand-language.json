@@ -1,0 +1,16 @@
+{
+  "schema_version": "content-generation.brand-language.v1",
+  "name": "Claude Code Launcher",
+  "personality": [
+    "plain",
+    "careful",
+    "practical"
+  ],
+  "promise": "Double-click once and Claude Code opens in your project, talking to InferHub through a proxy on your own machine.",
+  "avoid": [
+    "fake metrics",
+    "claims of Mac testing that has not happened",
+    "unexplained acronyms",
+    "printing or pasting keys"
+  ]
+}

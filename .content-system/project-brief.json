@@ -1,0 +1,51 @@
+{
+  "schema_version": "content-generation.project-brief.v2",
+  "project": "Claude Code Launcher",
+  "audience": [
+    "Alex, starting Claude Code on the Windows PC or the Mac",
+    "agents that maintain the launcher and its proxy files",
+    "future maintainers who need to know where each file came from"
+  ],
+  "problem": "The Claude Code launcher lived in three places that drifted apart: a Desktop copy on the PC, a module in agent-custom-setup, and the LiteLLM workbench it depended on. Nobody could tell which copy was current.",
+  "solution": "One private repository holds the Windows launcher, the Mac launcher and the shared LiteLLM proxy files they both run, with every copied file traced to its source commit and CI checking each change.",
+  "evidence": [
+    {
+      "claim": "The repository was created as the single home for the launcher, starting from a short README on main.",
+      "source": "Repository README.md at the bootstrap commit.",
+      "status": "shipped",
+      "supports": "The bootstrap commit contains only README.md, which names this repository as where the launchers live from now on.",
+      "limits": "The README states intent; it is not evidence that the launcher files have been moved here.",
+      "recorded_at": "2026-10-03T23:45:00Z",
+      "source_revision": {
+        "kind": "repository_artifact",
+        "reference": "README.md",
+        "repository": "Pukujan/claude-code-launcher",
+        "commit": "9af6b7ed923caab807a5db289622c6bea771a696",
+        "path": "README.md",
+        "locator": "whole file",
+        "uri": "https://github.com/Pukujan/claude-code-launcher/blob/9af6b7ed923caab807a5db289622c6bea771a696/README.md"
+      },
+      "cite_in_readme": false
+    },
+    {
+      "claim": "The launcher, its Mac port and the shared proxy files are planned to move into this repository through their own pull request.",
+      "source": "Owner direction recorded on the launcher issue.",
+      "status": "planned",
+      "supports": "Alex asked for windows/, mac/ and shared/litellm/ to be added in a separate launcher pull request.",
+      "limits": "A plan only; it says nothing about whether the launcher works from this repository yet.",
+      "recorded_at": "2026-10-03T23:45:00Z",
+      "source_revision": {
+        "kind": "owner_decision",
+        "reference": "owner task brief",
+        "observed_at": "2026-10-03",
+        "uri": "https://github.com/Pukujan/claude-code-launcher"
+      },
+      "cite_in_readme": false
+    }
+  ],
+  "boundaries": [
+    "Model routing to InferHub seats is copied from the workbench, not rewritten.",
+    "Nothing in this repository runs against the live proxy on port 4000.",
+    "Only .env.example is tracked; real keys stay on each machine."
+  ]
+}

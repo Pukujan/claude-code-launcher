@@ -1,0 +1,15 @@
+{
+  "schema_version": "content-generation.asset-manifest.v1",
+  "system_version": "0.5.12",
+  "assets": [
+    {
+      "path": "docs/assets/launcher-flow.svg",
+      "role": "ui-reference",
+      "orientation": "svg",
+      "dimensions": "720x160",
+      "text_policy": "Three labelled boxes and arrows only; no product claims or metrics.",
+      "review": "draft",
+      "source": "Hand-written SVG in this repository; a code-authored reference, not a generated narrative asset."
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "schema_version": "content-generation.review-rubric.v1",
+  "dimensions": [
+    {
+      "id": "clarity",
+      "question": "Can Alex tell from the docs how to start the launcher on each machine?"
+    },
+    {
+      "id": "provenance",
+      "question": "Can every copied file be traced to a source repository, path and commit?"
+    },
+    {
+      "id": "honesty",
+      "question": "Do the docs say plainly what has and has not been tested, including that the Mac launcher has only run on Linux?"
+    },
+    {
+      "id": "safety",
+      "question": "Is the live proxy on port 4000 left alone, and are keys never printed or committed?"
+    }
+  ],
+  "decision_rule": "human review plus deterministic repository gates"
+}

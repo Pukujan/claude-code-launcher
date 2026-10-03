@@ -1,0 +1,29 @@
+{
+  "schema_version": "content-generation.visual-style.v1",
+  "reference_asset": "docs/assets/launcher-flow.svg",
+  "generation_workflow": "built-in image_gen",
+  "narrative_roles": [
+    "hero",
+    "problem",
+    "supporting"
+  ],
+  "palette": {
+    "background": "#ffffff",
+    "surface": "#f5f5f5",
+    "accent": "#0f766e"
+  },
+  "roles": {
+    "hero": {
+      "purpose": "show Claude Code reaching InferHub through a proxy on the same machine"
+    },
+    "ui-reference": {
+      "purpose": "code-authored diagram of the request path; not a product screenshot"
+    }
+  },
+  "reject_when": [
+    "fake metrics or invented stats",
+    "decorative complexity without meaning",
+    "tiny unreadable labels",
+    "screenshots that show keys or tokens"
+  ]
+}

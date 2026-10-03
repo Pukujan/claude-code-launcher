@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="160" viewBox="0 0 720 160" role="img" aria-labelledby="t d">
+  <title id="t">Launcher request path</title>
+  <desc id="d">Claude Code talks to a LiteLLM proxy on the same machine, which forwards to InferHub.</desc>
+  <rect width="720" height="160" fill="#ffffff"/>
+  <g font-family="Helvetica, Arial, sans-serif" font-size="16" fill="#1f2933" text-anchor="middle">
+    <rect x="20" y="50" width="180" height="60" rx="8" fill="#f5f5f5" stroke="#0f766e" stroke-width="2"/>
+    <text x="110" y="86">Claude Code</text>
+    <rect x="270" y="50" width="180" height="60" rx="8" fill="#f5f5f5" stroke="#0f766e" stroke-width="2"/>
+    <text x="360" y="78">LiteLLM proxy</text>
+    <text x="360" y="98" font-size="12">this machine only</text>
+    <rect x="520" y="50" width="180" height="60" rx="8" fill="#f5f5f5" stroke="#0f766e" stroke-width="2"/>
+    <text x="610" y="86">InferHub</text>
+    <path d="M200 80 H262 M450 80 H512" stroke="#0f766e" stroke-width="2" marker-end="url(#a)"/>
+  </g>
+  <defs><marker id="a" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="#0f766e"/></marker></defs>
+</svg>
