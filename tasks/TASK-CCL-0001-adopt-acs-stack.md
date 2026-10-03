@@ -1,8 +1,8 @@
 # TASK-CCL-0001 — Adopt the ACS stack
 
-<!-- continuity:task {"acceptance":["PCM continuity files and the nine pinned schemas are present and `continuity validate` prints VALID","the CGM 0.5.12 adapter lists all eight modules and the pinned validate_content_system.py prints VALID","the OIO 0.1.0 installer output is present and `oio_installer.py --check` prints VALID","the ACS .coord assignment, boss claim and stack-manifest.json are pinned to release train 2026-10-01","the pinned ACS hotload_check.py passes against this repository","the required `gates` check reports success on the pull request","no secrets are stored"],"depends_on":[],"goal":"Install the ACS multi-agent-hotload 0.1.0 stack (PCM 0.6.0, CGM 0.5.12, OIO 0.1.0) pinned to release train 2026-10-01 and prove it with the pinned validators in a required gates check.","id":"CCL-0001","issue_url":"https://github.com/Pukujan/claude-code-launcher/issues/1","next_action":"Open the pull request from task/CCL-0001-adopt-acs-stack and read the gates result.","owner":"Alex; executor agent installs","priority":"P0","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"active","why":"The launcher repository needs continuity files, an issue form and a required CI gate before any launcher code lands."} -->
+<!-- continuity:task {"acceptance":["PCM continuity files and the nine pinned schemas are present and `continuity validate` prints VALID","the CGM 0.5.12 adapter lists all eight modules and the pinned validate_content_system.py prints VALID","the OIO 0.1.0 installer output is present and `oio_installer.py --check` prints VALID","the ACS .coord assignment, boss claim and stack-manifest.json are pinned to release train 2026-10-01","the pinned ACS hotload_check.py passes against this repository","the required `gates` check reports success on the pull request","no secrets are stored"],"depends_on":[],"goal":"Install the ACS multi-agent-hotload 0.1.0 stack (PCM 0.6.0, CGM 0.5.12, OIO 0.1.0) pinned to release train 2026-10-01 and prove it with the pinned validators in a required gates check.","id":"CCL-0001","issue_url":"https://github.com/Pukujan/claude-code-launcher/issues/1","next_action":"None for this task.","owner":"Alex; executor agent installs","priority":"P0","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"completed","why":"The launcher repository needs continuity files, an issue form and a required CI gate before any launcher code lands."} -->
 
-- Status: active
+- Status: completed
 - Owner: Alex; executor agent installs
 - Priority: P0
 - Depends on: none
@@ -33,13 +33,13 @@ A fresh agent opening this repository finds the project contract, the current ch
 
 ## Acceptance criteria
 
-- [ ] PCM continuity files and the nine pinned schemas are present and `continuity validate` prints VALID
-- [ ] the CGM 0.5.12 adapter lists all eight modules and the pinned validate_content_system.py prints VALID
-- [ ] the OIO 0.1.0 installer output is present and `oio_installer.py --check` prints VALID
-- [ ] the ACS .coord assignment, boss claim and stack-manifest.json are pinned to release train 2026-10-01
-- [ ] the pinned ACS hotload_check.py passes against this repository
-- [ ] the required `gates` check reports success on the pull request
-- [ ] no secrets are stored
+- [x] PCM continuity files and the nine pinned schemas are present and `continuity validate` prints VALID
+- [x] the CGM 0.5.12 adapter lists all eight modules and the pinned validate_content_system.py prints VALID
+- [x] the OIO 0.1.0 installer output is present and `oio_installer.py --check` prints VALID
+- [x] the ACS .coord assignment, boss claim and stack-manifest.json are pinned to release train 2026-10-01
+- [x] the pinned ACS hotload_check.py passes against this repository
+- [x] the required `gates` check reports success on the pull request
+- [x] no secrets are stored
 
 ## Evidence and sources
 
@@ -52,8 +52,8 @@ Starting revision, material inputs/configuration, runtime, exact command or prom
 ## Related records
 
 - Leaf issue: https://github.com/Pukujan/claude-code-launcher/issues/1. Parent: none. Dependencies: none.
-- Primary writer: executor agent for Alex. Branch: `task/CCL-0001-adopt-acs-stack`. As of 2026-10-03: active.
-- PR and CI evidence: recorded on the issue once the `gates` check runs.
+- Primary writer: executor agent for Alex. Branch: `task/CCL-0001-adopt-acs-stack`. As of 2026-10-03: completed.
+- PR and CI evidence: PR #2; `gates` passed on head `d2c210a` (run 37162531043); squash-merged as `0357326` on 2026-10-03 at 7:41 PM ET; issue #1 closed.
 
 ## Checkpoint log
 

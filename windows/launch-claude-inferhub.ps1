@@ -1,13 +1,17 @@
 ﻿$ErrorActionPreference = "Stop"
 
 # InferHub Claude Code launcher via the UNIFIED local LiteLLM proxy
-# (D:\development\litellm-ckff-ops = CKFF + InferHub groups). Picks main + advisor from
-# IRE Top 20, seats aliases (sonnet/opus), points Claude at 127.0.0.1:4000.
+# (CKFF + InferHub groups), run from this repository's shared\litellm folder.
+# Picks main + advisor from IRE Top 20, seats aliases (sonnet/opus), points
+# Claude at 127.0.0.1:4000. The proxy is keyless and bound to 127.0.0.1 only.
 # Never sets CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1.
+# Source of truth: Pukujan/claude-code-launcher windows\ (see SOURCES.md).
 
 $Root = "D:\development"   # default project root (listed first in folder picker)
 $SecondaryRoot = "C:\work" # secondary project root, listed after the default root
-$LiteLLMRoot = "D:\development\litellm-ckff-ops"
+$RepoRoot = Split-Path -Parent $PSScriptRoot           # this repository
+$LiteLLMRoot = Join-Path $RepoRoot "shared\litellm"     # proxy config + scripts
+$LiteLLMOps = Join-Path $PSScriptRoot "litellm"         # start/stop scripts
 $ProxyPort = 4000
 $ProxyBase = "http://127.0.0.1:$ProxyPort"
 $DefaultModelId = "cb/deepseek-v4.1-flash"
@@ -15,12 +19,14 @@ $CkffEnvFile = "C:\Users\pujan\OneDrive\Desktop\configs\.env"
 # InferHub env: first existing file wins (IRE .env, then repo .env, then user config).
 $InferHubEnvCandidates = @(
   "D:\development\inference-recommendation-engine\.env",
-  (Join-Path $LiteLLMRoot ".env"),
+  (Join-Path $RepoRoot ".env"),
   (Join-Path $env:USERPROFILE ".config\inferhub\.env")
 )
 $InferHubEnvFile = $InferHubEnvCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 if (-not $InferHubEnvFile) { $InferHubEnvFile = $InferHubEnvCandidates[0] }
 
+# HOOK(ire-models): the picker table. It matches shared\litellm\config\top20-builtin.csv
+# (tests\test_top20_tables.py checks that). An IRE fetch can replace these rows.
 $Models = @(
   @{ Rank = 1;  Name = "DeepSeek V4.1 Flash";        Id = "cb/deepseek-v4.1-flash";              Eligible = $true;  Cost = "0.022" }
   @{ Rank = 2;  Name = "GLM 5.3 Flash";              Id = "cbcn/glm-5.3-flash";                  Eligible = $true;  Cost = "0.033" }
@@ -53,10 +59,13 @@ function Read-EnvValue {
 }
 
 function Read-LiteLLMMasterKey {
-  $key = Read-EnvValue -Path $CkffEnvFile -Name "LITELLM_MASTER_KEY"
-  if (-not $key) { $key = Read-EnvValue -Path $CkffEnvFile -Name "LITELLM_PROXY_KEY" }
-  if (-not $key) { throw "LITELLM_MASTER_KEY not found in $CkffEnvFile" }
-  return $key
+  # The proxy is keyless by default. If a LITELLM_MASTER_KEY is set, pass it
+  # through; otherwise Claude Code still needs some key value, so use "local".
+  foreach ($f in @($CkffEnvFile, $InferHubEnvFile)) {
+    $key = Read-EnvValue -Path $f -Name "LITELLM_MASTER_KEY"
+    if ($key) { return $key }
+  }
+  return "local"
 }
 
 function Read-MenuKey {
@@ -341,12 +350,12 @@ function Ensure-LiteLLMProxy {
     Write-Host "LiteLLM proxy already up at $ProxyBase"
     return
   }
-  $starter = Join-Path $LiteLLMRoot "start-litellm.ps1"
+  $starter = Join-Path $LiteLLMOps "start-litellm.ps1"
   if (-not (Test-Path -LiteralPath $starter)) {
-    throw "Missing $starter - clone/workbench expected at $LiteLLMRoot (git clone https://github.com/Pukujan/litellm-ckff-ops.git $LiteLLMRoot)"
+    throw "Missing $starter - this launcher must run from a claude-code-launcher checkout"
   }
   Write-Host "Starting unified LiteLLM proxy (background)..."
-  $arg = "-NoProfile -ExecutionPolicy Bypass -File `"$starter`" -Background -SkipSync -Port $ProxyPort"
+  $arg = "-NoProfile -ExecutionPolicy Bypass -File `"$starter`" -Background -SkipSync -Port $ProxyPort -CkffEnvFile `"$CkffEnvFile`" -InferHubEnvFile `"$InferHubEnvFile`""
   $starterProc = Start-Process -FilePath "powershell.exe" -ArgumentList $arg -WindowStyle Hidden -PassThru
   $null = $starterProc.Handle   # cache handle so ExitCode is readable after exit (PS 5.1)
   $deadline = (Get-Date).AddSeconds(300)
@@ -357,7 +366,7 @@ function Ensure-LiteLLMProxy {
       return
     }
     if ($starterProc.HasExited -and $starterProc.ExitCode -ne 0) {
-      throw "start-litellm.ps1 failed (exit $($starterProc.ExitCode)); run it in a visible window to see why: cd $LiteLLMRoot; .\start-litellm.ps1 -SkipSync"
+      throw "start-litellm.ps1 failed (exit $($starterProc.ExitCode)); run it in a visible window to see why: cd $LiteLLMOps; .\start-litellm.ps1 -SkipSync"
     }
   }
   throw "LiteLLM proxy did not become healthy at $ProxyBase within 300s. Check $LiteLLMRoot\logs"
@@ -375,10 +384,13 @@ function Apply-InferHubSeat {
       updated_at = (Get-Date).ToUniversalTime().ToString("o")
     } | ConvertTo-Json
     New-Item -ItemType Directory -Force -Path (Split-Path $seatPath) | Out-Null
-    Set-Content -LiteralPath $seatPath -Value $seat -Encoding UTF8
+    # UTF-8 without a BOM: PS 5.1's -Encoding UTF8 adds one and json.loads rejects it.
+    [System.IO.File]::WriteAllText($seatPath, $seat, [System.Text.UTF8Encoding]::new($false))
     Write-Host "wrote seat file (venv not ready yet); proxy start will apply aliases"
     return
   }
+  # reload_runtime.py reads an optional LITELLM_MASTER_KEY from these files.
+  $env:CLAUDE_IH_ENV_FILES = (@($CkffEnvFile, $InferHubEnvFile) -join ";")
   $apply = Join-Path $LiteLLMRoot "scripts\apply_inferhub_seat.py"
   $merge = Join-Path $LiteLLMRoot "scripts\merge_litellm_config.py"
   $advArg = @()
@@ -394,6 +406,9 @@ function Apply-InferHubSeat {
 # ---- interactive flow ----
 $main = Select-MainModel
 $advisor = Select-AdvisorModel
+# HOOK(fallback-ladder): a ladder picker goes here, after the seats are chosen
+# and before Apply-InferHubSeat. Today the ladders come from
+# shared\litellm\config\inferhub_fallbacks.yaml unchanged.
 $folder = Select-ProjectFolder
 
 $advisorId = $advisor.Id
@@ -406,7 +421,7 @@ Ensure-LiteLLMProxy
 Apply-InferHubSeat -MainId $main.Id -AdvisorId $advisorId
 # Soft note: LiteLLM may need restart to pick runtime.yaml changes if already running with old seat.
 Write-Host "Seat applied. If proxy was already running with an old seat, restart it:"
-Write-Host "  cd $LiteLLMRoot; .\stop-litellm.ps1; .\start-litellm.ps1 -Background"
+Write-Host "  cd $LiteLLMOps; .\stop-litellm.ps1; .\start-litellm.ps1 -Background -InferHubEnvFile `"$InferHubEnvFile`""
 
 $seatAlias = "sonnet"
 Sync-ModelPicker -MainId $main.Id -SeatAlias $seatAlias
@@ -449,7 +464,7 @@ Get-ChildItem Env: | Where-Object {
 }
 
 # Force InferHub-via-local-LiteLLM for this Claude child only.
-# Key = LiteLLM master/virtual key (from Desktop configs .env), NEVER CKFF.
+# Key = optional LiteLLM master key, else the dummy "local" (keyless proxy). NEVER CKFF.
 $env:ANTHROPIC_API_KEY = $master
 $env:ANTHROPIC_BASE_URL = $ProxyBase   # always http://127.0.0.1:4000
 $env:ANTHROPIC_MODEL = $seatAlias      # sonnet seat -> InferHub main

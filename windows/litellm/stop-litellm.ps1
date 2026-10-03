@@ -1,47 +1,62 @@
 ﻿#!/usr/bin/env pwsh
-# Stop the locally-running LiteLLM proxy (D:\claude\litellm workbench).
+# Stop the LiteLLM proxy that start-litellm.ps1 started from this repository,
+# and nothing else. It reads the PID from shared/litellm/logs/litellm.pid,
+# checks that the process is this repository's venv litellm, and stops that
+# process and its children. It never looks up or kills whatever owns a port,
+# so the live proxy on 127.0.0.1:4000 started some other way is left alone.
 
-$ErrorActionPreference = 'SilentlyContinue'
+param([switch]$WhatIf)
 
-$RepoRoot = Split-Path -Parent $MyInvocation.MyCommand.Definition
-$VenvPython = Join-Path $RepoRoot '.litellm-venv\Scripts\python.exe'
+$ErrorActionPreference = 'Stop'
 
-$procs = Get-Process python, litellm -ErrorAction SilentlyContinue | Where-Object {
-    $_.Path -like ('*' + $RepoRoot + '*') -or
-    $_.Path -like '*\litellm*' -or
-    ($VenvPython -and $_.Path -eq $VenvPython) -or
-    $_.Path -like '*litellm-ckff-ops*' -or
-    $_.Path -like '*\.litellm-venv\*'
+$RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$LiteLLMRoot = Join-Path $RepoRoot 'shared\litellm'
+$VenvScripts = Join-Path $LiteLLMRoot '.litellm-venv\Scripts'
+$PidFile = Join-Path $LiteLLMRoot 'logs\litellm.pid'
+
+if (-not (Test-Path -LiteralPath $PidFile)) {
+    Write-Host "No PID file at $PidFile; nothing started by this repo is recorded. Not stopping anything."
+    exit 0
 }
 
-# Also kill whatever owns port 4000 if it looks like our proxy
-$portOwners = @()
-Get-NetTCPConnection -LocalPort 4000 -ErrorAction SilentlyContinue | ForEach-Object {
-    $portOwners += $_.OwningProcess
-}
-$portOwners = $portOwners | Select-Object -Unique
-
-if ($procs) {
-    $procs | Stop-Process -Force
-    Write-Host "Stopped LiteLLM-related processes."
-} else {
-    Write-Host "No LiteLLM python processes matched by path."
+$raw = (Get-Content -LiteralPath $PidFile | Select-Object -First 1)
+$procId = 0
+if (-not [int]::TryParse("$raw".Trim(), [ref]$procId) -or $procId -le 0) {
+    Write-Host "PID file $PidFile does not hold a PID; leaving it for you to check."
+    exit 1
 }
 
-foreach ($procId in $portOwners) {
-    try {
-        $p = Get-Process -Id $procId -ErrorAction Stop
-        Write-Host ("Stopping port-4000 owner PID {0} ({1})" -f $procId, $p.ProcessName)
-        Stop-Process -Id $procId -Force
-    } catch {
-        Write-Host ("Port 4000 PID {0} already gone" -f $pid)
+$proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
+if (-not $proc) {
+    Write-Host "PID $procId is not running. Removing the stale PID file."
+    Remove-Item -LiteralPath $PidFile -ErrorAction SilentlyContinue
+    exit 0
+}
+
+# PIDs get reused: only stop it if it is this repository's venv litellm.
+$exe = $proc.Path
+if (-not $exe -or -not $exe.StartsWith($VenvScripts, [System.StringComparison]::OrdinalIgnoreCase)) {
+    Write-Host "PID $procId is $($proc.ProcessName) at '$exe', not this repo's LiteLLM. Not stopping it."
+    exit 1
+}
+
+function Get-ChildProcessId {
+    param([int]$ParentId)
+    $kids = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $ParentId" -ErrorAction SilentlyContinue)
+    foreach ($k in $kids) {
+        Get-ChildProcessId -ParentId ([int]$k.ProcessId)
+        [int]$k.ProcessId
     }
 }
 
-Start-Sleep -Seconds 1
-$left = Get-NetTCPConnection -LocalPort 4000 -ErrorAction SilentlyContinue
-if ($left) {
-    $left | ForEach-Object { Write-Host ("Port 4000 still bound by PID {0}" -f $_.OwningProcess) }
-} else {
-    Write-Host "Port 4000 is free."
+# Children first (the litellm.exe launcher runs python.exe as a child).
+$targets = @(Get-ChildProcessId -ParentId $procId) + @($procId)
+foreach ($t in $targets) {
+    if ($WhatIf) {
+        Write-Host "Would stop PID $t"
+        continue
+    }
+    Stop-Process -Id $t -Force -ErrorAction SilentlyContinue
+    Write-Host "Stopped PID $t"
 }
+if (-not $WhatIf) { Remove-Item -LiteralPath $PidFile -ErrorAction SilentlyContinue }

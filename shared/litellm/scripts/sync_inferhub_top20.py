@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Generate config/inferhub_top20.yaml from IRE Top 20 CSV.
 
-Reads D:\\claude\\inferhub\\research_model_top20_recommendations.csv (override with
---csv). Writes OpenAI-compatible InferHub deployments under model_name prefix ih/.
+Reads config/top20-builtin.csv, the table both launchers show (override with
+--csv; the launchers pass config/top20.csv instead when an IRE fetch wrote
+one). Writes OpenAI-compatible InferHub deployments under model_name prefix ih/.
 No secrets are written; api_key is os.environ/INFERHUB_API_KEY.
 """
 from __future__ import annotations
@@ -13,7 +14,7 @@ import datetime as dt
 import sys
 from pathlib import Path
 
-DEFAULT_CSV = Path(r"D:\claude\inferhub\research_model_top20_recommendations.csv")
+DEFAULT_CSV = Path(__file__).resolve().parents[1] / "config" / "top20-builtin.csv"
 DEFAULT_OUT = Path(__file__).resolve().parents[1] / "config" / "inferhub_top20.yaml"
 DEFAULT_API_BASE = "https://api.inferhub.dev/v1"
 

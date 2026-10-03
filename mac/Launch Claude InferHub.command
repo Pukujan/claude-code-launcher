@@ -1,20 +1,22 @@
 #!/bin/bash
 # =============================================================================
-# Launch Claude InferHub (macOS) - ACS module inferhub-litellm-macos v0.1.0
-# Source of truth: Pukujan/agent-custom-setup
-#   modules/claude-code/inferhub-litellm-macos/v0.1.0/
-# Mac port of modules/claude-code/inferhub-litellm (Windows launcher).
+# Launch Claude InferHub (macOS)
+# Source of truth: Pukujan/claude-code-launcher mac/ (see SOURCES.md).
+# Ported from ACS inferhub-litellm-macos v0.1.0 (agent-custom-setup PR #65).
+# Mac counterpart of windows/launch-claude-inferhub.ps1.
 #
 # Double-click in Finder. First run installs what is missing (no sudo):
-#   Xcode Command Line Tools (only if git is needed), uv, a uv-managed Python,
-#   the litellm-ckff-ops workbench checkout + its venv with pinned LiteLLM,
-#   and Claude Code. Then it asks once for the InferHub key, starts LiteLLM on
-#   127.0.0.1:4000, shows a folder picker and the Windows model picker, seats
-#   the models through the workbench's own scripts and runs claude.
+#   uv, a uv-managed Python, the venv with pinned LiteLLM under
+#   shared/litellm/.litellm-venv, and Claude Code. Then it asks once for the
+#   InferHub key, starts LiteLLM on 127.0.0.1:4000 from this repository's
+#   shared/litellm folder (no other checkout needed), shows a folder picker and
+#   the Windows model picker, seats the models and runs claude.
 # Later runs skip everything already installed.
 #
-# Secrets are read from files at runtime and never printed or committed:
-#   <litellm-ckff-ops>/.env  and  ~/.config/inferhub/.env (mode 600)
+# The proxy is keyless and bound to 127.0.0.1 only. A LITELLM_MASTER_KEY is
+# optional and passed through when set; otherwise claude gets the dummy key
+# "local". Secrets are read from files at runtime and never printed:
+#   <repo>/.env  and  ~/.config/inferhub/.env (mode 600)
 # Written for the bash 3.2 that ships with macOS (no bash 4 features).
 # =============================================================================
 
@@ -25,9 +27,9 @@ umask 022
 LITELLM_PORT="${LITELLM_PORT:-4000}"
 PROXY_BASE="http://127.0.0.1:${LITELLM_PORT}"
 WORK_ROOT="${CLAUDE_IH_WORK_ROOT:-$HOME/work}"
-LITELLM_DIR="${LITELLM_DIR:-$WORK_ROOT/litellm-ckff-ops}"
-LITELLM_GH_REPO="${LITELLM_GH_REPO:-Pukujan/litellm-ckff-ops}"
-LITELLM_REPO_URL="${LITELLM_REPO_URL:-https://github.com/${LITELLM_GH_REPO}.git}"
+# This file lives in <repo>/mac/; the proxy files live in <repo>/shared/litellm.
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+LITELLM_DIR="$REPO_ROOT/shared/litellm"
 IH_ENV_FILE="${INFERHUB_ENV_FILE:-$HOME/.config/inferhub/.env}"
 HEALTH_TIMEOUT="${LITELLM_HEALTH_TIMEOUT:-300}"
 PY_VERSION="${CLAUDE_IH_PYTHON:-3.12}"
@@ -51,17 +53,18 @@ LOG_FILE="$LOG_DIR/launcher.log"
 VENV="$LITELLM_DIR/.litellm-venv"
 VENV_PY="$VENV/bin/python"
 
-# Pinned to the versions in the working Windows venv (litellm-ckff-ops itself
-# installs litellm[proxy] unpinned, then pip-downgrades fastapi/starlette/
-# sse-starlette; OVERRIDES reproduces that downgrade with uv).
-# Change either list and the venv refreshes itself on the next run.
-REQUIREMENTS='litellm[proxy]==1.103.0
-pyyaml==6.0.3'
-OVERRIDES='fastapi==0.115.14
-starlette==0.41.3
-sse-starlette==2.1.3'
+# Pinned in shared/litellm/requirements.txt and requirements-overrides.txt,
+# the same files Windows installs from. The overrides pin fastapi/starlette/
+# sse-starlette below what LiteLLM declares, which uv does with --override.
+# Change either file and the venv refreshes itself on the next run.
+REQ_FILE="$LITELLM_DIR/requirements.txt"
+OVR_FILE="$LITELLM_DIR/requirements-overrides.txt"
+REQUIREMENTS="$(cat "$REQ_FILE" 2>/dev/null)"
+OVERRIDES="$(cat "$OVR_FILE" 2>/dev/null)"
 
-# Same IRE Top 20 table as the Windows launcher: rank|name|id|eligible|cost
+# HOOK(ire-models): the picker table, the same IRE Top 20 as the Windows
+# launcher: rank|name|id|eligible|cost. It matches
+# shared/litellm/config/top20-builtin.csv (tests/test_top20_tables.py checks).
 MODELS='1|DeepSeek V4.1 Flash|cb/deepseek-v4.1-flash|true|0.022
 2|GLM 5.3 Flash|cbcn/glm-5.3-flash|true|0.033
 3|Gemini 3.8 Flash|ag/gemini-3.8-flash-high|false|0.066
@@ -151,11 +154,11 @@ env_get() {
   return 1
 }
 
-# secret NAME -> first value from repo .env, then ~/.config/inferhub/.env,
+# secret NAME -> first value from <repo>/.env, then ~/.config/inferhub/.env,
 # then the already-exported environment.
 secret() {
   local v
-  v="$(env_get "$LITELLM_DIR/.env" "$1")" && [ -n "$v" ] && { printf '%s' "$v"; return 0; }
+  v="$(env_get "$REPO_ROOT/.env" "$1")" && [ -n "$v" ] && { printf '%s' "$v"; return 0; }
   v="$(env_get "$IH_ENV_FILE" "$1")" && [ -n "$v" ] && { printf '%s' "$v"; return 0; }
   eval "v=\"\${$1:-}\""
   [ -n "$v" ] && { printf '%s' "$v"; return 0; }
@@ -199,30 +202,11 @@ need_curl() {
   command -v curl >/dev/null 2>&1 || die "curl is missing; it ships with macOS, so this Mac looks unusual. Install curl and try again."
 }
 
-ensure_git() {
-  command -v git >/dev/null 2>&1 || [ "$OS_NAME" = "Darwin" ] || die "git is missing. Install git and try again."
-  if [ "$OS_NAME" = "Darwin" ] && ! xcode-select -p >/dev/null 2>&1; then
-    log "git needs Apple's Command Line Tools. Opening the installer..."
-    xcode-select --install >/dev/null 2>&1 || true
-    die "Finish the Command Line Tools install in the window that just opened, then double-click this launcher again."
-  fi
-}
-
 ensure_workbench() {
-  if [ -f "$LITELLM_DIR/scripts/apply_inferhub_seat.py" ] && [ -f "$LITELLM_DIR/config/config.yaml" ]; then
-    return 0
-  fi
-  if [ -d "$LITELLM_DIR" ] && [ -n "$(ls -A "$LITELLM_DIR" 2>/dev/null)" ]; then
-    die "$LITELLM_DIR exists but is not a litellm-ckff-ops checkout. Move it aside or set LITELLM_DIR to your checkout."
-  fi
-  ensure_git
-  log "Getting the LiteLLM workbench ($LITELLM_GH_REPO) into $LITELLM_DIR ..."
-  mkdir -p "$(dirname "$LITELLM_DIR")" || die "cannot create $(dirname "$LITELLM_DIR")"
-  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-    quiet gh repo clone "$LITELLM_GH_REPO" "$LITELLM_DIR" && return 0
-  fi
-  quiet git clone "$LITELLM_REPO_URL" "$LITELLM_DIR" && return 0
-  die "Could not clone $LITELLM_REPO_URL. It is a private repo: sign in first (brew install gh && gh auth login), or clone it yourself to $LITELLM_DIR, then run this again."
+  # The proxy files ship in this repository; nothing to clone.
+  [ -f "$LITELLM_DIR/scripts/apply_inferhub_seat.py" ] && [ -f "$LITELLM_DIR/config/config.yaml" ] \
+    && [ -n "$REQUIREMENTS" ] && [ -n "$OVERRIDES" ] && return 0
+  die "$LITELLM_DIR is incomplete. Run this launcher from a full claude-code-launcher checkout (git pull to update)."
 }
 
 ensure_uv() {
@@ -320,12 +304,8 @@ ensure_keys() {
     key=""
     log "Saved INFERHUB_API_KEY to $IH_ENV_FILE (mode 600)."
   fi
-  if ! secret LITELLM_MASTER_KEY >/dev/null; then
-    # Local-only key that Claude uses to talk to the proxy on 127.0.0.1.
-    command -v openssl >/dev/null 2>&1 || die "openssl missing; cannot create a local proxy key"
-    save_secret LITELLM_MASTER_KEY "sk-local-$(openssl rand -hex 24)"
-    log "Created a local LITELLM_MASTER_KEY in $IH_ENV_FILE (mode 600)."
-  fi
+  # No LITELLM_MASTER_KEY is needed: the proxy is keyless on 127.0.0.1. If
+  # one is set it is passed through (export_proxy_env) and used by claude.
 }
 
 inferhub_url() {
@@ -349,9 +329,18 @@ export_proxy_env() {
 ensure_top20() {
   local out="$LITELLM_DIR/config/inferhub_top20.yaml" csv
   [ -f "$out" ] && return 0
+  # HOOK(ire): INFERHUB_TOP20_CSV wins, then shared/litellm/config/top20.csv
+  # (written by an IRE fetch when one exists), then the IRE CSV in
+  # ~/.config/inferhub, then shared/litellm/config/top20-builtin.csv.
   csv="${INFERHUB_TOP20_CSV:-}"
+  if [ -z "$csv" ] && [ -f "$LITELLM_DIR/config/top20.csv" ]; then
+    csv="$LITELLM_DIR/config/top20.csv"
+  fi
   if [ -z "$csv" ] && [ -f "$HOME/.config/inferhub/research_model_top20_recommendations.csv" ]; then
     csv="$HOME/.config/inferhub/research_model_top20_recommendations.csv"
+  fi
+  if [ -z "$csv" ] && [ -f "$LITELLM_DIR/config/top20-builtin.csv" ]; then
+    csv="$LITELLM_DIR/config/top20-builtin.csv"
   fi
   if [ -z "$csv" ]; then
     # No IRE CSV on this Mac: build one from the launcher's Top 20 table so the
@@ -645,16 +634,21 @@ main() {
   pick_folder
   pick_main
   pick_advisor
+  # HOOK(fallback-ladder): a ladder picker goes here, after the seats are
+  # chosen and before apply_seat. Today the ladders come from
+  # shared/litellm/config/inferhub_fallbacks.yaml unchanged.
 
   apply_seat
   sync_model_picker
 
   local master
-  master="$(secret LITELLM_MASTER_KEY)" || die "LITELLM_MASTER_KEY not found in $IH_ENV_FILE or $LITELLM_DIR/.env"
+  # Keyless proxy: claude still needs some key, so "local" unless a real
+  # LITELLM_MASTER_KEY is set.
+  master="$(secret LITELLM_MASTER_KEY)" || master="local"
 
   clear_claude_env
   # InferHub through the local LiteLLM for this claude only. The key is the
-  # LiteLLM master key, never a CKFF key. Do NOT set ANTHROPIC_AUTH_TOKEN.
+  # optional LiteLLM master key or "local", never a CKFF key. Do NOT set ANTHROPIC_AUTH_TOKEN.
   # Experimental betas stay ON (CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS unset).
   export ANTHROPIC_API_KEY="$master"
   export ANTHROPIC_BASE_URL="$PROXY_BASE"

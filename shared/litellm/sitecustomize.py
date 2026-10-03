@@ -330,6 +330,19 @@ async def _wb_json_response(send, status: int, payload: dict):
     await send({"type": "http.response.body", "body": body, "more_body": False})
 
 
+_WB_LOOPBACK = {"127.0.0.1", "::1", "::ffff:127.0.0.1"}
+
+
+def _wb_authorized(master, token, scope) -> bool:
+    """With a master key, the bearer token must match it. Keyless (the default
+    for this repo's launchers, which bind 127.0.0.1 only), accept loopback
+    clients and nobody else."""
+    if master:
+        return bool(token) and token == master
+    client = scope.get("client") or ()
+    return bool(client) and str(client[0]) in _WB_LOOPBACK
+
+
 def _wb_read_bearer(scope) -> str | None:
     for key, value in scope.get("headers") or []:
         if key.lower() == b"authorization":
@@ -478,7 +491,7 @@ async def _wb_handle_reload(scope, receive, send):
         return await _wb_json_response(send, 500, {"error": f"proxy_server import failed: {e}"})
 
     master = getattr(ps, "master_key", None)
-    if not master or not token or token != master:
+    if not _wb_authorized(master, token, scope):
         return await _wb_json_response(send, 401, {"error": "unauthorized"})
 
     llm_router = getattr(ps, "llm_router", None)

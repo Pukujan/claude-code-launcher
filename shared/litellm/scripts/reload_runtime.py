@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """POST /workbench/reload_runtime on the local LiteLLM proxy (no secrets printed).
 
-Loads LITELLM_MASTER_KEY from process env or the usual local .env files
-(names only logged). If the proxy is not reachable, exits 0 with a skip
-message so apply/merge can stay non-fatal when :4000 is down.
+Uses LITELLM_MASTER_KEY when one is set (process env, the files listed in
+CLAUDE_IH_ENV_FILES, or the repository .env; names only logged). The proxy
+runs keyless by default, and then the request goes without an Authorization
+header; the endpoint accepts that only from loopback when no master key is set.
+If the proxy is not reachable, exits 0 with a skip message so apply/merge can
+stay non-fatal when the proxy is down.
 """
 from __future__ import annotations
 
@@ -17,17 +20,21 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = ROOT.parents[1]
 DEFAULT_BASE = "http://127.0.0.1:4000"
-ENV_CANDIDATES = [
-    Path(r"C:\Users\pujan\OneDrive\Desktop\configs\.env"),
-    Path(r"D:\claude\inferhub\.env"),
-    ROOT / ".env",
-]
+
+
+def env_candidates() -> list[Path]:
+    """Env files to read: the launcher's list (CLAUDE_IH_ENV_FILES, os.pathsep
+    separated), then the repository .env."""
+    paths = [Path(p) for p in os.environ.get("CLAUDE_IH_ENV_FILES", "").split(os.pathsep) if p.strip()]
+    paths.append(REPO_ROOT / ".env")
+    return paths
 
 
 def load_dotenv_files() -> list[str]:
     loaded: list[str] = []
-    for path in ENV_CANDIDATES:
+    for path in env_candidates():
         if not path.is_file():
             continue
         for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
@@ -46,6 +53,13 @@ def master_key() -> str | None:
     return os.environ.get("LITELLM_MASTER_KEY") or None
 
 
+def request_headers(key: str | None) -> dict[str, str]:
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    return headers
+
+
 def liveliness_ok(base: str, timeout: float) -> bool:
     try:
         with urllib.request.urlopen(base.rstrip("/") + "/health/liveliness", timeout=timeout) as resp:
@@ -54,18 +68,14 @@ def liveliness_ok(base: str, timeout: float) -> bool:
         return False
 
 
-def post_reload(base: str, scope: str, key: str, timeout: float) -> tuple[int, dict | str]:
+def post_reload(base: str, scope: str, key: str | None, timeout: float) -> tuple[int, dict | str]:
     url = base.rstrip("/") + "/workbench/reload_runtime"
     body = json.dumps({"scope": scope}).encode("utf-8")
     req = urllib.request.Request(
         url,
         data=body,
         method="POST",
-        headers={
-            "Authorization": f"Bearer {key}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        },
+        headers=request_headers(key),
     )
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -100,9 +110,7 @@ def main() -> int:
 
     key = master_key()
     if not key:
-        msg = "LITELLM_MASTER_KEY missing; cannot auth to /workbench/reload_runtime"
-        print(f"SKIP reload: {msg}")
-        return 1 if args.strict else 0
+        print("no LITELLM_MASTER_KEY set; calling reload without auth (keyless proxy)")
 
     if not liveliness_ok(args.base_url, min(args.timeout, 5.0)):
         msg = f"proxy not reachable at {args.base_url} (/health/liveliness)"

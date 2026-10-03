@@ -1,8 +1,30 @@
-# InferHub Claude Code for macOS: module notes (v0.1.0)
+# InferHub Claude Code for macOS: port notes
 
 The user guide is [README.md](README.md). This file is for whoever maintains the
-module: what was ported from where, what is deliberately the same as Windows,
-what is different, and how it was tested.
+launcher. Most of it is the original record from the ACS module
+(`inferhub-litellm-macos` v0.1.0, agent-custom-setup PR #65). The first section
+says what changed when the launcher moved here. The side-by-side comparison with
+Windows as it stands today is [docs/PARITY.md](../docs/PARITY.md).
+
+## What changed when it moved to claude-code-launcher
+
+- The proxy runs from `shared/litellm/` in this repository. The launcher no
+  longer clones `litellm-ckff-ops`, and it no longer needs git or the Command
+  Line Tools, so `ensure_git` and the clone path are gone.
+- The pins come from `shared/litellm/requirements.txt` and
+  `requirements-overrides.txt` instead of strings inside the script.
+- The proxy is keyless. The launcher no longer creates a `LITELLM_MASTER_KEY`;
+  it passes one through if you set it and otherwise gives Claude Code the key
+  `local`. The seat hot-reload works without a key from loopback (see
+  `shared/litellm/sitecustomize.py`).
+- The repository `.env` is `<repo>/.env`, not the workbench's.
+- With no IRE CSV, the Top 20 deployments come from
+  `shared/litellm/config/top20-builtin.csv`, the same file Windows uses.
+- `tests/dry_run.sh` copies this checkout instead of cloning the workbench,
+  asserts the keyless and loopback behaviour, and stops its test proxy by PID.
+
+The rest of this file is the ACS record and still talks about the workbench
+checkout. Read "workbench" as `shared/litellm/`.
 
 ## Source of truth
 
