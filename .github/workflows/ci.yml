@@ -1,0 +1,120 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  shell:
+    name: shell (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    defaults:
+      run:
+        working-directory: macos
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update -qq && sudo apt-get install -y shellcheck
+          else
+            brew install shellcheck
+          fi
+
+      # ACS-0008 requires bash 3.2 compatibility on macOS. Ubuntu's bash 5 is
+      # the other end of the range, so testing both catches the read -t and
+      # array-expansion differences between them.
+      - name: bash -n (all scripts)
+        run: |
+          find . -name "*.sh" -not -path "*/vendor/*" -print0 \
+            | xargs -0 -n1 bash -n
+
+      - name: shellcheck (warnings and above fail)
+        run: |
+          find . \( -name "*.sh" -o -name claude-acs \) -not -path "*/vendor/*" -print0 \
+            | xargs -0 shellcheck -S warning
+
+      - name: unit tests
+        run: |
+          bash tests/run-tests.sh
+          bash tests/nav-tests.sh
+
+  bash32:
+    name: bash 3.2 compatibility
+    # macOS ships bash 3.2 and the launcher must run on it. A Linux runner has
+    # bash 5, so build 3.2 explicitly to catch accidental bash 4+ syntax.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: macos
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build bash 3.2
+        run: |
+          curl -fsSL https://ftp.gnu.org/gnu/bash/bash-3.2.57.tar.gz -o /tmp/bash.tar.gz
+          tar -xzf /tmp/bash.tar.gz -C /tmp
+          cd /tmp/bash-3.2.57
+          ./configure --prefix=/usr/local/bash32 >/dev/null
+          make -j2 >/dev/null
+          make install >/dev/null
+          /usr/local/bash32/bin/bash --version | head -1
+      - name: bash 3.2 -n
+        run: |
+          find . -name "*.sh" -not -path "*/vendor/*" -print0 \
+            | xargs -0 -n1 /usr/local/bash32/bin/bash -n
+      - name: bash 3.2 unit tests
+        run: /usr/local/bash32/bin/bash tests/run-tests.sh
+
+  ire:
+    name: IRE model table is reachable
+    # The model list is fetched live at runtime, so a broken URL or a schema
+    # change upstream must fail here rather than at launch time.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch and parse the live IRE Top 20
+        working-directory: macos
+        run: |
+          python3 ire_live_models.py --refresh > /tmp/table.sh
+          grep -q '^MODEL_IDS=(' /tmp/table.sh || { echo "::error::no MODEL_IDS emitted"; exit 1; }
+          python3 - <<'PY'
+          import re
+          txt = open('/tmp/table.sh').read()
+          m = re.search(r'MODEL_IDS=\((.*?)\n\)', txt, re.S)
+          ids = re.findall(r'"([^"]+)"', m.group(1))
+          assert len(ids) >= 10, f"only {len(ids)} model ids parsed"
+          bad = [i for i in ids if not re.match(r'^[a-z0-9]+(?:/[a-z0-9._-]+)+$', i)]
+          assert not bad, f"malformed slugs: {bad}"
+          assert len(set(ids)) == len(ids), "duplicate slugs in the table"
+          print(f"{len(ids)} unique, well-formed model slugs")
+          PY
+
+  secrets:
+    name: no secrets committed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail if a key-shaped literal is committed
+        run: |
+          if grep -rInE '(sk-[A-Za-z0-9]{16,}|ih_[A-Za-z0-9]{16,})' \
+               --exclude-dir=.git . ; then
+            echo "::error::possible secret committed"
+            exit 1
+          fi
+          echo "no key-shaped literals found"
+      - name: .env files are not tracked
+        run: |
+          if git ls-files | grep -E '(^|/)\.env$' ; then
+            echo "::error::a .env file is tracked"
+            exit 1
+          fi
+          echo "no tracked .env files"

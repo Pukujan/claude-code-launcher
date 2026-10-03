@@ -1,0 +1,21 @@
+# Secrets — never commit. The InferHub key lives at
+# ~/.config/inferhub/.env (mode 600), outside the repo by default; these rules
+# catch a local override that someone creates inside the checkout.
+.env
+*.env
+!.env.example
+secrets/
+*.key
+*.pem
+
+# Local runtime state written by the launcher
+*.log
+.litellm-venv/
+litellm/
+.local/
+
+# Python / Node
+__pycache__/
+*.pyc
+node_modules/
+.DS_Store
