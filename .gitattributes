@@ -1,0 +1,3 @@
+# Keep copied launcher files byte-for-byte so their SHA-256 matches SOURCES.md.
+*.ps1 -text
+*.cmd -text

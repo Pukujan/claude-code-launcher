@@ -1,0 +1,55 @@
+# InferHub fallback chains for Claude seat aliases (consumed by scripts/merge_litellm_config.py).
+# Policy (Alex): only IRE recommendation-eligible Top20 routes, each < $0.10 USDC per 1M tokens
+# ("effectively free"). Live price + tool/stream checked 2026-09-30 with inferhub-live.ps1 and
+# streaming /v1/messages+tools probes. Re-check before adding a route.
+# Rules applied by the generator:
+#   - the seated model itself is removed from its own chain;
+#   - main-role chains drop any model whose vendor == the seated advisor's vendor, and
+#     advisor-role chains drop the seated main's vendor (main and advisor never share a vendor);
+#   - models above max_cost_per_mtok or not eligible are skipped.
+max_cost_per_mtok: 0.10
+models:
+  cb/deepseek-v4.1-flash:   {vendor: deepseek, rail: cb,   cost_per_mtok: 0.022, eligible: true}
+  cbcn/glm-5.3-flash:       {vendor: zhipu,    rail: cbcn, cost_per_mtok: 0.033, eligible: true}
+  cbcn/deepseek-v4-flash:   {vendor: deepseek, rail: cbcn, cost_per_mtok: 0.047, eligible: true}
+  ali/qwen3.8-flash:        {vendor: alibaba,  rail: ali,  cost_per_mtok: 0.008, eligible: true}
+  cbcn/minimax-m3:          {vendor: minimax,  rail: cbcn, cost_per_mtok: 0.052, eligible: true}
+  # seat-only (gated / not used as fallback targets), listed so vendor exclusion works
+  ag/gemini-3.8-flash-high: {vendor: google,   rail: ag,   cost_per_mtok: 0.066, eligible: false}
+roles:
+  main:
+    names: [main, sonnet, claude-sonnet-5, ih-main, ih-sonnet, inferhub-sonnet]
+    chain: [cb/deepseek-v4.1-flash, ali/qwen3.8-flash, cbcn/deepseek-v4-flash]
+  advisor:
+    names: [advisor, opus, claude-opus-5-5, claude-fable-5, claude-fable-5-1, ih-advisor, ih-opus, inferhub-opus]
+    chain: [cbcn/glm-5.3-flash, cbcn/minimax-m3]
+  small_fast:
+    names: [ih/ali/qwen3.8-flash]
+    chain: [cb/deepseek-v4.1-flash, cbcn/deepseek-v4-flash]
+  direct_deepseek:
+    names: [ih/cb/deepseek-v4.1-flash]
+    chain: [cbcn/deepseek-v4-flash, ali/qwen3.8-flash]# Per-name retry policy for the generated names (fail over fast instead of 3 retries).
+retry_policy:
+  RateLimitErrorRetries: 1
+  InternalServerErrorRetries: 1
+  ServiceUnavailableErrorRetries: 1
+  TimeoutErrorRetries: 0
+  BadRequestErrorRetries: 0
+  AuthenticationErrorRetries: 0
+
+# Benching (issue #36 follow-up): applied to model_info of every generated name and every chain
+# target, so a failing primary is skipped for cooldown_time seconds and requests go straight to
+# the backup. allowed_fails_policy uses explicit exception types so it also applies to
+# single-deployment groups (LiteLLM otherwise never benches those). A route is benched when its
+# failures within the window exceed the allowed count (1 => the 2nd failure benches it).
+# Note: LiteLLM never benches on raw connection errors (APIConnectionError).
+cooldown:
+  cooldown_time: 180
+  allowed_fails_policy:
+    RateLimitErrorAllowedFails: 1        # InferHub 402 no_provider_under_bid maps here
+    InternalServerErrorAllowedFails: 1
+    ServiceUnavailableErrorAllowedFails: 1
+    BadGatewayErrorAllowedFails: 1        # InferHub 502
+    TimeoutErrorAllowedFails: 1
+    AuthenticationErrorAllowedFails: 0
+    NotFoundErrorAllowedFails: 0
