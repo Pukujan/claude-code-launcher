@@ -47,16 +47,71 @@ launch works offline and falls back to the cache if GitHub is unreachable.
 a completion per route instead of trusting the CSV. Last run on this Mac:
 
 ```
-answered: 16/20   unavailable: 4/20
+answered: 17/20   unavailable: 3/20
   #8  cmc/meta/muse-spark-1.3-contributor   503 no provider available
   #11 ali/deepseek-v4-flash-0731            402 no provider bidding
   #17 cmc/meta/muse-spark-1.2-contributor   503 no provider available
-  #20 ali/kimi-k2.7-code                    402 no provider bidding
 ```
 
-Those four are upstream capacity, not misconfiguration. The routes stay in the
-table because that reflects the ranking; run `--check-proxy` to see what answers
-right now.
+Those three are upstream capacity, not misconfiguration. The routes stay in the
+table because that is what IRE's ranking says; run `--check-proxy` to see what
+answers right now.
+
+## What IRE actually says, and what we do about it
+
+The Top 20 view is **not** a list of 20 usable models. IRE ships a
+`recommendation_eligible` column and a `gate_reasons` column, and only **10 of 20**
+are eligible. The other ten are visible for ranking but gated:
+
+| Gate | Rows |
+|---|---|
+| `insufficient_provider_breadth` | #3, #5, #8, #11, #12, #13, #17 |
+| `catalog_availability_below_minimum` | #6, #12, #13 |
+| `release_date_unknown` | #11, #12, #13, #16, #17 |
+| `not_routing_eligible` | #9 |
+| `tier_below_minimum` / `capability_below_minimum` | #16 |
+
+So the launcher shows all 20 (ranked, with price and a `[gated by IRE]` tag) but
+marks eligibility, rather than presenting 20 routes as equally available.
+
+`docs/INFERHUB-API-SETUP.md` further treats anything under **$0.10 USDC/1M** as
+"effectively free" and prefers eligible rows under that bar. Only **5** satisfy
+both: DeepSeek V4.1 Flash, GLM 5.3 Flash, DeepSeek V4 Flash, Qwen3.8 Flash,
+MiniMax M3.
+
+### IRE is a snapshot, so intersect it with the live catalog
+
+`lists/manifest.json` states the CSVs are *"verbatim, byte-identical input
+copies"* of a workspace that is **not version-controlled**, generated
+`2026-09-22`. Vendor slugs therefore rot. Three are already retired upstream and
+would make LiteLLM answer `Invalid model name`:
+
+```
+cp/cline-pass/deepseek-v4-flash
+cp/cline-pass/glm-5.2
+cp/cline-pass/kimi-k2.7-code
+```
+
+So `ire_live_models.py` intersects IRE with `GET /v1/models`, emits only live
+vendor slugs, and prints the retired ones as a comment. Every one of the 20
+families still has at least one live vendor.
+
+### Vendor fallback
+
+A family can 402 on its first vendor while another answers — Kimi K2.7 Code did
+exactly that. `apply_seat.py` therefore registers **every** vendor id IRE lists
+for a family and chains them in `router_settings.fallbacks`, in IRE's order.
+That took the live count from 16/20 to **17/20**.
+
+LiteLLM's `Router.validate_fallbacks` requires each entry to be a dict with
+**exactly one** key — both a bare list and a `{model_name, fallbacks}` dict raise
+at startup:
+
+```yaml
+router_settings:
+  fallbacks:
+    - "ih/cb/deepseek-v4.1-flash": ["ih/cbcn/deepseek-v4.1-flash", "ih/ali/deepseek-v4.1-flash"]
+```
 
 ## Folder navigation (terminal only)
 

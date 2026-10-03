@@ -43,27 +43,31 @@ SMALL_FAST_ID = "ali/qwen3.8-flash"
 # The IRE Top 20, so every ranked route is individually addressable through the
 # proxy (not just the two seats). Order matches the recommendation_rank column.
 # Each entry: (family, primary slug, cost USDC per 1M tokens, eligible)
+# The IRE Top 20, read live from inference-recommendation-engine and cached
+# (see ire_live_models.py). Each entry is (family, cost_usdc_per_1m, eligible,
+# [vendor slugs in IRE's preference order]) — every vendor id IRE lists is
+# registered, because a route can 402 on its first vendor while another answers.
 IRE_TOP20 = [
-    ("DeepSeek V4.1 Flash", "cb/deepseek-v4.1-flash", 0.022, True),
-    ("GLM 5.3 Flash", "cbcn/glm-5.3-flash", 0.033, True),
-    ("Gemini 3.8 Flash", "ag/gemini-3.8-flash-high", 0.066, False),
-    ("DeepSeek V4 Flash", "cbcn/deepseek-v4-flash", 0.047, True),
-    ("DeepSeek V4 Pro 0813", "ali/deepseek-v4-pro-0813", 0.083, False),
-    ("Qwen3.8 Max 0902", "ali/qwen3.8-max-0902", 0.078, False),
-    ("Qwen3.8 Flash", "ali/qwen3.8-flash", 0.008, True),
-    ("Muse Spark 1.3 Contributor", "cmc/meta/muse-spark-1.3-contributor", 0.040, False),
-    ("GPT 5.6 Luna", "cx/gpt-5.6-luna", 0.040, False),
-    ("MiniMax M3", "cbcn/minimax-m3", 0.052, True),
-    ("DeepSeek V4 Flash 0731", "ali/deepseek-v4-flash-0731", 0.091, False),
-    ("Gemini 3.7 Flash", "ag/gemini-3.7-flash-high", 0.077, False),
-    ("Gemini 3.6 Flash", "ag/gemini-3.6-flash-high", 0.081, False),
-    ("DeepSeek V4 Pro", "cbcn/deepseek-v4-pro", 0.138, True),
-    ("GLM 5.2", "ali/glm-5.2", 0.181, True),
-    ("Hy4 Preview", "cb/hy4-preview", 0.077, False),
-    ("Muse Spark 1.2 Contributor", "cmc/meta/muse-spark-1.2-contributor", 0.029, False),
-    ("Qwen 3.8 Max", "ali/qwen3.8-max", 0.170, True),
-    ("GLM 5.3", "cbcn/glm-5.3", 0.267, True),
-    ("Kimi K2.7 Code", "ali/kimi-k2.7-code", 0.156, True),
+    ("DeepSeek V4.1 Flash", 0.022108, True, ["cb/deepseek-v4.1-flash", "cbcn/deepseek-v4.1-flash", "ali/deepseek-v4.1-flash", "cp/cline-pass/deepseek-v4.1-flash", "ocg/deepseek-v4.1-flash"]),
+    ("GLM 5.3 Flash", 0.032924, True, ["cbcn/glm-5.3-flash", "cp/zai/glm-5.3-flash", "cmc/z-ai/glm-5.3-flash", "zai/glm-5.3-flash", "ocg/glm-5.3-flash"]),
+    ("Gemini 3.8 Flash", 0.066345, False, ["ag/gemini-3.8-flash-high"]),
+    ("DeepSeek V4 Flash", 0.046688, True, ["cbcn/deepseek-v4-flash", "cmc/deepseek/deepseek-v4-flash", "ocg/deepseek-v4-flash"]),
+    ("DeepSeek V4 Pro 0813", 0.08298, False, ["ali/deepseek-v4-pro-0813"]),
+    ("Qwen3.8 Max 0902", 0.078043, False, ["ali/qwen3.8-max-0902"]),
+    ("Qwen3.8 Flash", 0.008056, True, ["ali/qwen3.8-flash", "ocg/qwen3.8-flash"]),
+    ("Muse Spark 1.3 Contributor", 0.040076, False, ["cmc/meta/muse-spark-1.3-contributor"]),
+    ("GPT 5.6 Luna", 0.04015, False, ["cx/gpt-5.6-luna", "cb/gpt-5.6-luna", "ocg/gpt-5.6-luna"]),
+    ("MiniMax M3", 0.052142, True, ["cbcn/minimax-m3", "cb/minimax-m3", "cp/cline-pass/minimax-m3", "ocg/minimax-m3"]),
+    ("DeepSeek V4 Flash 0731", 0.091326, False, ["ali/deepseek-v4-flash-0731"]),
+    ("Gemini 3.7 Flash", 0.077005, False, ["ag/gemini-3.7-flash-high"]),
+    ("Gemini 3.6 Flash", 0.080802, False, ["ag/gemini-3.6-flash-high"]),
+    ("DeepSeek V4 Pro", 0.138399, True, ["cbcn/deepseek-v4-pro", "cmc/deepseek/deepseek-v4-pro", "cp/cline-pass/deepseek-v4-pro"]),
+    ("GLM 5.2", 0.180507, True, ["ali/glm-5.2", "cbcn/glm-5.2", "cb/glm-5.2", "cmc/zai-org/GLM-5.2"]),
+    ("Hy4 Preview", 0.077408, False, ["cb/hy4-preview", "cbcn/hy4-preview"]),
+    ("Muse Spark 1.2 Contributor", 0.028751, False, ["cmc/meta/muse-spark-1.2-contributor"]),
+    ("Qwen 3.8 Max", 0.169559, True, ["ali/qwen3.8-max", "cp/cline-pass/qwen3.8-max", "ocg/qwen3.8-max"]),
+    ("GLM 5.3", 0.26708, True, ["cbcn/glm-5.3", "cb/glm-5.3", "ali/glm-5.3", "zai/glm-5.3", "cp/cline-pass/glm-5.3", "ocg/glm-5.3"]),
+    ("Kimi K2.7 Code", 0.155677, True, ["ali/kimi-k2.7-code", "cbcn/kimi-k2.7", "cmc/moonshotai/Kimi-K2.7-Code", "ocg/kimi-k2.7-code"]),
 ]
 
 
@@ -81,7 +85,7 @@ def entry(alias: str, inferhub_id: str, role: str) -> list[str]:
         f"      api_base: {API_BASE}",
         "      api_key: os.environ/INFERHUB_API_KEY",
         "    model_info:",
-        f"      description: {yaml_escape(f'InferHub Claude seat ({role}) -> {inferhub_id}')}",
+        f"      description: {yaml_escape(f'InferHub ({role}) -> {inferhub_id}')}",
         "",
     ]
 
@@ -125,14 +129,20 @@ def main() -> int:
                        "advisor" if advisor_id else "advisor OFF -> main")
     lines += entry(SMALL_FAST_ALIAS, SMALL_FAST_ID, "small/fast side model")
 
-    # Every IRE-ranked route, individually addressable as ih/<slug>. The seat
-    # aliases above stay the recommended path (they carry fallback chains); these
-    # exist so a caller can pin one specific route.
-    for fam, slug, cost, elig in IRE_TOP20:
-        role = f"IRE Top 20 {fam} ~{cost:.3f} USDC/1M"
+    # Every IRE-ranked route, individually addressable as ih/<slug>. IRE lists
+    # several vendor ids per model family; a route can 402 on its first vendor
+    # while another answers, so every vendor is registered and chained.
+    fallback_chains: list[tuple[str, list[str]]] = []
+    for rank, (fam, cost, elig, slugs) in enumerate(IRE_TOP20, start=1):
+        role = f"IRE #{rank:02d} {fam} ~{cost:.3f} USDC/1M"
         if not elig:
-            role += " (gated)"
-        lines += entry(f"ih/{slug}", slug, role)
+            role += " [gated by IRE]"
+        primary, *rest = slugs
+        lines += entry(f"ih/{primary}", primary, role)
+        for alt in rest:
+            lines += entry(f"ih/{alt}", alt, f"{role} (alt vendor)")
+        if rest:
+            fallback_chains.append((f"ih/{primary}", [f"ih/{a}" for a in rest]))
 
     lines += [
         "",
@@ -144,6 +154,18 @@ def main() -> int:
         "  request_timeout: 600",
         "  num_retries: 2",
         "  telemetry: false",
+        "",
+        "# Alternate vendor ids for one model family, tried in IRE's order.",
+        "# A route can 402 on its first vendor while another answers.",
+    ]
+    if fallback_chains:
+        lines += ["router_settings:", "  fallbacks:"]
+        for primary, alts in fallback_chains:
+            alist = ", ".join(f'"{a}"' for a in alts)
+            # Exactly one key: LiteLLM's Router.validate_fallbacks rejects both a
+            # bare list and a dict with model_name+fallbacks.
+            lines.append(f'    - "{primary}": [{alist}]')
+    lines += [
         "",
         "general_settings:",
         "  # Loopback only. Do not bind 0.0.0.0 - there is no auth on this proxy.",
