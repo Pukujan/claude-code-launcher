@@ -29,6 +29,11 @@ Both launchers pick the same 20 models, default to DeepSeek V4.1 Flash with the
 advisor OFF, and start Claude Code with
 `claude --model sonnet --permission-mode bypassPermissions`.
 
+**Two Mac launchers for now.** `mac/` is the port from agent-custom-setup and
+runs the proxy from `shared/litellm/`. `macos/` arrived separately in PR #7 and
+installs its own proxy under `~/litellm`. Both put the proxy on 127.0.0.1:4000
+keyless. Which one stays is still open.
+
 ## Keys
 
 Copy `.env.example` to `.env` in the repository root and fill in
@@ -66,7 +71,8 @@ hot-reloads the running proxy; it does not restart it.
 | Folder | What it holds |
 | --- | --- |
 | `windows/` | The PowerShell launcher, and `litellm/` with the start and stop scripts |
-| `mac/` | The Mac launcher, its guide and its dry-run test |
+| `mac/` | The Mac launcher ported from agent-custom-setup, its guide and its dry-run test |
+| `macos/` | A separate Mac shim installer (`setup.sh`, `claude-acs`) with a live IRE model table, from PR #7 |
 | `shared/litellm/` | Proxy config, seat and merge scripts, fallback chains, pinned requirements |
 | `docs/` | [PARITY.md](docs/PARITY.md) compares the two launchers; [HOOKS.md](docs/HOOKS.md) lists where planned features plug in |
 | `history/` | Older launcher versions, kept as a record |

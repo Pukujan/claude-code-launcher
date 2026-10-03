@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+"""Write Claude-facing InferHub seat aliases into config/inferhub_seats.yaml.
+
+macOS port of litellm-ckff-ops/scripts/apply_inferhub_seat.py. Same seat file
+and same alias contract, so a seat chosen here behaves identically to one
+chosen by the Windows launcher.
+
+Seat file (config/inferhub_seat.json):
+  {
+    "main_inferhub_id": "cb/deepseek-v4.1-flash",
+    "advisor_inferhub_id": "cbcn/glm-5.3"   # or null / omit when OFF
+  }
+
+Alias contract (from the Windows workbench):
+  main    -> main, sonnet, claude-sonnet-5, ih-main, ih-sonnet, inferhub-sonnet
+  advisor -> advisor, opus, claude-opus-5-5, claude-fable-5, claude-fable-5-1,
+             ih-advisor, ih-opus, inferhub-opus
+  When the advisor is OFF, advisor aliases point at the main seat so that
+  /advisor opus still resolves instead of 404ing.
+"""
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_SEAT = ROOT / "config" / "inferhub_seat.json"
+DEFAULT_OUT = ROOT / "config" / "inferhub_seats.yaml"
+API_BASE = "https://api.inferhub.dev/v1"
+
+MAIN_ALIASES = ["main", "sonnet", "claude-sonnet-5", "claude-sonnet-5-5",
+                "claude-sonnet-4-6", "claude-sonnet-4-5", "ih-main", "ih-sonnet",
+                "inferhub-sonnet", "default"]
+ADVISOR_ALIASES = ["advisor", "opus", "claude-opus-5-5", "claude-opus-4-6",
+                   "claude-opus-4-5", "claude-fable-5", "claude-fable-5-1",
+                   "ih-advisor", "ih-opus", "inferhub-opus"]
+SMALL_FAST_ALIAS = "ih/ali/qwen3.8-flash"
+SMALL_FAST_ID = "ali/qwen3.8-flash"
+
+# The IRE Top 20, so every ranked route is individually addressable through the
+# proxy (not just the two seats). Order matches the recommendation_rank column.
+# Each entry: (family, primary slug, cost USDC per 1M tokens, eligible)
+IRE_TOP20 = [
+    ("DeepSeek V4.1 Flash", "cb/deepseek-v4.1-flash", 0.022, True),
+    ("GLM 5.3 Flash", "cbcn/glm-5.3-flash", 0.033, True),
+    ("Gemini 3.8 Flash", "ag/gemini-3.8-flash-high", 0.066, False),
+    ("DeepSeek V4 Flash", "cbcn/deepseek-v4-flash", 0.047, True),
+    ("DeepSeek V4 Pro 0813", "ali/deepseek-v4-pro-0813", 0.083, False),
+    ("Qwen3.8 Max 0902", "ali/qwen3.8-max-0902", 0.078, False),
+    ("Qwen3.8 Flash", "ali/qwen3.8-flash", 0.008, True),
+    ("Muse Spark 1.3 Contributor", "cmc/meta/muse-spark-1.3-contributor", 0.040, False),
+    ("GPT 5.6 Luna", "cx/gpt-5.6-luna", 0.040, False),
+    ("MiniMax M3", "cbcn/minimax-m3", 0.052, True),
+    ("DeepSeek V4 Flash 0731", "ali/deepseek-v4-flash-0731", 0.091, False),
+    ("Gemini 3.7 Flash", "ag/gemini-3.7-flash-high", 0.077, False),
+    ("Gemini 3.6 Flash", "ag/gemini-3.6-flash-high", 0.081, False),
+    ("DeepSeek V4 Pro", "cbcn/deepseek-v4-pro", 0.138, True),
+    ("GLM 5.2", "ali/glm-5.2", 0.181, True),
+    ("Hy4 Preview", "cb/hy4-preview", 0.077, False),
+    ("Muse Spark 1.2 Contributor", "cmc/meta/muse-spark-1.2-contributor", 0.029, False),
+    ("Qwen 3.8 Max", "ali/qwen3.8-max", 0.170, True),
+    ("GLM 5.3", "cbcn/glm-5.3", 0.267, True),
+    ("Kimi K2.7 Code", "ali/kimi-k2.7-code", 0.156, True),
+]
+
+
+def yaml_escape(s: str) -> str:
+    if any(c in s for c in ': #{}[]&*!|>%@`\'"'):
+        return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    return s
+
+
+def entry(alias: str, inferhub_id: str, role: str) -> list[str]:
+    return [
+        f"  - model_name: {yaml_escape(alias)}",
+        "    litellm_params:",
+        f"      model: openai/{inferhub_id}",
+        f"      api_base: {API_BASE}",
+        "      api_key: os.environ/INFERHUB_API_KEY",
+        "    model_info:",
+        f"      description: {yaml_escape(f'InferHub Claude seat ({role}) -> {inferhub_id}')}",
+        "",
+    ]
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--main", required=True, help="main InferHub model id")
+    ap.add_argument("--advisor", default="", help="advisor id, or empty for OFF")
+    ap.add_argument("--seat-file", default=str(DEFAULT_SEAT))
+    ap.add_argument("--out", default=str(DEFAULT_OUT))
+    args = ap.parse_args()
+
+    main_id = args.main.strip()
+    advisor_id = (args.advisor or "").strip() or None
+    if not main_id:
+        print("--main is required", file=sys.stderr)
+        return 2
+    if advisor_id == main_id:
+        print("refusing to seat advisor == main; they must differ", file=sys.stderr)
+        return 2
+
+    seat = {
+        "main_inferhub_id": main_id,
+        "advisor_inferhub_id": advisor_id,
+        "updated_at": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+    }
+    Path(args.seat_file).parent.mkdir(parents=True, exist_ok=True)
+    Path(args.seat_file).write_text(json.dumps(seat, indent=2) + "\n", encoding="utf-8")
+
+    lines: list[str] = [
+        "# InferHub seats for local LiteLLM on macOS.",
+        "# Generated by scripts/apply_seat.py - do not edit by hand.",
+        f"# main={main_id}  advisor={advisor_id or 'OFF (aliases fall back to main)'}",
+        f"# generated_at={seat['updated_at']}",
+        "model_list:",
+    ]
+    for a in MAIN_ALIASES:
+        lines += entry(a, main_id, "main")
+    for a in ADVISOR_ALIASES:
+        lines += entry(a, advisor_id or main_id,
+                       "advisor" if advisor_id else "advisor OFF -> main")
+    lines += entry(SMALL_FAST_ALIAS, SMALL_FAST_ID, "small/fast side model")
+
+    # Every IRE-ranked route, individually addressable as ih/<slug>. The seat
+    # aliases above stay the recommended path (they carry fallback chains); these
+    # exist so a caller can pin one specific route.
+    for fam, slug, cost, elig in IRE_TOP20:
+        role = f"IRE Top 20 {fam} ~{cost:.3f} USDC/1M"
+        if not elig:
+            role += " (gated)"
+        lines += entry(f"ih/{slug}", slug, role)
+
+    lines += [
+        "",
+        "litellm_settings:",
+        "  # No master key: single-user proxy bound to loopback. Claude Code still",
+        "  # needs an ANTHROPIC_API_KEY value, so the launcher passes a dummy that",
+        "  # LiteLLM ignores rather than duplicating the real key in two places.",
+        "  drop_params: true",
+        "  request_timeout: 600",
+        "  num_retries: 2",
+        "  telemetry: false",
+        "",
+        "general_settings:",
+        "  # Loopback only. Do not bind 0.0.0.0 - there is no auth on this proxy.",
+        "  host: 127.0.0.1",
+        "  port: 4000",
+        "",
+    ]
+
+    Path(args.out).write_text("\n".join(lines), encoding="utf-8")
+    print(f"seated main={main_id} advisor={advisor_id or 'OFF'}")
+    print(f"wrote {args.out}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
