@@ -1,0 +1,87 @@
+name: launcher-ci
+
+# Lint, the Mac launcher dry run (on Linux) and the Python unit tests.
+# All three job names are required checks on main, next to `gates`.
+# Nothing here touches port 4000: the dry run uses 4100 and refuses 4000.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: shellcheck the Mac launcher and its test
+        shell: bash
+        run: |
+          set -euo pipefail
+          shellcheck --version | head -2
+          shellcheck -s bash "mac/Launch Claude InferHub.command" mac/tests/dry_run.sh
+
+      - name: Parse and PSScriptAnalyzer the Windows scripts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bad = 0
+          foreach ($f in Get-ChildItem windows -Recurse -Filter *.ps1) {
+            $tokens = $null; $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+            foreach ($e in $errors) { Write-Host "$($f.Name):$($e.Extent.StartLineNumber) $($e.Message)"; $bad++ }
+          }
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.23.0 -Scope CurrentUser -Force
+          $findings = @(Invoke-ScriptAnalyzer -Path windows -Recurse -Settings ./PSScriptAnalyzerSettings.psd1)
+          $findings | Format-Table ScriptName, Line, Severity, RuleName, Message -AutoSize | Out-String -Width 220 | Write-Host
+          if ($bad -gt 0 -or $findings.Count -gt 0) { throw "parse errors: $bad, analyzer findings: $($findings.Count)" }
+
+      - name: ruff the Python
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet ruff==0.16.10
+          ruff check --no-cache .
+
+  mac-dry-run:
+    name: mac-dry-run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Run the Mac launcher dry run with a mock claude
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n "mac/Launch Claude InferHub.command"
+          bash mac/tests/dry_run.sh 4100
+
+  python-tests:
+    name: python-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the pinned test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet PyYAML==6.0.3 pytest==9.1.1 \
+            --requirement shared/litellm/requirements-overrides.txt
+
+      - name: Run the unit tests
+        run: python -m pytest -q tests

@@ -1,0 +1,10 @@
+# Lint for real mistakes in our Python (pyflakes plus pycodestyle errors).
+# Long lines and late imports are left alone: the copied scripts use both on
+# purpose (sitecustomize.py patches modules in order), and rewrapping them would
+# only make the diff against their sources harder to read.
+target-version = "py311"
+extend-exclude = ["history", ".github/scripts"]
+
+[lint]
+select = ["E", "F"]
+ignore = ["E501", "E402"]

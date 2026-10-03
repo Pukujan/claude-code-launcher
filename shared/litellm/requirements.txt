@@ -1,0 +1,6 @@
+# Pinned to the versions in the working Windows venv on Teresa-Pujan.
+# LiteLLM 1.103.0 declares starlette>=1.0.1, so fastapi/starlette/sse-starlette
+# are pinned lower in requirements-overrides.txt and installed as an override
+# (uv --override on the Mac, a second pip install on Windows).
+litellm[proxy]==1.103.0
+PyYAML==6.0.3
