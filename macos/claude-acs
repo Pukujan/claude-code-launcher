@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# Start the local LiteLLM proxy (if needed) and launch Claude Code against the
+# InferHub seats. macOS counterpart of the Windows ACS launcher.
+#
+#   claude-acs              -> pick main/advisor/project interactively, then launch
+#   claude-acs <project>    -> skip the pickers, use that project dir
+#
+# Env overrides: ACS_MAIN_ID, ACS_ADVISOR_ID ("" = OFF), ACS_FOLDER, LITELLM_ROOT
+set -euo pipefail
+
+PROXY_BASE="${PROXY_BASE:-http://127.0.0.1:4000}"
+LITELLM_ROOT="${LITELLM_ROOT:-$HOME/litellm}"
+STARTER="$LITELLM_ROOT/start-litellm.sh"
+
+# The proxy runs with no master key on loopback, so Claude Code still needs an
+# ANTHROPIC_API_KEY value. LiteLLM ignores this dummy; the real
+# INFERHUB_API_KEY stays inside the proxy process.
+export ANTHROPIC_API_KEY="${LITELLM_DUMMY_KEY:-litellm-local-no-auth}"
+export ANTHROPIC_BASE_URL="$PROXY_BASE"
+export ANTHROPIC_SMALL_FAST_MODEL="ih/ali/qwen3.8-flash"
+
+# Claude Code prefers ANTHROPIC_AUTH_TOKEN over ANTHROPIC_API_KEY, and ignores
+# ANTHROPIC_MODEL when picking the wire model. Clear both so nothing routes
+# around the proxy.
+unset ANTHROPIC_AUTH_TOKEN ANTHROPIC_MODEL
+# Keep experimental betas on; do not set CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS.
+
+proxy_healthy() {
+  curl -fsS -m 2 -o /dev/null "${PROXY_BASE}/health/liveliness" 2>/dev/null
+}
+
+if proxy_healthy; then
+  printf 'LiteLLM already up at %s\n' "$PROXY_BASE"
+else
+  [ -x "$STARTER" ] || {
+    printf 'LiteLLM workbench missing at %s\n' "$LITELLM_ROOT" >&2
+    exit 1
+  }
+  printf 'Starting LiteLLM...\n'
+  "$STARTER" -Background
+fi
+
+SEAT_ALIAS="${ACS_SEAT_ALIAS:-sonnet}"
+
+if [ $# -ge 1 ] && [ -d "$1" ]; then
+  cd "$1"
+  exec claude --model "$SEAT_ALIAS" --permission-mode bypassPermissions
+fi
+
+# No project argument: defer to the full interactive picker.
+LAUNCHER="$HOME/acs claude/launch-claude-inferhub.sh"
+if [ -x "$LAUNCHER" ] || [ -f "$LAUNCHER" ]; then
+  cd "$(dirname "$LAUNCHER")"
+  exec bash "$LAUNCHER"
+fi
+
+printf 'No project given and no launcher at %s\n' "$LAUNCHER" >&2
+printf 'Usage: claude-acs [project-dir]\n' >&2
+exit 2
