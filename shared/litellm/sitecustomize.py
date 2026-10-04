@@ -307,9 +307,11 @@ print("[sitecustomize] app-level dashboard HTML patch installed", flush=True)
 # POST /workbench/reload_runtime
 #   With a master key: Authorization: Bearer <LITELLM_MASTER_KEY> is required.
 #   Keyless (no master key): only loopback callers (127.0.0.1 / ::1) are accepted.
-# Body: {"scope":"seat"|"all"}  (default seat)
+# Body: {"scope":"seat"|"all"|"ladder"}  (default seat)
 # - seat: upsert Claude seat aliases from config/inferhub_aliases.yaml
 # - all:  replace router model_list from config/runtime.yaml
+# - ladder: {"scope":"ladder","plan":{...}} applies launcher fallback ladders
+#   via shared/ladder/proxy_apply.py; without "plan" it returns current state
 # Keeps the :4000 listener up (in-process swap; no process kill).
 # Requires PYTHONPATH to include the repo root so this sitecustomize loads.
 # ---------------------------------------------------------------------------
@@ -534,6 +536,7 @@ async def _wb_handle_reload(scope, receive, send):
 
     scope_name = "seat"
     config_path = None
+    payload = {}
     if body:
         try:
             payload = _json.loads(body.decode("utf-8"))
@@ -542,6 +545,29 @@ async def _wb_handle_reload(scope, receive, send):
                 config_path = payload.get("config_path") or payload.get("path")
         except Exception:
             pass
+
+    if scope_name == "ladder":
+        # Fallback ladders picked in the launcher (shared/ladder, issue #5).
+        # Partial in-memory update: rung deployments, seat fallbacks, retry
+        # policy, cooldown. Seat alias targets are never changed. Without
+        # "plan" it only reports the current state.
+        try:
+            import sys as _sys
+
+            _ladder_dir = str(_REPO_ROOT.parent / "ladder")
+            if _ladder_dir not in _sys.path:
+                _sys.path.insert(0, _ladder_dir)
+            import proxy_apply as _pa
+
+            plan = payload.get("plan") if isinstance(payload, dict) else None
+            result = _pa.apply_plan(llm_router, plan) if plan else {"ok": True}
+            result["state"] = _pa.read_state(llm_router)
+            if plan:
+                print(f"[sitecustomize] reload_runtime scope=ladder seats={plan.get('seats')}", flush=True)
+            return await _wb_json_response(send, 200, _json.loads(_json.dumps(result, default=str)))
+        except Exception as e:
+            print(f"[sitecustomize] reload_runtime ladder failed: {e}", flush=True)
+            return await _wb_json_response(send, 500, {"error": f"{type(e).__name__}: {e}"})
 
     try:
         if scope_name == "all":

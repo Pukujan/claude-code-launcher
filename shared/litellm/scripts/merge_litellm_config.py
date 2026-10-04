@@ -78,7 +78,11 @@ def build_inferhub_fallbacks(path: Path, ih_models: list, max_default: float = 0
     for m in ih_models:
         if isinstance(m, dict) and m.get("model_name"):
             raw = str((m.get("litellm_params") or {}).get("model") or "")
-            by_name[m["model_name"]] = raw.split("/", 1)[1] if raw.startswith("openai/") else raw
+            for pre in ("openai/responses/", "openai/"):  # cx/ seats use Responses mode
+                if raw.startswith(pre):
+                    raw = raw[len(pre):]
+                    break
+            by_name[m["model_name"]] = raw
 
     def seated(role):
         for n in (roles.get(role) or {}).get("names") or []:

@@ -70,11 +70,22 @@ def yaml_escape(s: str) -> str:
     return s
 
 
+def litellm_model(inferhub_id: str) -> str:
+    """cx/ routes go through LiteLLM's Responses API mode. Over Chat Completions,
+    InferHub's cx rail turns the system prompt into a developer message and forces
+    the instructions field to a stock prompt; /v1/responses keeps instructions as
+    sent (IRE frontier list: preferred_endpoint=/v1/responses). Every other route
+    is unchanged."""
+    if inferhub_id.startswith("cx/"):
+        return f"openai/responses/{inferhub_id}"
+    return f"openai/{inferhub_id}"
+
+
 def entry(alias: str, inferhub_id: str, api_base: str, role: str) -> list[str]:
     return [
         f"  - model_name: {yaml_escape(alias)}",
         "    litellm_params:",
-        f"      model: openai/{inferhub_id}",
+        f"      model: {litellm_model(inferhub_id)}",
         f"      api_base: {api_base}",
         "      api_key: os.environ/INFERHUB_API_KEY",
         "    model_info:",

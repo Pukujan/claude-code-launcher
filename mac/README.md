@@ -90,8 +90,8 @@ has). The launcher prints one `IRE:` line saying which it used, and never
 stops because of it.
 
 The same fetch also reads IRE's frontier list (stronger models with live route
-prices) when IRE publishes it, and saves it as `ire-frontier.json` in
-`~/Library/Application Support/claude-inferhub/`. Nothing picks from it yet.
+prices) when IRE publishes it. Type `f` at the main or advisor prompt to pick
+from it instead of the Top 20.
 
 ## If the Mac complains
 

@@ -16,12 +16,10 @@ the repo.
 | Top 20 list | `operational/telemetry/gravebuster/pipeline/ihub/lists/research_model_top20_recommendations.csv` |
 | Price policy | the "below **$0.10 USDC per 1 million tokens** ... effectively free" line in `docs/INFERHUB-API-SETUP.md` |
 | Fallback picks (optional) | `operational/recommendations/claude-code-fallbacks.v1.json` |
-| Frontier models (optional) | `operational/telemetry/gravebuster/pipeline/ihub/lists/research_model_frontier_recommendations.csv` and `.json` |
-| Frontier routes (optional) | `operational/telemetry/gravebuster/pipeline/ihub/lists/research_model_frontier_routes.csv` |
+| Frontier list (optional) | `operational/telemetry/gravebuster/pipeline/ihub/lists/research_model_frontier_recommendations.json`; if that's missing, `research_model_frontier_routes.csv` in the same folder, with eligibility from `research_model_frontier_recommendations.csv`; if the routes CSV is missing too, that recommendations CSV alone |
 
-The frontier files arrived with IRE PR #68 (`9a8fba0`). They're optional: if
-one is missing, the frontier answer just has less in it, and if all three are
-missing it says `"available": false`. They never change the main answer below.
+The frontier files arrived with IRE PR #68 (`9a8fba0`). They're optional and can never
+change the Top 20: if they're missing, unreadable or slow, `frontier` is just `[]`.
 
 IRE doesn't publish fallback picks yet. I searched `main` at `9a8fba0` on 2026-10-03 and
 found none. Until that file exists, the ladders come from `defaults.json`. When it does
@@ -57,7 +55,6 @@ never written to the cache or the output.
 python3 shared/ire/ire_fetch.py                  # JSON on stdout
 python3 shared/ire/ire_fetch.py --out ire.json   # JSON to a file
 python3 shared/ire/ire_fetch.py --offline        # skip GitHub: cache, then defaults
-  --frontier-out F     also write the frontier list (see below) to F
   --table-out F        also write rank|name|id|eligible|cost lines (the Mac picker)
   --top20-csv F        also write the Top 20 as CSV for sync_inferhub_top20.py
   --timeout 5          seconds for the whole fetch
@@ -73,8 +70,7 @@ where the answer came from, for example:
 [ire] source=defaults  built-in picks  (GitHub skipped: gh is installed but not logged in; no cache yet)
 ```
 
-From Python, `get_recommendations(offline=False, timeout=5.0)` returns the same dict, and
-`get_recommendations_and_frontier(...)` returns `(bundle, frontier)`.
+From Python, `get_recommendations(offline=False, timeout=5.0)` returns the same dict.
 
 The exit code is always 0, because a launcher should start even when IRE can't be
 reached. These environment variables change its behaviour: `CCL_IRE_OFFLINE=1` (same as
@@ -84,8 +80,8 @@ than the default).
 ### In the launchers
 
 - **Mac** (`mac/Launch Claude InferHub.command`, `fetch_ire`): runs after the venv is
-  ready, writes `$STATE_DIR/ire.json` (`CCL_IRE_JSON`), `$STATE_DIR/ire-frontier.json`
-  (`CCL_IRE_FRONTIER_JSON`), `$STATE_DIR/ire-table.txt` (which replaces the picker's
+  ready, writes `$STATE_DIR/ire.json` (`CCL_IRE_JSON`, frontier included),
+  `$STATE_DIR/ire-table.txt` (which replaces the picker's
   built-in table) and `shared/litellm/config/top20.csv` (for the `ih/` deployments).
 - **Windows** (`windows/launch-claude-inferhub.ps1`, `Get-IreRecommendations`): runs
   before the pickers, writes `%LOCALAPPDATA%\claude-code-launcher\ire.json` and sets
@@ -97,8 +93,9 @@ built-in table. The ladder picker (issue #5) is the part that reads `CCL_IRE_JSO
 
 ## Output schema
 
-Exactly these six top-level keys. The ladder picker (#5) depends on them, so don't add,
-rename or drop any without changing that picker too.
+These six top-level keys, plus the optional `frontier` key described below. The ladder
+picker (#5) depends on them, so don't add, rename or drop any without changing that
+picker too.
 
 ```jsonc
 {
@@ -128,43 +125,24 @@ rename or drop any without changing that picker too.
 }
 ```
 
+`frontier` holds IRE's frontier list, one row per enabled route, sorted by frontier rank
+with the best route of each family first. It's always present and is `[]` when IRE has no
+frontier list (or the copy is unreadable), when running from the built-in defaults, or
+when the cache predates the key. It's cached along with everything else. A row looks like
+`{"rank": 5, "name": "GPT 6.1 Sol", "vendor": "OpenAI", "route": "cx/gpt-6.1-sol",
+"best_route": true, "eligible": true, "health": "healthy", "cost_per_mtok": 0.016,
+"price_in": 0.016, "price_out": 0.08, "preferred_endpoint": "/v1/responses",
+"system_prompt_handling": "developer_message", "context_window": 272000}`. Here
+`cost_per_mtok` is the cheapest input ask, which is the basis IRE uses for its price policy.
+In the routes CSV fallback, `eligible` comes from the recommendations CSV
+(`recommendation_eligible`) when it can be read, and otherwise means the route is healthy,
+because the routes file has no eligibility column. From the recommendations CSV alone you
+get one row per family, its best route only.
+
 The ladder ids are bare InferHub ids, without the `ih/` prefix that LiteLLM deployments
 use. Provenance (fetch time and IRE SHA) isn't in the output. It's in the stderr line and
 the cache file, which looks like
 `{"fetched_at": "<UTC ISO>", "source_sha": "<40 hex>", "repo", "ref", "bundle": {...}}`.
-
-## Frontier output
-
-Written by `--frontier-out`, and cached next to the bundle (only live answers are cached).
-These eight keys, always:
-
-```jsonc
-{
-  "available": true,           // false when IRE has none of the three files (or no live/cached copy)
-  "source": "live",            // "live" | "cache" | "none"
-  "ire_sha": "9a8fba05...",    // the IRE commit it was read at (the same one as the bundle)
-  "files": {"recommendations_csv": true, "recommendations_json": true, "routes_csv": true},
-  "schema": "ihub-frontier-recommendations/v1",   // from the JSON, or null
-  "generated_at": "2026-10-04T00:02:28Z",
-  "models": [
-    {"rank": 1, "name": "GPT 6 Astra", "vendor": "OpenAI", "tier": "frontier", "eligible": true,
-     "gate_reasons": [], "best_route": "cb/gpt-6-astra", "cost_per_mtok": 0.1,
-     "system_prompt_handling": "upstream_note", "preferred_endpoint": "",
-     "ids": ["cb/gpt-6-astra", "cx/gpt-6-astra"]}
-  ],
-  "routes": [
-    {"rank": 1, "name": "GPT 6 Astra", "route": "cx/gpt-6-astra", "best": false, "health": "healthy",
-     "cost_per_mtok": 0.1, "system_prompt_handling": "developer_message",
-     "preferred_endpoint": "/v1/responses", "required_instructions_value": "You are a helpful assistant."}
-  ]
-}
-```
-
-Models and routes come from the two CSVs. If a CSV is missing, the same rows are taken
-from the JSON. `system_prompt_handling` and `preferred_endpoint` are passed through as
-IRE wrote them: cx routes say `developer_message` and `/v1/responses`. Nothing in this
-repository routes on them yet. The proxy sends cx models over chat completions today,
-so a picker that offers cx frontier routes has to deal with that first.
 
 ## Tests
 
@@ -172,6 +150,7 @@ so a picker that offers cx frontier routes has to deal with that first.
 network or needs a token. It covers online (env token, `gh auth token`, a price cap taken
 from the doc, IRE picks, malformed picks), offline with a cache, offline with no cache, a
 slow GitHub, bad auth (401 with and without a cache, and a token that can't see the
-repo), the output contract and the CLI. The frontier tests cover missing files, the CSVs
-read at the bundle's commit (cx routes keep `developer_message` and `/v1/responses`), the
-JSON filling in for missing CSVs, the cache and the defaults.
+repo), the output contract and the CLI. The frontier tests cover the JSON, the routes CSV
+(with and without the recommendations CSV for eligibility), the recommendations CSV alone,
+cx routes keeping `developer_message` and `/v1/responses`, missing or malformed files, a
+slow frontier read that must not cost the live Top 20, and old caches without the key.

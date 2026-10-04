@@ -20,23 +20,22 @@ both launchers (`HOOK(ire)`); its README has the output schema.
 - The built-in tables stay as the last resort. `tests/test_top20_tables.py`
   and `tests/test_ire_fetch.py` keep them equal to each other and to
   `shared/ire/defaults.json`.
-- The optional frontier list goes to a separate file (`--frontier-out`; on the
-  Mac `CCL_IRE_FRONTIER_JSON`), so the six-key bundle the ladder picker reads
-  doesn't change.
+- The optional frontier list rides in the bundle under the extra `frontier`
+  key (`[]` when IRE has none). The pickers and the ladder picker read it from
+  `CCL_IRE_JSON`.
 - `INFERHUB_MANAGEMENT_URL` is listed in `.env.example`; nothing reads it yet.
 
-## Fallback ladder picker: `HOOK(fallback-ladder)`
+## Fallback ladder picker (issue #5)
 
-Today the ladders come from `shared/litellm/config/inferhub_fallbacks.yaml`,
-unchanged from `litellm-ckff-ops`.
+This hook is now filled. Both launchers call `shared/ladder/ladder_cli.py`
+right after each seat is picked, and once more after the last seat apply. See
+`shared/ladder/README.md` for how it works. In short:
 
-The marker sits right after the advisor is picked and before the seat is
-applied, in both launchers. A picker there can write its choice to a gitignored
-file and pass it to `merge_litellm_config.py --inferhub-fallbacks <file>`, or
-edit the role chains in a copy of `inferhub_fallbacks.yaml`. The merge then goes
-through the same hot reload as a seat change.
-
-The hot reload (`POST /workbench/reload_runtime`) works without a master key:
-with no key set, `shared/litellm/sitecustomize.py` accepts the request from
-127.0.0.1 or ::1 only, and `reload_runtime.py` sends no `Authorization` header.
-With a key set, the token must match, as before.
+- The default ladder comes from `shared/ladder/inputs.py` `load_inputs()`. It
+  uses an IRE bundle when one is available and otherwise the Top 20 table plus
+  the fixed chains.
+- The choice goes to the running proxy as `POST /workbench/reload_runtime`
+  with `{"scope": "ladder", "plan": ...}`. That is a partial, in-memory update
+  that leaves the seat targets alone.
+- `inferhub_fallbacks.yaml` is still the starting point after a proxy restart.
+  The next launch puts the picked ladder back on top.

@@ -22,7 +22,9 @@ import ire_fetch as F  # noqa: E402
 FIX = Path(__file__).resolve().parent / "fixtures" / "ire"
 SHA = "0123456789abcdef0123456789abcdef01234567"
 TOKEN = "test-token-not-real"
-KEYS = {"source", "top20", "price_policy", "ladders", "retries", "cooldown_s"}
+KEYS = {"source", "top20", "price_policy", "ladders", "retries", "cooldown_s", "frontier"}
+FRONTIER_ROW = {"rank", "name", "vendor", "route", "best_route", "eligible", "health", "cost_per_mtok",
+                "price_in", "price_out", "preferred_endpoint", "system_prompt_handling", "context_window"}
 
 
 class FakeGitHub:
@@ -84,6 +86,9 @@ def check_contract(b):
     assert set(b["ladders"]) == {"main", "advisor"}
     assert all(isinstance(x, str) for chain in b["ladders"].values() for x in chain)
     assert isinstance(b["retries"], int) and isinstance(b["cooldown_s"], int)
+    assert isinstance(b["frontier"], list)
+    for row in b["frontier"]:
+        assert set(row) == FRONTIER_ROW
     json.dumps(b)
 
 
@@ -197,6 +202,65 @@ def test_corrupt_cache_falls_to_defaults(env):
     assert F.get_recommendations(offline=True, directory=env)["source"] == "defaults"
 
 
+# ------------------------------------------------------------------ frontier list
+
+
+def frontier_files(json_ok=True, csv_ok=False):
+    f = {}
+    if json_ok:
+        f[F.FRONTIER_JSON_PATH] = (FIX / "frontier.json").read_bytes()
+    if csv_ok:
+        f[F.FRONTIER_ROUTES_PATH] = (FIX / "frontier_routes.csv").read_bytes()
+    return f
+
+
+def test_frontier_comes_from_the_json(monkeypatch, env):
+    monkeypatch.setenv("GH_TOKEN", TOKEN)
+    online(monkeypatch, FakeGitHub(frontier_files(csv_ok=True)))
+    b = F.get_recommendations(directory=env)
+    check_contract(b)
+    routes = [r["route"] for r in b["frontier"]]
+    assert "xx/disabled-route" not in routes  # disabled routes are left out
+    assert routes[0] == "cb/gpt-6-astra" and routes.index("cb/gpt-6-astra") < routes.index("cx/gpt-6-astra")
+    sol = next(r for r in b["frontier"] if r["route"] == "cx/gpt-6.1-sol")
+    assert (sol["price_in"], sol["price_out"], sol["cost_per_mtok"]) == (0.016, 0.08, 0.016)
+    assert sol["preferred_endpoint"] == "/v1/responses" and sol["eligible"] is True
+    fable = next(r for r in b["frontier"] if r["route"] == "cc/claude-fable-5-1")
+    assert fable["cost_per_mtok"] == 1.0
+    # cached with the rest, and still there offline
+    monkeypatch.setattr(F.urllib.request, "urlopen", no_network)
+    assert F.get_recommendations(directory=env)["frontier"] == b["frontier"]
+
+
+def test_frontier_falls_back_to_the_routes_csv(monkeypatch, env):
+    monkeypatch.setenv("GH_TOKEN", TOKEN)
+    files = frontier_files(json_ok=False, csv_ok=True)
+    online(monkeypatch, FakeGitHub(files))
+    b = F.get_recommendations(directory=env)
+    check_contract(b)
+    assert [r["route"] for r in b["frontier"]] == ["cc/claude-fable-5-1", "cx/gpt-6.1-sol"]
+
+
+def test_frontier_missing_or_malformed_is_empty(monkeypatch, env):
+    monkeypatch.setenv("GH_TOKEN", TOKEN)
+    online(monkeypatch, FakeGitHub({F.FRONTIER_JSON_PATH: b"{not json"}))
+    b = F.get_recommendations(directory=env)
+    check_contract(b)
+    assert b["source"] == "live" and b["frontier"] == []
+    online(monkeypatch, FakeGitHub())
+    assert F.get_recommendations(directory=env)["frontier"] == []
+
+
+def test_old_cache_without_frontier_still_loads(env):
+    env.mkdir(parents=True)
+    d = F.load_defaults()
+    d.pop("frontier")
+    F.write_cache(env, dict(d, source="live"), SHA, "2026-10-03T00:00:00Z")
+    b = F.get_recommendations(offline=True, directory=env)
+    check_contract(b)
+    assert b["source"] == "cache" and b["frontier"] == []
+
+
 # ------------------------------------------------------------------ offline, no cache
 
 
@@ -288,91 +352,65 @@ def test_cli_writes_json(env, tmp_path):
     check_contract(json.loads(out.read_text()))
 
 
-# ------------------------------------------------------------------ frontier list (optional)
+# ------------------------------------------------------------------ frontier: the other optional files
 
-FRONTIER_FILES = {
-    F.FRONTIER_PATHS["recommendations_csv"]: (FIX / "frontier_recommendations.csv").read_bytes(),
-    F.FRONTIER_PATHS["routes_csv"]: (FIX / "frontier_routes.csv").read_bytes(),
-}
-
-
-def test_frontier_missing_is_fine(monkeypatch, env):
+def test_frontier_routes_csv_takes_eligibility_from_the_recommendations_csv(monkeypatch, env):
+    # 9a8fba0 rows: GPT 6 Astra (rank 1) and Claude Fable 5.1 (rank 2) are both recommended.
     monkeypatch.setenv("GH_TOKEN", TOKEN)
-    online(monkeypatch)
-    b, fr = F.get_recommendations_and_frontier(directory=env)
+    online(monkeypatch, FakeGitHub({
+        F.FRONTIER_MODELS_CSV_PATH: (FIX / "frontier_recommendations.csv").read_bytes(),
+        F.FRONTIER_ROUTES_PATH: (FIX / "frontier_routes.csv").read_bytes(),
+    }))
+    b = F.get_recommendations(directory=env)
     check_contract(b)
-    assert b["source"] == "live"
-    assert set(fr) == set(F.FRONTIER_KEYS)
-    assert fr["available"] is False and fr["models"] == [] and fr["routes"] == []
-    assert fr["files"] == {k: False for k in F.FRONTIER_PATHS}
+    by_name = {r["name"]: r["eligible"] for r in b["frontier"]}
+    assert by_name.get("Claude Fable 5.1") is True
+    sol = next(r for r in b["frontier"] if r["route"] == "cx/gpt-6.1-sol")
+    assert sol["system_prompt_handling"] == "developer_message"
+    assert sol["preferred_endpoint"] == "/v1/responses"
 
 
-def test_frontier_read_at_the_same_commit_and_cx_routes_keep_their_handling(monkeypatch, env):
+def test_frontier_recommendations_csv_alone_gives_best_routes(monkeypatch, env):
     monkeypatch.setenv("GH_TOKEN", TOKEN)
-    online(monkeypatch, FakeGitHub(files=FRONTIER_FILES))
-    b, fr = F.get_recommendations_and_frontier(directory=env)
-    check_contract(b)  # the frontier list never changes the six-key bundle
-    assert fr["available"] and fr["source"] == "live" and fr["ire_sha"] == SHA
-    assert fr["files"]["recommendations_csv"] and fr["files"]["routes_csv"]
-    assert not fr["files"]["recommendations_json"]
-    assert fr["models"][0]["rank"] == 1 and fr["models"][0]["name"] == "GPT 6 Astra"
-    cx = [r for r in fr["routes"] if r["route"].startswith("cx/")]
-    assert cx, "fixture has a cx route"
-    for r in cx:
-        assert r["system_prompt_handling"] == "developer_message"
-        assert r["preferred_endpoint"] == "/v1/responses"
+    online(monkeypatch, FakeGitHub({
+        F.FRONTIER_MODELS_CSV_PATH: (FIX / "frontier_recommendations.csv").read_bytes()}))
+    b = F.get_recommendations(directory=env)
+    check_contract(b)
+    assert [r["route"] for r in b["frontier"]] == ["cb/gpt-6-astra", "cc/claude-fable-5-1"]
+    assert all(r["best_route"] and r["eligible"] for r in b["frontier"])
 
 
-def test_frontier_json_fills_in_when_csvs_are_missing(monkeypatch, env):
-    doc = {"schema": "ihub-frontier-recommendations/v1", "generated_at": "2026-10-04T00:02:28Z",
-           "models": [{"frontier_rank": 1, "model_family": "GPT 6 Astra", "recommendation_eligible": True,
-                       "model_ids": ["cb/gpt-6-astra", "cx/gpt-6-astra"]}],
-           "routes": [{"frontier_rank": 1, "model_family": "GPT 6 Astra", "route": "cx/gpt-6-astra",
-                       "health": {"status": "healthy"}, "system_prompt_handling": "developer_message",
-                       "preferred_endpoint": "/v1/responses"}]}
+def test_slow_frontier_file_keeps_the_live_top20(monkeypatch, env):
+    # A frontier read that runs out of time must not turn a live answer into cache/defaults.
     monkeypatch.setenv("GH_TOKEN", TOKEN)
-    online(monkeypatch, FakeGitHub(files={F.FRONTIER_PATHS["recommendations_json"]: json.dumps(doc).encode()}))
-    _, fr = F.get_recommendations_and_frontier(directory=env)
-    assert fr["available"] and fr["schema"] == doc["schema"]
-    assert fr["models"][0]["ids"] == ["cb/gpt-6-astra", "cx/gpt-6-astra"] and fr["models"][0]["eligible"]
-    assert fr["routes"][0]["health"] == "healthy"
-    assert fr["routes"][0]["preferred_endpoint"] == "/v1/responses"
+    fake = FakeGitHub()
+
+    def slow_frontier(req, timeout=None):
+        if "frontier" in req.full_url:
+            raise urllib.error.URLError(OSError("timed out"))
+        return fake(req, timeout)
+
+    monkeypatch.setattr(F.urllib.request, "urlopen", slow_frontier)
+    b = F.get_recommendations(directory=env)
+    assert b["source"] == "live" and b["frontier"] == []
 
 
-def test_frontier_comes_back_from_the_cache(monkeypatch, env):
-    monkeypatch.setenv("GH_TOKEN", TOKEN)
-    online(monkeypatch, FakeGitHub(files=FRONTIER_FILES))
-    F.get_recommendations_and_frontier(directory=env)
-    monkeypatch.setattr(F.urllib.request, "urlopen", no_network)
-    b, fr = F.get_recommendations_and_frontier(directory=env)
-    assert b["source"] == "cache" and fr["source"] == "cache" and fr["available"]
-
-
-def test_frontier_empty_with_defaults(monkeypatch, env):
-    monkeypatch.setattr(F.urllib.request, "urlopen", lambda *a, **k: pytest.fail("network used"))
-    b, fr = F.get_recommendations_and_frontier(directory=env)
-    assert b["source"] == "defaults" and fr == F.empty_frontier()
-
-
-def test_cli_writes_frontier_table_and_csv(env, tmp_path):
+def test_cli_writes_the_picker_table_and_top20_csv(env, tmp_path):
     out = tmp_path / "o"
     r = subprocess.run([sys.executable, str(REPO / "shared" / "ire" / "ire_fetch.py"), "--offline",
                         "--cache-dir", str(env), "--out", str(out / "ire.json"),
-                        "--frontier-out", str(out / "frontier.json"), "--table-out", str(out / "table.txt"),
-                        "--top20-csv", str(out / "top20.csv")],
+                        "--table-out", str(out / "table.txt"), "--top20-csv", str(out / "top20.csv")],
                        capture_output=True, text=True, check=False)
     assert r.returncode == 0, r.stderr
     assert r.stdout == ""
-    assert json.loads((out / "frontier.json").read_text())["available"] is False
     lines = (out / "table.txt").read_text().splitlines()
     assert len(lines) == 20 and lines[0] == "1|DeepSeek V4.1 Flash|cb/deepseek-v4.1-flash|true|0.022"
     rows = list(csv.DictReader(io.StringIO((out / "top20.csv").read_text())))
     assert rows[0]["model_ids"] == "cb/deepseek-v4.1-flash" and len(rows) == 20
 
 
-def test_builtin_table_matches_the_mac_launcher_fallback(env, tmp_path):
+def test_builtin_table_matches_the_mac_launcher_fallback():
     # The Mac launcher's built-in MODELS is what it shows when ire_fetch.py can't run at all.
     text = (REPO / "mac" / "Launch Claude InferHub.command").read_text(encoding="utf-8")
     block = text.split("MODELS='", 1)[1].split("'", 1)[0]
-    table = F.shell_table(F.load_defaults())
-    assert block.strip().splitlines() == table.strip().splitlines()
+    assert block.strip().splitlines() == F.shell_table(F.load_defaults()).strip().splitlines()

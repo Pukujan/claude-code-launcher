@@ -76,9 +76,10 @@ Windows still shows its built-in table and passes the fetched one on as
 `CCL_IRE_JSON`.
 
 It also reads IRE's newer frontier list (stronger models with live route
-prices, IRE PR #68) when it's there, and writes it to a separate file. Nothing
-picks from it yet. Its cx routes want the system prompt as a developer message
-on `/v1/responses`, which the proxy doesn't do today.
+prices, IRE PR #68) when it's there, and keeps it in the same answer. Both
+pickers can seat from it: `f` at the Mac prompts, Tab on Windows. A `cx/` seat
+goes through the proxy's Responses mode (`/v1/responses`), which is what those
+routes ask for.
 
 ## What is where
 

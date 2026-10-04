@@ -42,9 +42,9 @@ and what didn't.
   else its cache, else its built-in defaults). The launcher's own `MODELS` is
   the last resort. The fetched Top 20 is also written to
   `shared/litellm/config/top20.csv`, and `inferhub_top20.yaml` is rebuilt when
-  that file changes. The optional IRE frontier list goes to
-  `ire-frontier.json` in the state folder (`CCL_IRE_FRONTIER_JSON`); nothing
-  picks from it yet.
+  that file changes. The optional IRE frontier list rides in the
+  same `ire.json` (`CCL_IRE_JSON`) under its `frontier` key; `f` at the model
+  prompts picks from it through `shared/ladder/ladder_cli.py primary`.
 - `ANTHROPIC_SMALL_FAST_MODEL` is `small-fast`, the fast seat alias
   (`ali/qwen3.8-flash` by default), as on Windows.
 - With no master key, the proxy process gets

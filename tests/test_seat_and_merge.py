@@ -119,3 +119,57 @@ def test_master_key_is_only_an_env_reference_when_set():
     assert merge.apply_master_key_setting({}, {"LITELLM_MASTER_KEY": "sk-x"}) == {
         "master_key": "os.environ/LITELLM_MASTER_KEY"}
     assert merge.apply_master_key_setting({"master_key": "x"}, {}) == {}
+
+
+# ---- cx/ seats use Responses mode; everything else is byte-identical (#13) ----
+
+GOLDEN = SCRIPTS.parents[2] / "tests" / "fixtures" / "seat"
+# Written by the unmodified upstream apply_inferhub_seat.py at litellm-ckff-ops
+# de69e68 (no cx change, includes the haiku/small-fast aliases); only the
+# "# Generated:" timestamp line is dropped.
+GOLDEN_CASES = [
+    ("cb/deepseek-v4.1-flash", "ali/qwen3.8-flash", "cb-deepseek-v4.1-flash_ali-qwen3.8-flash.yaml"),
+    ("ag/gemini-3.8-flash-high", "", "ag-gemini-3.8-flash-high_.yaml"),
+    ("cmc/meta/muse-spark-1.3-contributor", "cb/hy4-preview", "cmc-meta-muse-spark-1.3-contributor_cb-hy4-preview.yaml"),
+]
+
+
+def _seat_yaml(tmp_path, main, advisor):
+    out = tmp_path / "aliases.yaml"
+    r = run("apply_inferhub_seat.py", "--seat", str(tmp_path / "s.json"), "--out", str(out),
+            "--main", main, "--advisor", advisor, "--no-merge", "--no-reload")
+    assert r.returncode == 0, r.stderr
+    text = out.read_text(encoding="utf-8")
+    return "".join(ln for ln in text.splitlines(keepends=True) if not ln.startswith("# Generated: "))
+
+
+def test_non_cx_seat_output_is_byte_identical_to_before(tmp_path):
+    for main, advisor, golden in GOLDEN_CASES:
+        assert _seat_yaml(tmp_path, main, advisor).encode() == (GOLDEN / golden).read_bytes(), golden
+
+
+def test_only_cx_routes_change_model_string():
+    import csv as _csv
+    import apply_inferhub_seat as seat
+    ids = set()
+    with open(LITELLM / "config" / "top20-builtin.csv", encoding="utf-8") as fh:
+        for row in _csv.DictReader(fh):
+            ids.update(x.strip() for x in (row.get("model_ids") or row.get("id") or "").split(";") if x.strip())
+    ids.update({"cbcn/glm-5.3-flash", "cc/claude-fable-5-1", "ag/gemini-pro-agent", "cxx/not-cx", "acx/x"})
+    for mid in ids:
+        if mid.startswith("cx/"):
+            continue
+        assert seat.litellm_model(mid) == f"openai/{mid}", mid
+    assert seat.litellm_model("cx/gpt-6.1-sol") == "openai/responses/cx/gpt-6.1-sol"
+    assert seat.litellm_model("cx/gpt-5.6-luna") == "openai/responses/cx/gpt-5.6-luna"
+
+
+def test_cx_primary_is_seated_in_responses_mode(tmp_path):
+    out = tmp_path / "aliases.yaml"
+    r = run("apply_inferhub_seat.py", "--seat", str(tmp_path / "s.json"), "--out", str(out),
+            "--main", "cx/gpt-6.1-sol", "--advisor", "cbcn/minimax-m3", "--no-merge", "--no-reload")
+    assert r.returncode == 0, r.stderr
+    a = aliases(out)
+    for name in ("main", "sonnet", "claude-sonnet-5"):
+        assert a[name] == "openai/responses/cx/gpt-6.1-sol"
+    assert a["opus"] == "openai/cbcn/minimax-m3"

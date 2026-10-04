@@ -37,7 +37,7 @@ cat > "$T/bin/claude" <<'MOCK'
   [ "${ANTHROPIC_API_KEY:-}" = "local" ] && echo "api_key_is_local: yes"
   [ -n "${LITELLM_DANGEROUSLY_PERMIT_WEAK_OR_UNSET_MASTER_KEY:-}" ] && echo "weak_key_flag_leaked: yes"
   [ -n "${CCL_IRE_JSON:-}" ] && [ -f "$CCL_IRE_JSON" ] && echo "ire_json: present"
-  [ -n "${CCL_IRE_FRONTIER_JSON:-}" ] && [ -f "$CCL_IRE_FRONTIER_JSON" ] && echo "ire_frontier_json: present"
+  [ -n "${CCL_IRE_JSON:-}" ] && python3 -c 'import json,os,sys; sys.exit(0 if isinstance(json.load(open(os.environ["CCL_IRE_JSON"])).get("frontier"), list) else 1)' 2>/dev/null && echo "ire_frontier_key: present"
 } > "$MOCK_CLAUDE_OUT"
 MOCK
 chmod +x "$T/bin/claude"
@@ -77,7 +77,7 @@ expect "ANTHROPIC_BASE_URL=http://127.0.0.1:$PORT"
 expect "ANTHROPIC_MODEL=sonnet"
 expect "ANTHROPIC_SMALL_FAST_MODEL=small-fast"
 expect "ire_json: present"
-expect "ire_frontier_json: present"
+expect "ire_frontier_key: present"
 grep -q "weak_key_flag_leaked" "$T/claude-call.txt" && { echo "keyless flag reached claude (proxy only)"; fail=1; }
 grep -q "IRE: source=defaults" "$T/launcher-output.txt" || { echo "IRE status line missing"; fail=1; }
 n="$(grep -c -E '^(ANTHROPIC_|CLAUDE_CODE_|CKFF_|ckff_)' "$T/claude-call.txt")"

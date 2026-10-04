@@ -109,9 +109,9 @@ under `~/litellm`. It is gone; these parts now live in `mac/`:
 | --- | --- | --- | --- | --- | --- |
 | `shared/litellm/config/config.yaml` | `Pukujan/litellm-ckff-ops` | `config/config.yaml` | `de69e68` | `365d2f308e9e7cafdfc789390102563163a4fb874f9d4e8045cc2e9690bc2da7` | no |
 | `shared/litellm/config/inferhub_fallbacks.yaml` | `Pukujan/litellm-ckff-ops` | `config/inferhub_fallbacks.yaml` | `de69e68` | `b258eb03774a06a781df25a17144eae8bd97fe95b170ce185b5ccec98e12cec2` | no |
-| `shared/litellm/scripts/apply_inferhub_seat.py` | `Pukujan/litellm-ckff-ops` | `scripts/apply_inferhub_seat.py` | `de69e68` | `6bba74f851e6ab729c368c24d711b5792342e1b93cd8a48e4d0d00013dd5a37e` | no |
-| `shared/litellm/scripts/merge_litellm_config.py` | `Pukujan/litellm-ckff-ops` | `scripts/merge_litellm_config.py` | `de69e68` | `b77190bb7060c57fbb567bd8fd22af321fa2740add5c566e9b9cff625a1871e2` | no |
-| `shared/litellm/sitecustomize.py` | `Pukujan/litellm-ckff-ops` | `sitecustomize.py` | `de69e68` | `bf627afc9bc610ecea7d633a62fb34c9145e3076efaf969be22a1ea47651d8d3` | no |
+| `shared/litellm/scripts/apply_inferhub_seat.py` | `Pukujan/litellm-ckff-ops` | `scripts/apply_inferhub_seat.py` | `de69e68` | `6bba74f851e6ab729c368c24d711b5792342e1b93cd8a48e4d0d00013dd5a37e` | cx Responses mode (`litellm_model()`) |
+| `shared/litellm/scripts/merge_litellm_config.py` | `Pukujan/litellm-ckff-ops` | `scripts/merge_litellm_config.py` | `de69e68` | `b77190bb7060c57fbb567bd8fd22af321fa2740add5c566e9b9cff625a1871e2` | strips `openai/responses/` too |
+| `shared/litellm/sitecustomize.py` | `Pukujan/litellm-ckff-ops` | `sitecustomize.py` | `de69e68` | `bf627afc9bc610ecea7d633a62fb34c9145e3076efaf969be22a1ea47651d8d3` | ladder scope |
 | `shared/litellm/scripts/reload_runtime.py` | `Pukujan/litellm-ckff-ops` | `scripts/reload_runtime.py` | `f04adc8` | `6d177c687e7509196162c0bc9eaf1c01fea42f0af70eaa876e96f563d7ebbfaa` | yes; checked against `de69e68` (`d858f9a9…`), kept |
 | `shared/litellm/scripts/sync_inferhub_top20.py` | `Pukujan/litellm-ckff-ops` | `scripts/sync_inferhub_top20.py` | `f04adc8` | `0f5a52d8706ef588d722d2bfd3d0bdcb7eb394b94833a372859be51b1aa66b64` | default CSV only; checked against `de69e68` (`0254c188…`), kept |
 
@@ -119,8 +119,11 @@ under `~/litellm`. It is gone; these parts now live in `mac/`:
 but `apply_inferhub_seat.py` and `merge_litellm_config.py` call the first, and
 both launchers need the second to write the `ih/` deployments, so they came too.
 
-**Re-sync to `de69e68` (PR #42, issue #11).** Five files are now byte-for-byte
-the `de69e68` versions. What that brings in:
+**Re-sync to `de69e68` (PR #42, issue #11).** `config.yaml` and
+`inferhub_fallbacks.yaml` are byte-for-byte the `de69e68` versions;
+`apply_inferhub_seat.py`, `merge_litellm_config.py` and `sitecustomize.py` are
+the `de69e68` versions plus the small local edits listed below. What `de69e68`
+brings in:
 
 - `apply_inferhub_seat.py`: the fast seat. `haiku`, `claude-haiku-5`,
   `small-fast`, `ih-haiku`, `ih-small-fast` and `inferhub-haiku` go to
@@ -134,8 +137,8 @@ the `de69e68` versions. What that brings in:
 - `sitecustomize.py`: upstream now has the same keyless rule this repository
   had added (no key: only 127.0.0.1 or ::1 may call
   `/workbench/reload_runtime`; with a key the token must match, compared in
-  constant time), and it reports `haiku` after a reload. The local edit is no
-  longer needed.
+  constant time), and it reports `haiku` after a reload. The local auth edit
+  is no longer needed.
 - `config.yaml` and `inferhub_fallbacks.yaml` didn't change upstream.
 
 Not taken from `de69e68`:
@@ -155,6 +158,24 @@ Not taken from `de69e68`:
   keyless. The pinned 1.103.0 doesn't read it (no reference in the installed
   package) and starts keyless without it; the flag is there for the next bump.
 
+Local edits kept on top of `de69e68` (diff against upstream shows only these):
+
+- `apply_inferhub_seat.py`: `litellm_model()` seats `cx/` routes as
+  `openai/responses/cx/...`, so they go through LiteLLM's Responses mode
+  (issue #13). Every other route is written exactly as upstream writes it;
+  `tests/fixtures/seat/` holds output from the unmodified `de69e68` script.
+- `merge_litellm_config.py`: strips `openai/responses/` as well as `openai/`
+  when it reads seat targets back.
+- `sitecustomize.py`: the `ladder` scope on `/workbench/reload_runtime`, which
+  hands the launcher's fallback-ladder plan to `shared/ladder/proxy_apply.py`
+  (issue #5).
+- `reload_runtime.py` (kept from `f04adc8`): the env file list is whatever the
+  launcher puts in `CLAUDE_IH_ENV_FILES`, then the repository `.env`, instead
+  of a hardcoded Desktop path. With no master key it calls the reload endpoint
+  without an `Authorization` header.
+- `sync_inferhub_top20.py` (kept from `f04adc8`): the default CSV is
+  `config/top20-builtin.csv`.
+
 Written here, not copied: `shared/litellm/requirements.txt` and
 `requirements-overrides.txt` (pins from the working Windows venv, the same ones
 the Mac port used), and `shared/litellm/config/top20-builtin.csv` (generated
@@ -166,7 +187,9 @@ table row for row).
 `shared/ire/ire_fetch.py` reads these from the private
 `Pukujan/inference-recommendation-engine` at run time; none of them are copied
 here. The frontier files were added by IRE PR #68 (`9a8fba0`) and are optional:
-when one is missing, the frontier output is just emptier.
+the bundle's `frontier` key uses the JSON if it's there, else the routes CSV
+(eligibility from the recommendations CSV when it can be read), else the
+recommendations CSV alone, else stays empty. None of them can change the Top 20.
 
 | What | IRE path | Since |
 | --- | --- | --- |
@@ -176,9 +199,9 @@ when one is missing, the frontier output is just emptier.
 | Frontier models (optional) | `operational/telemetry/gravebuster/pipeline/ihub/lists/research_model_frontier_recommendations.csv` and `.json` | issue #11 |
 | Frontier routes (optional) | `operational/telemetry/gravebuster/pipeline/ihub/lists/research_model_frontier_routes.csv` | issue #11 |
 
-The test fixtures `tests/fixtures/ire/frontier_recommendations.csv` (header and
-2 rows) and `frontier_routes.csv` (routes of those 2 models) are cut from the
-`9a8fba0` files.
+The test fixture `tests/fixtures/ire/frontier_recommendations.csv` (header and
+2 rows) is cut from the `9a8fba0` file. `frontier.json` and `frontier_routes.csv`
+next to it are small hand-written samples in the same shape (issue #13).
 
 ## History
 
