@@ -20,14 +20,17 @@ Describe 'Windows install end to end' -Tag 'E2E' -Skip:(-not $script:OnWindows) 
         $script:Other = [Net.HttpListener]::new()
         $Other.Prefixes.Add("http://127.0.0.1:$StartPort/")
         $Other.Start()
-        $script:OtherJob = Start-ThreadJob -ArgumentList $Other -ScriptBlock {
+        # A plain runspace, not Start-ThreadJob: Windows PowerShell 5.1 has no ThreadJob module.
+        $script:OtherPs = [powershell]::Create()
+        $null = $OtherPs.AddScript({
             param($l)
             while ($l.IsListening) {
                 try { $c = $l.GetContext() } catch { break }
                 $c.Response.StatusCode = $(if ($c.Request.Url.AbsolutePath -like '/health/*') { 200 } else { 404 })
                 $c.Response.Close()
             }
-        }
+        }).AddArgument($Other)
+        $script:OtherHandle = $OtherPs.BeginInvoke()
         $script:Log = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Installer -Source $Repo -InstallDir $InstallDir `
             -InferHubKey $Key -StartPort $StartPort -SkipPrereqs -NoPath -NonInteractive *>&1 | Out-String
         $script:InstallExit = $LASTEXITCODE
@@ -36,6 +39,7 @@ Describe 'Windows install end to end' -Tag 'E2E' -Skip:(-not $script:OnWindows) 
     AfterAll {
         try { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $InstallDir 'app\windows\install.ps1') -InstallDir $InstallDir -Uninstall -NonInteractive *>&1 | Out-Null } catch {}
         try { $Other.Stop() } catch {}
+        try { $OtherPs.Dispose() } catch {}
         Remove-Item Env:CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue
         if (Test-Path $Root) { Remove-Item $Root -Recurse -Force -ErrorAction SilentlyContinue }
     }
