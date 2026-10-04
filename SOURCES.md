@@ -169,6 +169,8 @@ Local edits kept on top of `de69e68` (diff against upstream shows only these):
 - `sitecustomize.py`: the `ladder` scope on `/workbench/reload_runtime`, which
   hands the launcher's fallback-ladder plan to `shared/ladder/proxy_apply.py`
   (issue #5).
+  It also loads `bench_after_retries.py` on the first request (issue #21, see
+  below).
 - `reload_runtime.py` (kept from `f04adc8`): the env file list is whatever the
   launcher puts in `CLAUDE_IH_ENV_FILES`, then the repository `.env`, instead
   of a hardcoded Desktop path. With no master key it calls the reload endpoint
@@ -176,7 +178,11 @@ Local edits kept on top of `de69e68` (diff against upstream shows only these):
 - `sync_inferhub_top20.py` (kept from `f04adc8`): the default CSV is
   `config/top20-builtin.csv`.
 
-Written here, not copied: `shared/litellm/requirements.txt` and
+Written here, not copied: `shared/litellm/bench_after_retries.py`, which
+benches a seat or rung once it has used up its retries. LiteLLM 1.103.0's own
+allowed-fails counter can't do that on the proxy, because it counts all the
+retries of one request as a single failure.
+`shared/litellm/requirements.txt` and
 `requirements-overrides.txt` (pins from the working Windows venv, the same ones
 the Mac port used), and `shared/litellm/config/top20-builtin.csv` (generated
 from the Mac launcher's `MODELS` table, which matches the Windows `$Models`

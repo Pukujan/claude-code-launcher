@@ -13,6 +13,14 @@ model fails.
 - The failure that uses up a model's last retry **benches** it for
   **180 seconds**. While it's benched, new requests skip it and go straight
   to the next rung. When the bench time is up, the 1st model is tried again.
+- The bench is done by `shared/litellm/bench_after_retries.py`, not by
+  LiteLLM's allowed-fails counter. On the proxy, LiteLLM 1.103 logs a failed
+  request once, no matter how many retries it used. So with 3 allowed fails a
+  model was only benched after 4 failed requests, which in practice meant
+  never. The hook listens for LiteLLM's fallback event, which fires only when a
+  model's retries are spent, and benches that model for its `cooldown_time`.
+  It leaves cooldowns alone for bad requests and connection errors, and it
+  doesn't extend a bench that's already running.
 - This applies to both seats (main and advisor) and to every rung. It comes
   from three places: `shared/ire/defaults.json` (`retries`, `cooldown_s`),
   the picker's live apply, and the proxy config
