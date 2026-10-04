@@ -50,9 +50,16 @@ right after each seat is picked, and once more after the last seat apply. See
   tool, which only Anthropic runs. `merge_litellm_config.py` turns on LiteLLM's
   `websearch_interception` callback and a `duckduckgo` search tool, and
   `shared/litellm/web_search.py` (installed by `sitecustomize.py`) runs those
-  searches through the keyless `ddgs` package: Yahoo, then ddgs's `auto` mix,
-  then Yahoo again, 1 s apart. A `search_tools` list already in `config.yaml`
-  wins.
+  searches through the keyless `ddgs` package: Yahoo, DuckDuckGo, then ddgs's
+  `auto` mix, and the same again after a 2 s back-off, within 20 s
+  (`CCL_DDGS_BACKENDS` changes the list). Results without a URL don't count,
+  successes are cached for 10 minutes, and when everything fails Claude Code
+  gets `Search failed: ...` with the reasons instead of an empty result list.
+  `CCL_WEB_SEARCH_CHAIN` (default `ddgs`) can add LiteLLM search providers
+  around it, e.g. `searxng,ddgs,brave` with `SEARXNG_API_BASE` /
+  `BRAVE_API_KEY` set. Each search logs a timestamped `[web_search]` line in
+  `shared/litellm/logs/litellm.out.log`. A `search_tools` list already in
+  `config.yaml` wins.
 - **Fast seat max_tokens floor.** WebFetch summaries go to the fast seat with a
   small `max_tokens`; reasoning models could spend all of it thinking and send
   back nothing. `shared/litellm/fast_min_tokens.py` raises `max_tokens` to 4096
