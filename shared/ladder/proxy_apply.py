@@ -90,7 +90,8 @@ def apply_plan(router, plan: dict) -> dict:
     pol = plan.get("retry_policy")
     if isinstance(pol, dict):
         mgrp = dict(getattr(router, "model_group_retry_policy", None) or {})
-        for n in names:
+        # seats and their rungs alike: every model gets the same retries before moving on
+        for n in names | set(upserted):
             mgrp[n] = RetryPolicy(**pol)
         router.update_settings(model_group_retry_policy=mgrp)
 

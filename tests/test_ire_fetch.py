@@ -107,7 +107,7 @@ def test_online_fetches_and_caches(monkeypatch, env, capsys):
     assert b["price_policy"]["free_below_per_mtok"] == 0.10
     assert b["ladders"] == {"main": ["cb/deepseek-v4.1-flash", "ali/qwen3.8-flash", "cbcn/deepseek-v4-flash"],
                             "advisor": ["cbcn/glm-5.3-flash", "cbcn/minimax-m3"]}
-    assert (b["retries"], b["cooldown_s"]) == (1, 180)
+    assert (b["retries"], b["cooldown_s"]) == (3, 180)
     record = json.loads((env / F.CACHE_NAME).read_text())
     assert record["source_sha"] == SHA
     assert record["fetched_at"].endswith("Z")
@@ -272,7 +272,7 @@ def test_offline_no_cache_uses_defaults(monkeypatch, env):
     assert b["source"] == "defaults"
     assert b["ladders"]["main"] == ["cb/deepseek-v4.1-flash", "ali/qwen3.8-flash", "cbcn/deepseek-v4-flash"]
     assert b["ladders"]["advisor"] == ["cbcn/glm-5.3-flash", "cbcn/minimax-m3"]
-    assert (b["retries"], b["cooldown_s"]) == (1, 180)
+    assert (b["retries"], b["cooldown_s"]) == (3, 180)
     assert b["price_policy"]["free_below_per_mtok"] == 0.10
     assert not (env / F.CACHE_NAME).exists()  # defaults are never cached
 

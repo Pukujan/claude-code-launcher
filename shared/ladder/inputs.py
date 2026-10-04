@@ -7,7 +7,7 @@ It returns a dict shaped like this, from the best source available:
     "price_policy": {"max_cost_per_mtok": 0.10},
     "top20": [{"rank", "name", "eligible", "cost_per_mtok", "ids": [...]}, ...],
     "ladders": {"main": {"primary", "fallbacks"}, "advisor": {...}},
-    "retry": {"retries": 1, "cooldown_seconds": 180},
+    "retry": {"retries": 3, "cooldown_seconds": 180},
   }
 
 Sources, in order:
@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -35,7 +36,40 @@ FIXED_LADDERS = {
     "main": {"primary": "cb/deepseek-v4.1-flash", "fallbacks": ["ali/qwen3.8-flash", "cbcn/deepseek-v4-flash"]},
     "advisor": {"primary": "cbcn/glm-5.3-flash", "fallbacks": ["cbcn/minimax-m3"]},
 }
-FIXED_RETRY = {"retries": 1, "cooldown_seconds": 180}
+# Failure policy (Alex, 2026-10-03): each model gets 3 retries, then the request
+# moves to the next rung. A model that used up its retries is benched for 180 s,
+# then tried again. CCL_RETRIES and CCL_COOLDOWN_S override both on a machine.
+FIXED_RETRY = {"retries": 3, "cooldown_seconds": 180}
+RETRIES_ENV, COOLDOWN_ENV = "CCL_RETRIES", "CCL_COOLDOWN_S"
+
+
+def _env_int(name: str, lo: int, hi: int):
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return None
+    try:
+        v = int(raw)
+    except ValueError:
+        v = None
+    if v is None or not lo <= v <= hi:
+        print(f"[ladder] ignoring {name}={raw!r} (want a whole number {lo}-{hi})", file=sys.stderr)
+        return None
+    return v
+
+
+def retry_settings(base: dict | None = None) -> dict:
+    """{retries, cooldown_seconds}: CCL_RETRIES / CCL_COOLDOWN_S win, then base, then 3 / 180."""
+    out = dict(FIXED_RETRY)
+    for k in out:
+        if base and base.get(k) is not None:
+            out[k] = int(base[k])
+    r = _env_int(RETRIES_ENV, 0, 10)
+    c = _env_int(COOLDOWN_ENV, 1, 86400)
+    if r is not None:
+        out["retries"] = r
+    if c is not None:
+        out["cooldown_seconds"] = c
+    return out
 PRICE_CAP = 0.10  # docs/INFERHUB-API-SETUP.md in IRE: under $0.10 per 1M is "effectively free"
 
 
@@ -69,7 +103,7 @@ def builtin_inputs() -> dict:
             if top:
                 return {"source": {"kind": "builtin", "detail": f"{p.name} + fixed chains"},
                         "price_policy": {"max_cost_per_mtok": PRICE_CAP}, "top20": top,
-                        "ladders": json.loads(json.dumps(FIXED_LADDERS)), "retry": dict(FIXED_RETRY)}
+                        "ladders": json.loads(json.dumps(FIXED_LADDERS)), "retry": retry_settings()}
     raise FileNotFoundError("no Top 20 table under shared/litellm/config")
 
 
@@ -91,8 +125,8 @@ def normalize(raw) -> dict | None:
             lad[role] = {"primary": v.get("primary"), "fallbacks": list(v.get("fallbacks") or [])}
     for role, v in FIXED_LADDERS.items():
         lad.setdefault(role, json.loads(json.dumps(v)))
-    retry = raw.get("retry") or {"retries": raw.get("retries", FIXED_RETRY["retries"]),
-                                 "cooldown_seconds": raw.get("cooldown_s", FIXED_RETRY["cooldown_seconds"])}
+    retry = retry_settings(raw.get("retry") or {"retries": raw.get("retries"),
+                                                "cooldown_seconds": raw.get("cooldown_s")})
     src = raw.get("source")
     detail = src if isinstance(src, str) else (src or {}).get("kind", "?")
     out = {"source": {"kind": "ire", "detail": str(detail)},
