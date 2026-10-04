@@ -594,7 +594,8 @@ function Open-UltraCodeShim {
   param([string]$Model)
   $dir = Get-UltraCodeShim
   $port = 4100
-  while (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) { $port++ }
+  $busy = @([Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners() | ForEach-Object { $_.Port })
+  while ($busy -contains $port) { $port++ }
   $route = [ordered]@{ upstream = $ProxyBase; model = $Model }
   $conf = [ordered]@{
     models = @([ordered]@{ id = "claude-main"; display_name = "Main seat ($Model)" }, [ordered]@{ id = "claude-worker"; display_name = "Worker ($Model)" })
