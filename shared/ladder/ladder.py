@@ -356,7 +356,11 @@ def prompt_ladder(bundle: dict, role: str, primary: str, blocked_prefixes=(), *,
         p("  note: cx/ route. It is seated in Responses API mode so your system prompt arrives as")
         p("        'instructions'. Over Chat Completions cx would replace it with a stock prompt.")
     src = (bundle.get("source") or {}).get("kind", "?")
-    p(f"Default fallback ladder (IRE source: {src}; cap ${cap:g}/1M; 1 retry, then next rung; 180 s cooldown):")
+    rt = bundle.get("retry") or {}
+    n, cd = rt.get("retries", 3), rt.get("cooldown_seconds", 180)
+    p(f"Default fallback ladder (IRE source: {src}; cap ${cap:g}/1M):")
+    p(f"  each model gets {n} {'retry' if n == 1 else 'retries'}, then the next rung; a model that fails is "
+      f"benched for {cd:g} s, then tried again")
     if dflt:
         for i, r in enumerate(dflt, 1):
             p(f"  {i}. {r}" + ("   [cx: Responses mode]" if is_cx(r) else ""))
@@ -444,7 +448,7 @@ def prompt_primary(bundle: dict, role: str, *, default: str | None = None, allow
 
 
 def build_plan(main_primary: str, main_ladder: list, advisor_primary: str | None,
-               advisor_ladder: list, api_base: str, retries: int = 1, cooldown: float = 180.0,
+               advisor_ladder: list, api_base: str, retries: int = 3, cooldown: float = 180.0,
                main_names=None, advisor_names=None) -> dict:
     """The JSON the proxy hook applies. Seat aliases are not touched here;
     only the ih/<route> rung deployments and the fallback lists are."""
@@ -473,11 +477,14 @@ def build_plan(main_primary: str, main_ladder: list, advisor_primary: str | None
         "retry_policy": {"RateLimitErrorRetries": retries, "InternalServerErrorRetries": retries,
                          "ServiceUnavailableErrorRetries": retries, "TimeoutErrorRetries": 0,
                          "BadRequestErrorRetries": 0, "AuthenticationErrorRetries": 0},
-        # Same values as the existing inferhub_fallbacks.yaml: a route that fails twice
-        # within a minute is benched for cooldown_time seconds.
+        # Each model gets `retries` retries (1 + retries attempts) before the request
+        # moves to the next rung. The failure that uses up the last retry benches the
+        # model for cooldown_time seconds (allowed fails = retries), so later requests
+        # skip it until the cooldown ends. Timeouts, bad requests and auth errors are
+        # not retried. Same values as inferhub_fallbacks.yaml.
         "cooldown": {"cooldown_time": float(cooldown), "allowed_fails_policy": {
-            "RateLimitErrorAllowedFails": 1, "InternalServerErrorAllowedFails": 1,
-            "ServiceUnavailableErrorAllowedFails": 1, "BadGatewayErrorAllowedFails": 1,
+            "RateLimitErrorAllowedFails": retries, "InternalServerErrorAllowedFails": retries,
+            "ServiceUnavailableErrorAllowedFails": retries, "BadGatewayErrorAllowedFails": retries,
             "TimeoutErrorAllowedFails": 1, "AuthenticationErrorAllowedFails": 0,
             "NotFoundErrorAllowedFails": 0}},
     }

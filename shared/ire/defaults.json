@@ -28,6 +28,6 @@
     "main": ["cb/deepseek-v4.1-flash", "ali/qwen3.8-flash", "cbcn/deepseek-v4-flash"],
     "advisor": ["cbcn/glm-5.3-flash", "cbcn/minimax-m3"]
   },
-  "retries": 1,
+  "retries": 3,
   "cooldown_s": 180
 }

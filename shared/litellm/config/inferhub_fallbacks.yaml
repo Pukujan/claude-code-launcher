@@ -28,11 +28,17 @@ roles:
     chain: [cb/deepseek-v4.1-flash, cbcn/deepseek-v4-flash]
   direct_deepseek:
     names: [ih/cb/deepseek-v4.1-flash]
-    chain: [cbcn/deepseek-v4-flash, ali/qwen3.8-flash]# Per-name retry policy for the generated names (fail over fast instead of 3 retries).
+    chain: [cbcn/deepseek-v4-flash, ali/qwen3.8-flash]
+
+# Failure policy (Alex, 2026-10-03): when the 1st model fails, try the 2nd, then the 3rd.
+# Each model gets 3 retries on rate-limit and 5xx errors before the request moves on.
+# Applied to every generated name and every chain target. CCL_RETRIES overrides the
+# retry count on a machine (merge_litellm_config.py). Timeouts, bad requests and auth
+# errors are not retried.
 retry_policy:
-  RateLimitErrorRetries: 1
-  InternalServerErrorRetries: 1
-  ServiceUnavailableErrorRetries: 1
+  RateLimitErrorRetries: 3
+  InternalServerErrorRetries: 3
+  ServiceUnavailableErrorRetries: 3
   TimeoutErrorRetries: 0
   BadRequestErrorRetries: 0
   AuthenticationErrorRetries: 0
@@ -41,15 +47,17 @@ retry_policy:
 # target, so a failing primary is skipped for cooldown_time seconds and requests go straight to
 # the backup. allowed_fails_policy uses explicit exception types so it also applies to
 # single-deployment groups (LiteLLM otherwise never benches those). A route is benched when its
-# failures within the window exceed the allowed count (1 => the 2nd failure benches it).
+# failures within the window exceed the allowed count. The allowed count equals the retries, so
+# the failure that uses up a model's last retry benches it for cooldown_time seconds (180 s,
+# CCL_COOLDOWN_S overrides). After that the 1st model is tried again.
 # Note: LiteLLM never benches on raw connection errors (APIConnectionError).
 cooldown:
   cooldown_time: 180
   allowed_fails_policy:
-    RateLimitErrorAllowedFails: 1        # InferHub 402 no_provider_under_bid maps here
-    InternalServerErrorAllowedFails: 1
-    ServiceUnavailableErrorAllowedFails: 1
-    BadGatewayErrorAllowedFails: 1        # InferHub 502
+    RateLimitErrorAllowedFails: 3        # InferHub 402 no_provider_under_bid maps here
+    InternalServerErrorAllowedFails: 3
+    ServiceUnavailableErrorAllowedFails: 3
+    BadGatewayErrorAllowedFails: 3        # InferHub 502
     TimeoutErrorAllowedFails: 1
     AuthenticationErrorAllowedFails: 0
     NotFoundErrorAllowedFails: 0

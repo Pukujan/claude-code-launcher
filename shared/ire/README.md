@@ -21,7 +21,7 @@ the repo.
 IRE doesn't publish fallback picks yet. I searched `main` at `9a8fba0` on 2026-10-03 and
 found none. Until that file exists, the ladders come from `defaults.json`. When it does
 appear, it should look like
-`{"main": ["id", ...], "advisor": ["id", ...], "retries": 1, "cooldown_s": 180}`. The
+`{"main": ["id", ...], "advisor": ["id", ...], "retries": 3, "cooldown_s": 180}`. The
 `retries` and `cooldown_s` fields are optional, and the same shape nested under
 `"ladders"` also works. A malformed file is ignored and the built-in ladders are used.
 
@@ -113,7 +113,7 @@ picker too.
     "main":    ["cb/deepseek-v4.1-flash", "ali/qwen3.8-flash", "cbcn/deepseek-v4-flash"],
     "advisor": ["cbcn/glm-5.3-flash", "cbcn/minimax-m3"]
   },
-  "retries": 1,                // retries on a rung before moving down the ladder
+  "retries": 3,                // retries on each model before moving down the ladder
   "cooldown_s": 180            // seconds a failed rung sits out
 }
 ```

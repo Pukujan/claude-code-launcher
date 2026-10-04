@@ -87,6 +87,33 @@ def test_full_merge_from_builtin_top20(tmp_path):
     # Keyless unless the env sets one: the key is only an env reference.
     assert doc["general_settings"]["master_key"] == "os.environ/LITELLM_MASTER_KEY"
     assert any("sonnet" in d for d in doc["router_settings"]["fallbacks"])
+    # failure policy: 3 retries per model (seats and chain targets), benched 180 s after the last one
+    pol = doc["router_settings"]["model_group_retry_policy"]
+    assert pol["sonnet"]["ServiceUnavailableErrorRetries"] == 3
+    assert pol["ih/ali/qwen3.8-flash"]["RateLimitErrorRetries"] == 3
+    info = {m["model_name"]: m.get("model_info") or {} for m in doc["model_list"]}
+    assert info["sonnet"]["cooldown_time"] == 180.0
+    assert info["sonnet"]["allowed_fails_policy"]["ServiceUnavailableErrorAllowedFails"] == 3
+
+
+def test_merge_honors_ccl_retries_and_cooldown(tmp_path, monkeypatch):
+    top = tmp_path / "top20.yaml"
+    assert run("sync_inferhub_top20.py", "--out", str(top)).returncode == 0
+    al = tmp_path / "aliases.yaml"
+    assert run("apply_inferhub_seat.py", "--seat", str(tmp_path / "s.json"), "--out", str(al),
+               "--main", "cb/deepseek-v4.1-flash", "--advisor", "", "--no-merge", "--no-reload").returncode == 0
+    out = tmp_path / "runtime.yaml"
+    monkeypatch.setenv("CCL_RETRIES", "2")
+    monkeypatch.setenv("CCL_COOLDOWN_S", "20")
+    r = run("merge_litellm_config.py", "--inferhub-top20", str(top), "--inferhub-aliases", str(al),
+            "--out", str(out), "--no-reload")
+    assert r.returncode == 0, r.stderr
+    doc = yaml.safe_load(out.read_text(encoding="utf-8"))
+    pol = doc["router_settings"]["model_group_retry_policy"]["sonnet"]
+    assert pol["ServiceUnavailableErrorRetries"] == 2 and pol["TimeoutErrorRetries"] == 0
+    info = {m["model_name"]: m.get("model_info") or {} for m in doc["model_list"]}["sonnet"]
+    assert info["cooldown_time"] == 20.0
+    assert info["allowed_fails_policy"]["ServiceUnavailableErrorAllowedFails"] == 2
 
 
 # ---- cx/ seats use Responses mode; everything else is byte-identical (#13) ----

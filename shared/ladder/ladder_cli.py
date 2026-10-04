@@ -152,7 +152,8 @@ def cmd_apply(a):
         log("ERROR: no main seat in state; run `choose --role main` first")
         return 2
     adv = st.get("advisor") or {"primary": None, "fallbacks": []}
-    retry = (st.get("inputs") or {}).get("retry") or dict(I.FIXED_RETRY)
+    # CCL_RETRIES / CCL_COOLDOWN_S at apply time win over the snapshot in the state file
+    retry = I.retry_settings((st.get("inputs") or {}).get("retry"))
     plan = L.build_plan(m["primary"], m["fallbacks"], adv.get("primary"), adv.get("fallbacks") or [],
                         a.api_base, retries=int(retry["retries"]), cooldown=float(retry["cooldown_seconds"]))
     save_json(a.state.with_name("ladder-plan.json"), plan)

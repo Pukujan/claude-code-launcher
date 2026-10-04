@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -95,6 +96,45 @@ def build_inferhub_fallbacks(path: Path, ih_models: list, max_default: float = 0
     return out
 
 
+TRANSIENT = ("RateLimitError", "InternalServerError", "ServiceUnavailableError")
+
+
+def _env_int(name, lo, hi):
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return None
+    try:
+        v = int(raw)
+    except ValueError:
+        v = None
+    if v is None or not lo <= v <= hi:
+        print(f"warning: ignoring {name}={raw!r} (want a whole number {lo}-{hi})", file=sys.stderr)
+        return None
+    return v
+
+
+def apply_env_overrides(pol, cd):
+    """CCL_RETRIES sets the retries for transient errors (rate limit, 5xx) and the
+    allowed fails that bench a model, so a model is benched by the failure that
+    uses up its last retry. CCL_COOLDOWN_S sets the bench time in seconds."""
+    pol = dict(pol) if isinstance(pol, dict) else pol
+    cd = dict(cd) if isinstance(cd, dict) else cd
+    r = _env_int("CCL_RETRIES", 0, 10)
+    c = _env_int("CCL_COOLDOWN_S", 1, 86400)
+    if r is not None and isinstance(pol, dict):
+        for k in TRANSIENT:
+            pol[f"{k}Retries"] = r
+    if isinstance(cd, dict):
+        if r is not None and isinstance(cd.get("allowed_fails_policy"), dict):
+            afp = dict(cd["allowed_fails_policy"])
+            for k in TRANSIENT + ("BadGatewayError",):
+                afp[f"{k}AllowedFails"] = r
+            cd["allowed_fails_policy"] = afp
+        if c is not None:
+            cd["cooldown_time"] = c
+    return pol, cd
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--ckff", type=Path, default=ROOT / "config" / "config.yaml")
@@ -140,18 +180,18 @@ def main() -> int:
         # Fail over fast on seat names: InferHub 402 no_provider_under_bid / 5xx are not
         # transient within seconds, so 1 retry then fall back (issue #36).
         fb_doc = yaml.safe_load(args.inferhub_fallbacks.read_text(encoding="utf-8")) or {}
-        pol = fb_doc.get("retry_policy")
+        pol, cd = apply_env_overrides(fb_doc.get("retry_policy"), fb_doc.get("cooldown"))
+        targets = set(generated) | {t for d in ih_fallbacks for v in d.values() for t in v}
         if isinstance(pol, dict):
             mgrp = dict(rs.get("model_group_retry_policy") or {})
-            for name in generated:
+            # every seat name and every chain target gets the same retries
+            for name in targets:
                 mgrp[name] = dict(pol)
             rs["model_group_retry_policy"] = mgrp
         merged["router_settings"] = rs
         # Per-deployment benching (cooldown_time + allowed_fails_policy in model_info, which
         # stays router-internal and is not sent upstream).
-        cd = fb_doc.get("cooldown")
         if isinstance(cd, dict):
-            targets = set(generated) | {t for d in ih_fallbacks for v in d.values() for t in v}
             for m in ih_top + ih_alias:
                 if isinstance(m, dict) and m.get("model_name") in targets:
                     mi = dict(m.get("model_info") or {})
