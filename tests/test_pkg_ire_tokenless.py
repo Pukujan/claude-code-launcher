@@ -82,7 +82,9 @@ def test_token_is_still_sent_when_present(monkeypatch, clean):
 
 @pytest.mark.property
 @settings(max_examples=40, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
-@given(st.text(alphabet=st.characters(min_codepoint=33, max_codepoint=126), min_size=12, max_size=40))
+# The "ghtok_" prefix keeps a random token from being a substring of real IRE data
+# (Hypothesis once drew "cbcn/glm-5.2", a model id).
+@given(st.text(alphabet=st.characters(min_codepoint=33, max_codepoint=126), min_size=12, max_size=40).map(lambda s: "ghtok_" + s))
 def test_a_token_never_reaches_output_or_cache(monkeypatch, clean, capsys, token):
     monkeypatch.setenv("GITHUB_TOKEN", token)
     monkeypatch.setattr(F.urllib.request, "urlopen", PublicGitHub())

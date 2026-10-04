@@ -2,7 +2,20 @@
 
 This sets up Claude Code on your PC so it talks to InferHub through a small
 LiteLLM proxy that runs on your own machine. You need an InferHub API key and
-about ten minutes. Nothing here needs admin rights.
+about ten minutes. A TinyFish key for web search is a good idea too (it's
+free, see below). Nothing here needs admin rights.
+
+## Before you start: get a free TinyFish key
+
+TinyFish Search is what Claude uses to search the web. It's free and doesn't
+need a card:
+
+1. Sign up at <https://agent.tinyfish.ai/sign-up>.
+2. Open <https://agent.tinyfish.ai/api-keys> and click "Create API Key".
+3. Keep the key handy; the installer asks for it.
+
+You can skip it, but then search falls back to DuckDuckGo and You.com, which
+are often rate-limited and can be unreliable. You can add the key later.
 
 ## Install
 
@@ -12,21 +25,24 @@ Open **PowerShell** (Start menu, type "PowerShell", Enter) and paste:
 irm https://github.com/Pukujan/claude-code-launcher/releases/download/v1.0.0-windows/install.ps1 | iex
 ```
 
-It asks for your InferHub key (the typing is hidden), then does the rest. When
-it says "All set", open a **new** terminal and run:
+It asks for your InferHub key, then your TinyFish key (the typing is hidden
+for both; press Enter at the TinyFish one to skip it), then does the rest.
+When it says "All set", open a **new** terminal and run:
 
 ```powershell
 claude-inferhub
 ```
 
-If you would rather pass the key up front, so nothing is asked:
+If you would rather pass the keys up front, so nothing is asked:
 
 ```powershell
-& ([scriptblock]::Create((irm https://github.com/Pukujan/claude-code-launcher/releases/download/v1.0.0-windows/install.ps1))) -InferHubKey 'ih-your-key-here'
+& ([scriptblock]::Create((irm https://github.com/Pukujan/claude-code-launcher/releases/download/v1.0.0-windows/install.ps1))) -InferHubKey 'ih-your-key-here' -TinyFishKey 'your-tinyfish-key'
 ```
 
-Keep in mind that a key typed on the command line can end up in your
-PowerShell history. The prompt doesn't have that problem.
+Use `-SkipTinyFish` instead of `-TinyFishKey` if you don't want one. Setting
+`INFERHUB_API_KEY` and `TINYFISH_API_KEY` in the environment works too. Keep
+in mind that a key typed on the command line can end up in your PowerShell
+history. The prompts don't have that problem.
 
 ### Prefer to look at the script first?
 
@@ -56,7 +72,7 @@ Only what is missing. Everything already on the PC is left as it is.
 - The launcher itself, in `%LOCALAPPDATA%\claude-code-launcher`:
   - `app\` holds the launcher files
   - `venv\` holds LiteLLM
-  - `secrets\inferhub.env` holds your key, readable only by your user
+  - `secrets\inferhub.env` and `secrets\tinyfish.env` hold your keys, readable only by your user
   - `state\` holds your last picks and optional settings
   - `logs\` holds the logs
   - `bin\claude-inferhub.cmd` is the command, added to your user PATH
@@ -81,6 +97,7 @@ Other things you can do:
 | Command | What it does |
 | --- | --- |
 | `claude-inferhub --set-key` | Change your InferHub key (restarts the proxy) |
+| `claude-inferhub --set-tinyfish-key` | Add or change your TinyFish key; press Enter to remove it (restarts the proxy) |
 | `claude-inferhub --uninstall` | Remove everything it installed (same as `install.ps1 -Uninstall`) |
 
 Running the install command again updates the launcher and keeps your key.
@@ -93,15 +110,15 @@ the next free port and remembers it in `install.json`. It never takes over or
 stops a program it didn't start. Before Claude Code connects, the launcher
 checks that the proxy on that port really is this install's.
 
-## Web search (optional)
+## Web search
 
-Web search works without any extra key: it uses DuckDuckGo, then You.com's
-free tier. If you have a TinyFish key, put it in
-`%LOCALAPPDATA%\claude-code-launcher\state\local.env` like this, and TinyFish
-is tried first:
+With a TinyFish key, Claude's web searches go to TinyFish first, then
+DuckDuckGo, then You.com's free tier if the others come back empty. Without
+one, only DuckDuckGo and You.com are tried, and those often throttle or return
+nothing. To add the key later:
 
-```
-TINYFISH_API_KEY=your-tinyfish-key
+```powershell
+claude-inferhub --set-tinyfish-key
 ```
 
 ## Uninstall
@@ -124,5 +141,5 @@ and Claude Code stay installed, since you may use them for other things.
 ## If something goes wrong
 
 Look in `%LOCALAPPDATA%\claude-code-launcher\logs\`. `install.log` is the
-installer, and `litellm.err.log` is the proxy. Your key is never written to
-the logs.
+installer, and `litellm.err.log` is the proxy. Your keys are never written
+to the logs.

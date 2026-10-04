@@ -21,7 +21,7 @@ irm https://github.com/Pukujan/claude-code-launcher/releases/download/v1.0.0-win
 ```
 
 That installs whatever is missing (uv, Git, Node, pnpm, Claude Code), asks for
-the InferHub key, puts the launcher in `%LOCALAPPDATA%\claude-code-launcher`
+the InferHub key and a free TinyFish Search key (skippable), puts the launcher in `%LOCALAPPDATA%\claude-code-launcher`
 and adds a `claude-inferhub` command. See
 [windows/README-friend.md](windows/README-friend.md) for the details,
 `--set-key` and `--uninstall`, and [docs/specs/windows-package.md](docs/specs/windows-package.md)

@@ -36,7 +36,7 @@ through the local proxy with all four slots and web search working, even if he a
 
 ## Acceptance criteria
 
-- [ ] one command (irm ... | iex) plus an InferHub key installs everything into %LOCALAPPDATA%\claude-code-launcher and leaves a working claude-inferhub command
+- [ ] one command (irm ... | iex) plus an InferHub key (and an optional, free TinyFish key) installs everything into %LOCALAPPDATA%\claude-code-launcher and leaves a working claude-inferhub command
 - [ ] the proxy picks a free port from 4000 up, never a port held by another program, and Claude's base URL follows it
 - [ ] packaged mode reads no Alex-specific paths and the key is never printed or logged
 - [ ] spec, property-based, metamorphic and Windows end-to-end tests pass in CI, and gates (with hotload_check) pass
@@ -51,3 +51,6 @@ through the local proxy with all four slots and web search working, even if he a
 - 2026-10-04 6:20 PM ET: spec written and linked on #61; claim taken in `.coord`.
 - 2026-10-04 6:35 PM ET: red tests committed (`6f7c87b`): pytest 31 failed + 2 collection errors, Pester 166 failed.
 - 2026-10-04 6:58 PM ET: implementation in; locally pytest 276 passed / 7 skipped, Pester 166 passed / 8 skipped (E2E is Windows only), ruff and PSScriptAnalyzer clean. Waiting on CI, including the Windows job.
+- 2026-10-04 7:20 PM ET: CI green, including the Windows job (Pester on PowerShell 5.1 and 7, real install, coexistence with another LiteLLM, uninstall).
+- 2026-10-04 7:28 PM ET: Alex asked for a TinyFish key prompt. Spec updated and red tests committed (`166ad6e`): pytest 4 failed, Pester 66 failed.
+- 2026-10-04 7:40 PM ET: TinyFish key implemented; locally pytest 280 passed / 7 skipped, Pester 235 passed / 8 skipped (E2E).

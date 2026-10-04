@@ -1193,7 +1193,7 @@ function Invoke-NonInteractive {
 function Get-CclLaunchConfig {
   # The resolved configuration (docs/specs/windows-package.md). Read only.
   $roots = @(@($Root, $SecondaryRoot) | Where-Object { $_ })
-  $envFiles = $(if ($Packaged) { @($InferHubEnvFile, $LocalEnvFile) } else { @($DesktopEnvFile, $InferHubEnvFile, $LocalEnvFile) })
+  $envFiles = $(if ($Packaged) { @($InferHubEnvFile, (Join-Path $CclHome "secrets\tinyfish.env"), $LocalEnvFile) } else { @($DesktopEnvFile, $InferHubEnvFile, $LocalEnvFile) })
   return [ordered]@{
     Packaged = [bool]$Packaged
     Home = $CclHome

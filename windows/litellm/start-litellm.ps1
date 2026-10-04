@@ -47,6 +47,7 @@ $LogDir = Join-Path $LiteLLMRoot 'logs'
 # overwrites the live proxy's litellm.pid (stop-litellm.ps1 reads that file).
 $LogTag = if ($Port -eq 4000) { 'litellm' } else { "litellm-$Port" }
 $CclInstall = $null
+$TinyFishEnvFile = ''
 if ($CclHome) {
     $CclHome = [IO.Path]::GetFullPath($CclHome)
     $installJson = Join-Path $CclHome 'install.json'
@@ -57,6 +58,9 @@ if ($CclHome) {
     # One proxy per install, so the PID file name never depends on the port.
     $LogTag = 'litellm'
     $InferHubEnvFile = Join-Path $CclHome 'secrets\inferhub.env'
+    # Optional: the free TinyFish Search key (TINYFISH_API_KEY), which puts tinyfish
+    # first in the default web search chain.
+    $TinyFishEnvFile = Join-Path $CclHome 'secrets\tinyfish.env'
     $LocalEnvFile = Join-Path $CclHome 'state\local.env'
     $env:CCL_INSTANCE_ID = [string]$CclInstall.instance_id
 }
@@ -138,6 +142,9 @@ if ($DesktopEnvFile) {
 }
 if ($InferHubEnvFile -ne $DesktopEnvFile) {
     Import-DotEnvFile -Path $InferHubEnvFile -Label 'inferhub' -SkipCkff:$skip
+}
+if ($TinyFishEnvFile -and (Test-Path -LiteralPath $TinyFishEnvFile)) {
+    Import-DotEnvFile -Path $TinyFishEnvFile -Label 'tinyfish' -SkipCkff:$skip
 }
 # Per-PC settings (e.g. the web search chain). Optional, so no note when absent.
 if (Test-Path -LiteralPath $LocalEnvFile) {

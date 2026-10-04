@@ -1,12 +1,13 @@
 # claude-code-launcher: one-command Windows installer (issue #61).
 #
-# Sets up Claude Code with InferHub models through a local LiteLLM proxy. The only
-# thing you need is an InferHub API key. Run it in PowerShell:
+# Sets up Claude Code with InferHub models through a local LiteLLM proxy. You need an
+# InferHub API key, and a free TinyFish Search key is recommended for web search
+# (https://agent.tinyfish.ai/api-keys). Run it in PowerShell:
 #
 #   irm https://github.com/Pukujan/claude-code-launcher/releases/download/v1.0.0-windows/install.ps1 | iex
 #
 # or, to pass options, download it first and run
-#   powershell -ExecutionPolicy Bypass -File .\install.ps1 [-InferHubKey <key>] [-Uninstall] ...
+#   powershell -ExecutionPolicy Bypass -File .\install.ps1 [-InferHubKey <key>] [-TinyFishKey <key>] [-Uninstall] ...
 #
 # What it does: installs uv, git, Node with pnpm and Claude Code when they are
 # missing (official installers and winget), fetches the launcher files for its own
@@ -16,7 +17,7 @@
 # logon task, writes Claude Code's settings and leaves a `claude-inferhub` command.
 # The spec is docs/specs/windows-package.md in the repository.
 #
-# The key is never printed or logged. Prerequisites are never uninstalled.
+# The keys are never printed or logged. Prerequisites are never uninstalled.
 
 [CmdletBinding()]
 param(
@@ -27,6 +28,9 @@ param(
     [int]$StartPort = 4000,
     [switch]$Uninstall,
     [switch]$ChangeKey,
+    [string]$TinyFishKey = '',
+    [switch]$SkipTinyFish,
+    [switch]$ChangeTinyFishKey,
     [switch]$SkipPrereqs,
     [switch]$SkipVenv,
     [switch]$NoTask,
@@ -83,19 +87,19 @@ function Test-CclKeyShape {
 }
 
 function Read-CclSecret {
-    param([string]$Path)
+    param([string]$Path, [string]$Name = 'INFERHUB_API_KEY')
     if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return $null }
     foreach ($line in [IO.File]::ReadAllLines($Path)) {
-        if ($line -match '^INFERHUB_API_KEY=(.*)$') { return $Matches[1] }
+        if ($line.StartsWith($Name + '=')) { return $line.Substring($Name.Length + 1) }
     }
     return $null
 }
 
 function Write-CclSecret {
-    # secrets\inferhub.env: one line, UTF-8 without BOM. On Windows the folder is
-    # limited to the current user.
-    param([string]$Path, [string]$Key)
-    Write-CclUtf8 -Path $Path -Text ('INFERHUB_API_KEY=' + $Key + "`n")
+    # secrets\inferhub.env or secrets\tinyfish.env: one NAME=key line, UTF-8 without BOM.
+    # On Windows the folder is limited to the current user.
+    param([string]$Path, [string]$Key, [string]$Name = 'INFERHUB_API_KEY')
+    Write-CclUtf8 -Path $Path -Text ($Name + '=' + $Key + "`n")
     if ($script:CclOnWindows) {
         $dir = Split-Path -Parent $Path
         try { & icacls.exe $dir /inheritance:r /grant:r ("{0}:(OI)(CI)F" -f $env:USERNAME) 2>&1 | Out-Null } catch { }
@@ -105,6 +109,50 @@ function Write-CclSecret {
 function Read-CclKeyFromPrompt {
     $secure = Read-Host -AsSecureString 'InferHub API key (typing is hidden)'
     return [Net.NetworkCredential]::new('', $secure).Password
+}
+
+function Read-CclTinyFishKeyFromPrompt {
+    Write-Information '' -InformationAction Continue
+    Write-Information 'Web search works best with a TinyFish Search key. It is free, no card needed:' -InformationAction Continue
+    Write-Information '  sign up at https://agent.tinyfish.ai/sign-up, then create a key at https://agent.tinyfish.ai/api-keys' -InformationAction Continue
+    $secure = Read-Host -AsSecureString 'TinyFish API key (typing is hidden; press Enter to skip)'
+    return [Net.NetworkCredential]::new('', $secure).Password
+}
+
+function Resolve-CclTinyFishKey {
+    # -TinyFishKey, then CCL_TINYFISH_KEY, then TINYFISH_API_KEY, then the stored key, then
+    # the prompt (not with -Skip or -NonInteractive). $null means skipped; never an error.
+    param(
+        [string]$Flag,
+        [System.Collections.IDictionary]$Environment = @{},
+        [string]$StoredPath,
+        [scriptblock]$Prompt = { Read-CclTinyFishKeyFromPrompt },
+        [switch]$NonInteractive,
+        [switch]$Skip
+    )
+    if ($null -eq $Environment) { $Environment = @{} }
+    $found = $null
+    foreach ($c in @($Flag, $Environment['CCL_TINYFISH_KEY'], $Environment['TINYFISH_API_KEY'])) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$c)) { $found = [string]$c; break }
+    }
+    if ($null -eq $found) {
+        $stored = Read-CclSecret -Path $StoredPath -Name 'TINYFISH_API_KEY'
+        if (-not [string]::IsNullOrWhiteSpace($stored)) { $found = $stored }
+    }
+    if ($null -eq $found) {
+        if ($NonInteractive -or $Skip) { return $null }
+        $found = [string](& $Prompt)
+        if ([string]::IsNullOrWhiteSpace($found)) { return $null }
+    }
+    if (-not (Test-CclKeyShape -Key $found)) {
+        throw 'CCL_BAD_KEY: that TinyFish key has a line break, quote or NUL in it, or is too long.'
+    }
+    return $found.Trim()
+}
+
+function Write-CclNoTinyFishWarning {
+    Write-CclLog ('No TinyFish key, so web search uses only DuckDuckGo and You.com, which can be unreliable. ' +
+        'Get a free key at https://agent.tinyfish.ai/api-keys and add it with: claude-inferhub --set-tinyfish-key') 'warn'
 }
 
 function Resolve-CclInferHubKey {
@@ -242,6 +290,7 @@ function Get-CclShimText {
         'setlocal'
         ('set "CCL_HOME=' + $d + '"')
         ('if /i "%~1"=="--set-key" ( ' + $ps + ' "%CCL_HOME%\app\windows\install.ps1" -InstallDir "%CCL_HOME%" -ChangeKey & exit /b )')
+        ('if /i "%~1"=="--set-tinyfish-key" ( ' + $ps + ' "%CCL_HOME%\app\windows\install.ps1" -InstallDir "%CCL_HOME%" -ChangeTinyFishKey & exit /b )')
         ('if /i "%~1"=="--uninstall" ( ' + $ps + ' "%CCL_HOME%\app\windows\install.ps1" -InstallDir "%CCL_HOME%" -Uninstall & exit /b )')
         ($ps + ' "%CCL_HOME%\app\windows\launch-claude-inferhub.ps1" %* & exit /b')
     ) -join "`r`n"
@@ -638,14 +687,44 @@ function Invoke-CclChangeKey {
     } catch { Write-CclLog $_.Exception.Message 'warn'; return (Get-CclKeyErrorCode $_) }
     Write-CclSecret -Path (Join-Path $InstallDir 'secrets\inferhub.env') -Key $key
     Write-CclLog 'Saved the new InferHub key.'
-    if ((Get-CclPortState -Port ([int]$state.port) -InstanceId $state.instance_id) -eq 'ours') {
+    Restart-CclProxyIfOurs -InstallDir $InstallDir -State $state
+    return 0
+}
+
+function Restart-CclProxyIfOurs {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Internal helper of a non-interactive installer; -WhatIf is not offered.')]
+    param([string]$InstallDir, $State)
+    if ((Get-CclPortState -Port ([int]$State.port) -InstanceId $State.instance_id) -eq 'ours') {
         Write-CclLog 'Restarting the proxy so it picks the new key up ...'
         Stop-CclProxy -InstallDir $InstallDir
         Start-Sleep -Seconds 2
-        if (-not (Start-CclProxy -InstallDir $InstallDir -Port ([int]$state.port) -InstanceId $state.instance_id)) {
+        if (-not (Start-CclProxy -InstallDir $InstallDir -Port ([int]$State.port) -InstanceId $State.instance_id)) {
             Write-CclLog "The proxy didn't come back; claude-inferhub will start it." 'warn'
         }
     }
+}
+
+function Invoke-CclChangeTinyFishKey {
+    # Replace the stored TinyFish key; an empty answer removes it. The stored key is not
+    # offered back, so the prompt always asks.
+    param([string]$InstallDir, [string]$TinyFishKey, [System.Collections.IDictionary]$Environment, [scriptblock]$TinyFishPrompt, [switch]$NonInteractive)
+    $state = Read-CclInstallState -InstallDir $InstallDir
+    if (-not $state) { Write-CclLog "No install at $InstallDir; run the installer first." 'warn'; return 2 }
+    try {
+        $key = Resolve-CclTinyFishKey -Flag $TinyFishKey -Environment $Environment -StoredPath '' -Prompt $TinyFishPrompt -NonInteractive:$NonInteractive
+    } catch { Write-CclLog $_.Exception.Message 'warn'; return 2 }
+    $path = Join-Path $InstallDir 'secrets\tinyfish.env'
+    if ($key) {
+        Write-CclSecret -Path $path -Key $key -Name 'TINYFISH_API_KEY'
+        Write-CclLog 'Saved the new TinyFish key.'
+    } elseif ($NonInteractive) {
+        Write-CclLog 'No TinyFish key given; the stored one (if any) is unchanged.' 'warn'
+        return 4
+    } else {
+        if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force; Write-CclLog 'Removed the TinyFish key.' }
+        Write-CclNoTinyFishWarning
+    }
+    Restart-CclProxyIfOurs -InstallDir $InstallDir -State $state
     return 0
 }
 
@@ -658,6 +737,9 @@ function Invoke-CclInstall {
         [int]$StartPort = 4000,
         [switch]$Uninstall,
         [switch]$ChangeKey,
+        [string]$TinyFishKey = '',
+        [switch]$SkipTinyFish,
+        [switch]$ChangeTinyFishKey,
         [switch]$SkipPrereqs,
         [switch]$SkipVenv,
         [switch]$NoTask,
@@ -665,10 +747,14 @@ function Invoke-CclInstall {
         [switch]$NoStart,
         [switch]$NonInteractive,
         [System.Collections.IDictionary]$Environment = $null,
-        [scriptblock]$KeyPrompt = { Read-CclKeyFromPrompt }
+        [scriptblock]$KeyPrompt = { Read-CclKeyFromPrompt },
+        [scriptblock]$TinyFishPrompt = { Read-CclTinyFishKeyFromPrompt }
     )
     if ($null -eq $Environment) {
-        $Environment = @{ CCL_INFERHUB_KEY = $env:CCL_INFERHUB_KEY; INFERHUB_API_KEY = $env:INFERHUB_API_KEY }
+        $Environment = @{
+            CCL_INFERHUB_KEY = $env:CCL_INFERHUB_KEY; INFERHUB_API_KEY = $env:INFERHUB_API_KEY
+            CCL_TINYFISH_KEY = $env:CCL_TINYFISH_KEY; TINYFISH_API_KEY = $env:TINYFISH_API_KEY
+        }
     }
     $InstallDir = Resolve-CclInstallDir -InstallDir $InstallDir
     $script:CclLogFile = $null
@@ -676,12 +762,17 @@ function Invoke-CclInstall {
     if ($ChangeKey) {
         return (Invoke-CclChangeKey -InstallDir $InstallDir -InferHubKey $InferHubKey -Environment $Environment -KeyPrompt $KeyPrompt -NonInteractive:$NonInteractive)
     }
+    if ($ChangeTinyFishKey) {
+        return (Invoke-CclChangeTinyFishKey -InstallDir $InstallDir -TinyFishKey $TinyFishKey -Environment $Environment -TinyFishPrompt $TinyFishPrompt -NonInteractive:$NonInteractive)
+    }
     if ($StartPort -lt 1024 -or $StartPort -gt 65000) { Write-CclLog 'StartPort must be between 1024 and 65000.' 'warn'; return 2 }
 
-    # 1. The key, before anything changes on disk.
+    # 1. The keys, before anything changes on disk.
     $secretPath = Join-Path $InstallDir 'secrets\inferhub.env'
+    $tinyFishPath = Join-Path $InstallDir 'secrets\tinyfish.env'
     try {
         $key = Resolve-CclInferHubKey -Flag $InferHubKey -Environment $Environment -StoredPath $secretPath -Prompt $KeyPrompt -NonInteractive:$NonInteractive
+        $tinyFish = Resolve-CclTinyFishKey -Flag $TinyFishKey -Environment $Environment -StoredPath $tinyFishPath -Prompt $TinyFishPrompt -NonInteractive:$NonInteractive -Skip:$SkipTinyFish
     } catch { Write-CclLog $_.Exception.Message 'warn'; return (Get-CclKeyErrorCode $_) }
 
     # 2. Prerequisites.
@@ -699,6 +790,12 @@ function Invoke-CclInstall {
     catch { Write-CclLog $_.Exception.Message 'warn'; return 5 }
     Write-CclSecret -Path $secretPath -Key $key
     Write-CclLog 'InferHub key saved for this user.'
+    if ($tinyFish) {
+        Write-CclSecret -Path $tinyFishPath -Key $tinyFish -Name 'TINYFISH_API_KEY'
+        Write-CclLog 'TinyFish key saved for this user.'
+    } else {
+        Write-CclNoTinyFishWarning
+    }
 
     # 4. The LiteLLM venv.
     if (-not $SkipVenv) {
@@ -746,7 +843,8 @@ function Invoke-CclInstall {
 if ($env:CCL_INSTALL_LIBRARY_ONLY -eq '1') { return }
 $cclArgs = @{
     InferHubKey = $InferHubKey; InstallDir = $InstallDir; Ref = $Ref; Source = $Source; StartPort = $StartPort
-    Uninstall = $Uninstall; ChangeKey = $ChangeKey; SkipPrereqs = $SkipPrereqs; SkipVenv = $SkipVenv; NoTask = $NoTask
+    Uninstall = $Uninstall; ChangeKey = $ChangeKey; TinyFishKey = $TinyFishKey; SkipTinyFish = $SkipTinyFish
+    ChangeTinyFishKey = $ChangeTinyFishKey; SkipPrereqs = $SkipPrereqs; SkipVenv = $SkipVenv; NoTask = $NoTask
     NoPath = $NoPath; NoStart = $NoStart; NonInteractive = $NonInteractive
 }
 $cclCode = Invoke-CclInstall @cclArgs

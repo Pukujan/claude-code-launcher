@@ -15,6 +15,7 @@ Describe 'Windows install end to end' -Tag 'E2E' -Skip:(-not $script:OnWindows) 
         New-Item -ItemType Directory -Force -Path $ClaudeDir | Out-Null
         $env:CLAUDE_CONFIG_DIR = $ClaudeDir
         $script:Key = 'ih-e2e-' + [guid]::NewGuid().ToString('N')
+        $script:TfKey = 'tf-e2e-' + [guid]::NewGuid().ToString('N')
         $script:StartPort = 47400
         # The "other LiteLLM": answers /health/liveliness on the start port, no identity.
         $script:Other = [Net.HttpListener]::new()
@@ -32,7 +33,7 @@ Describe 'Windows install end to end' -Tag 'E2E' -Skip:(-not $script:OnWindows) 
         }).AddArgument($Other)
         $script:OtherHandle = $OtherPs.BeginInvoke()
         $script:Log = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Installer -Source $Repo -InstallDir $InstallDir `
-            -InferHubKey $Key -StartPort $StartPort -SkipPrereqs -NoPath -NonInteractive *>&1 | Out-String
+            -InferHubKey $Key -TinyFishKey $TfKey -StartPort $StartPort -SkipPrereqs -NoPath -NonInteractive *>&1 | Out-String
         $script:InstallExit = $LASTEXITCODE
         Write-Host $Log
     }
@@ -46,6 +47,11 @@ Describe 'Windows install end to end' -Tag 'E2E' -Skip:(-not $script:OnWindows) 
 
     It 'installs with exit 0' { $InstallExit | Should -Be 0 }
     It 'never prints the key' { $Log | Should -Not -BeLike "*$Key*" }
+    It 'stores the TinyFish key without printing it' {
+        $Log | Should -Not -BeLike "*$TfKey*"
+        (Get-Content (Join-Path $InstallDir 'secrets\tinyfish.env') -Raw) | Should -Be "TINYFISH_API_KEY=$TfKey`n"
+        Get-Content (Join-Path $InstallDir 'logs\*.log') -Raw -ErrorAction SilentlyContinue | Should -Not -BeLike "*$TfKey*"
+    }
     It 'skips the port held by the other LiteLLM' {
         $port = (Get-Content (Join-Path $InstallDir 'install.json') -Raw | ConvertFrom-Json).port
         $port | Should -Not -Be $StartPort
