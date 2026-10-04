@@ -1043,7 +1043,7 @@ general_settings:
 litellm_settings:
   drop_params: true
   num_retries: 3
-  request_timeout: 120
+  request_timeout: 600
   telemetry: false
 router_settings:
   enable_pre_call_checks: true

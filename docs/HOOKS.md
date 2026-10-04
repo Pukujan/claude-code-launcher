@@ -58,3 +58,12 @@ right after each seat is picked, and once more after the last seat apply. See
   back nothing. `shared/litellm/fast_min_tokens.py` raises `max_tokens` to 4096
   for the fast aliases only. `CCL_FAST_MIN_MAX_TOKENS` changes the floor (0
   turns it off).
+- **Request fixes.** `shared/litellm/request_fixes.py` does three small things.
+  A `claude-*` id the proxy does not serve (for example `claude-opus-4-8`), or
+  any unknown name ending in `[1m]`, goes to the `main` seat and its fallbacks
+  instead of failing with "model not found"; names the proxy serves keep their
+  routing. An assistant `tool_use` with no `tool_result` in the next user
+  message gets a placeholder result ("Tool call was rejected or not run."), so
+  strict backends such as DeepSeek don't answer 400. A non-streaming reply with
+  no text and no tool call raises a retryable 500, so retries and fallbacks
+  take over; streaming replies are not checked.
