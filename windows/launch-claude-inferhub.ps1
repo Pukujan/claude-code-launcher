@@ -667,7 +667,7 @@ function Invoke-UltraCodeStep {
     $title = "Step 9: UltraCode ORCHESTRATOR (runs the main loop)."
     $dflt = "claude-ih-main"
   }
-  $lines = @(foreach ($c in $choices) { if ($c.Id) { "{0,-58} {1}" -f $c.Label, $c.Id } else { $c.Label } })
+  $lines = @($choices | ForEach-Object { $_.Label })
   $help = @("Up/Down move. Enter picks. Left = previous step, Right = next step (keeps the highlighted pick). Esc quits.",
             "Orchestrator = the main loop, worker = every parallel sub-agent. Everything goes through the local LiteLLM; CKFF is never offered.")
   $want = Get-StartPick -S $S -Last $Last -Slot $Slot -Choices $choices -Default $dflt

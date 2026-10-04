@@ -698,7 +698,7 @@ pick_launch() {
   LAUNCH="${CLAUDE_IH_LAUNCH:-}"
   if [ -n "$LAUNCH" ] || [ ! -t 0 ] || ! _have_tty; then LAUNCH="${LAUNCH:-claude}"; return 0; fi
   grep -q '"launch": *"ultracode"' "$LAST_PICKS" 2>/dev/null && idx=1
-  PICKER_LINES=("Claude Code" "UltraCode (the ultracode command, through the proxy)")
+  PICKER_LINES=("Claude Code" "UltraCode (pick an orchestrator and a worker after the models)")
   while :; do
     show_picker 2 "$idx" "Launch with" "Up/Down move. Enter launches. Left = back to the folder. Esc quits."
     key="$(read_menu_key)"
@@ -710,14 +710,24 @@ pick_launch() {
     esac
   done
   if [ "$idx" -eq 1 ]; then LAUNCH=ultracode; else LAUNCH=claude; fi
-  mkdir -p "$STATE_DIR" && printf '{\n  "launch": "%s"\n}\n' "$LAUNCH" > "$LAST_PICKS"
+  save_last_picks
 }
 
-# OnlyTerp/UltraCode-Shim (MIT, standard-library Python) provides the `ultracode`
-# command. Fetched on demand at a pinned commit into a per-user cache (never
-# vendored here) and installed from there with its install.sh.
+# OnlyTerp/UltraCode-Shim (MIT, standard-library Python) runs Claude Code with
+# two models: the ORCHESTRATOR (the main loop) and the WORKER (every parallel
+# sub-agent and background call). Fetched on demand at a pinned commit into a
+# per-user cache (never vendored here) and run from there with its own
+# bin/ultracode. The global `ultracode` command is never installed or changed.
+# shared/ultracode/uc_models.py writes the cache's config.json (the InferHub
+# seats, UltraCode's own usable options without CKFF, and the IRE Top 20, all
+# through LiteLLM) and preselects the orchestrator/worker pick.
 UC_COMMIT="1870e58e2622c8946c9c7cd45483aa47d7bd5867"
 UC_DIR="$HOME/.cache/claude-code-launcher/ultracode-shim"
+# The shim keeps its selection.json here (bin/ultracode's state folder).
+UC_STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/ultracode-shim"
+# The shim's own proxy port: 4241 + the LiteLLM port (8241 for 4000). Not the
+# shim's default 8141, so a standalone ultracode on that port is never reused.
+UC_PORT=$((LITELLM_PORT + 4241))
 
 ensure_ultracode() {
   [ -f "$UC_DIR/proxy.py" ] && [ "$(cat "$UC_DIR/.commit" 2>/dev/null)" = "$UC_COMMIT" ] && return 0
@@ -732,46 +742,118 @@ ensure_ultracode() {
   rm -rf "$tmp"
 }
 
-# Makes `ultracode` a real command that points at the pinned checkout, using
-# the shim's own install.sh (self-test, then ~/.local/bin/ultracode). Sets UC_CMD.
-install_ultracode() {
-  local c
-  for c in "$(command -v ultracode 2>/dev/null)" "$HOME/.local/bin/ultracode"; do
-    [ -n "$c" ] && grep -qF "$UC_DIR/bin/ultracode" "$c" 2>/dev/null && { UC_CMD="$c"; return 0; }
-  done
-  log "Installing the ultracode command (UltraCode-Shim install.sh) ..."
-  bash "$UC_DIR/install.sh" >> "$LOG_FILE" 2>&1 || die "UltraCode-Shim install.sh failed; see $LOG_FILE"
-  UC_CMD="$HOME/.local/bin/ultracode"
-  [ -x "$UC_CMD" ] || die "install.sh did not create $UC_CMD"
+# shared/ultracode/uc_models.py with uv (stdlib only, no project).
+uc_models() {
+  uv run --no-project python "$REPO_ROOT/shared/ultracode/uc_models.py" "$@"
 }
 
-# Runs the real `ultracode` command in the chosen folder with --model <seat
-# alias>. Its config.json lists claude-main and claude-worker (both the seat
-# alias on the keyless proxy) for /model, and the upstream is the proxy too, so
-# the seat, the tier pins, the advisor and count_tokens never reach
-# api.anthropic.com. The shim's own proxy listens on 4141 + the LiteLLM port.
-run_ultracode() {
-  local port=$((LITELLM_PORT + 4141)) state="${XDG_STATE_HOME:-$HOME/.local/state}/ultracode-shim"
-  ensure_ultracode
-  cat > "$UC_DIR/config.json" <<EOF
-{
-  "proxy": {"listen_port": $port, "anthropic_upstream": "$PROXY_BASE"},
-  "models": [{"id": "claude-main", "display_name": "Main seat ($SEAT_ALIAS)"},
-             {"id": "claude-worker", "display_name": "Worker ($SEAT_ALIAS)"}],
-  "routes": {
-    "claude-main": {"upstream": "$PROXY_BASE", "model": "$SEAT_ALIAS"},
-    "claude-worker": {"upstream": "$PROXY_BASE", "model": "$SEAT_ALIAS"}
-  }
+# last_pick KEY: a value from last-picks.json ("" when missing).
+last_pick() {
+  sed -n "s/.*\"$1\": *\"\([^\"]*\)\".*/\1/p" "$LAST_PICKS" 2>/dev/null | head -1
 }
-EOF
-  # Start with no orchestrator/worker pick; a leftover one would reroute the seat.
-  mkdir -p "$state" && printf '{"orch": null, "worker": null, "worker_explicit": false}\n' > "$state/selection.json"
-  install_ultracode
-  export UC_UPSTREAM="$PROXY_BASE" UC_SELECTOR=0   # our pickers already chose the seats
-  unset UC_LISTEN_PORT
-  log "ultracode=$UC_CMD (shim http://127.0.0.1:$port -> $PROXY_BASE)"
+
+# Writes last-picks.json: the launch target and the UltraCode picks (kept from
+# last time when this run didn't make them).
+save_last_picks() {
+  local orch="${UC_ORCH-$(last_pick uc_orch)}" worker="${UC_WORKER-$(last_pick uc_worker)}"
+  mkdir -p "$STATE_DIR" && printf '{\n  "launch": "%s",\n  "uc_orch": "%s",\n  "uc_worker": "%s"\n}\n' \
+    "$LAUNCH" "$orch" "$worker" > "$LAST_PICKS"
+}
+
+# Writes the cache's config.json and the choices (id<TAB>label) to UC_LIST.
+uc_build_choices() {
+  local top
+  ensure_ultracode
+  top="$(mktemp)" || die "mktemp failed"
+  printf '%s\n' "$MODELS" > "$top"
+  mkdir -p "$STATE_DIR" || die "cannot create $STATE_DIR"
+  UC_LIST="$STATE_DIR/ultracode-choices.tsv"
+  uc_models build --example "$UC_DIR/config.example.json" --top20 "$top" --proxy-base "$PROXY_BASE" \
+    --port "$UC_PORT" --main-name "${MAIN_NAME:-}" --advisor-name "${ADVISOR_NAME:-}" \
+    --config-out "$UC_DIR/config.json" --list-out "$UC_LIST" 2>> "$LOG_FILE" \
+    || { rm -f "$top"; die "uc_models.py build failed; see $LOG_FILE"; }
+  rm -f "$top"
+}
+
+uc_listed() {  # uc_listed ID: is ID one of the choices?
+  cut -f1 "$UC_LIST" | grep -qxF "$1"
+}
+
+# uc_pick orch|worker: one arrow-key list. Sets UC_PICK ("" = same as the
+# orchestrator). Returns 1 for Left.
+uc_pick() {
+  local slot="$1" idx=0 key i id label want title tab
+  tab="$(printf '\t')"
+  UC_IDS=(); PICKER_LINES=()
+  if [ "$slot" = "worker" ]; then
+    UC_IDS[0]=""; PICKER_LINES[0]="Same as orchestrator"
+    if [ -n "${UC_WORKER+set}" ]; then want="$UC_WORKER"; else want="$(last_pick uc_worker)"; fi
+    title="UltraCode WORKER (runs every parallel sub-agent and background call)"
+  else
+    want="${UC_ORCH:-$(last_pick uc_orch)}"; want="${want:-claude-ih-main}"
+    title="UltraCode ORCHESTRATOR (runs the main loop)"
+  fi
+  while IFS="$tab" read -r id label; do
+    [ -n "$id" ] || continue
+    i=${#UC_IDS[@]}
+    UC_IDS[i]="$id"; PICKER_LINES[i]="$label"
+  done < "$UC_LIST"
+  i=0
+  while [ "$i" -lt "${#UC_IDS[@]}" ]; do
+    [ "${UC_IDS[$i]}" = "$want" ] && { idx=$i; break; }
+    i=$((i + 1))
+  done
+  while :; do
+    show_picker "${#UC_IDS[@]}" "$idx" "$title" \
+      "Up/Down move. Enter picks. Left = back. Esc quits." \
+      "Orchestrator = the main loop, worker = every parallel sub-agent. All through the local LiteLLM; CKFF is never offered."
+    key="$(read_menu_key)"
+    case "$key" in
+      UP|DOWN|PGUP|PGDN|HOME|END) idx="$(move_index "$idx" "${#UC_IDS[@]}" "$key" 10)" ;;
+      ENTER|RIGHT) break ;;
+      LEFT) return 1 ;;
+      ESC) die "Cancelled." ;;
+    esac
+  done
+  UC_PICK="${UC_IDS[$idx]}"
+}
+
+# After "launch with" = UltraCode: pick the orchestrator and the worker. With
+# no terminal, or CLAUDE_IH_UC_ORCH set, use CLAUDE_IH_UC_ORCH /
+# CLAUDE_IH_UC_WORKER, else last time's picks, else the main seat for both.
+pick_ultracode() {
+  uc_build_choices
+  if [ -n "${CLAUDE_IH_UC_ORCH:-}" ] || [ ! -t 0 ] || ! _have_tty; then
+    UC_ORCH="${CLAUDE_IH_UC_ORCH:-$(last_pick uc_orch)}"
+    UC_ORCH="${UC_ORCH:-claude-ih-main}"
+    if [ -n "${CLAUDE_IH_UC_WORKER+set}" ]; then UC_WORKER="$CLAUDE_IH_UC_WORKER"; else UC_WORKER="$(last_pick uc_worker)"; fi
+    uc_listed "$UC_ORCH" || die "UltraCode orchestrator $UC_ORCH is not one of the choices (see $UC_LIST)"
+    [ -z "$UC_WORKER" ] || uc_listed "$UC_WORKER" || die "UltraCode worker $UC_WORKER is not one of the choices (see $UC_LIST)"
+  else
+    while :; do
+      uc_pick orch || continue   # nothing before this step to go back to
+      UC_ORCH="$UC_PICK"
+      if uc_pick worker; then UC_WORKER="$UC_PICK"; break; fi
+    done
+  fi
+  save_last_picks
+}
+
+# Preselects the pick (POST /uc/select when a shim with this config already
+# runs, else the shim's selection.json, read when its proxy starts), then runs
+# the cache's own bin/ultracode in the chosen folder with the shim's picker off
+# and --model <orchestrator>. The shim starts, reuses and stops its own proxy;
+# its upstream is the local LiteLLM, so nothing goes to api.anthropic.com.
+run_ultracode() {
+  local port
+  port="$(uc_models preselect --config "$UC_DIR/config.json" --state-file "$UC_STATE_DIR/selection.json" \
+    --orch "$UC_ORCH" --worker "${UC_WORKER:-}" 2>> "$LOG_FILE")" || die "uc_models.py preselect failed; see $LOG_FILE"
+  unset UC_LISTEN_PORT UC_UPSTREAM   # config.json decides both
+  export UC_SELECTOR=0               # our pickers replace the shim's own
+  log "ultracode=$UC_DIR/bin/ultracode (shim http://127.0.0.1:$port -> $PROXY_BASE)"
+  log "orchestrator=$UC_ORCH worker=${UC_WORKER:-(same as orchestrator)}"
   log "Starting UltraCode..."
-  exec "$UC_CMD" --model "$SEAT_ALIAS" --permission-mode bypassPermissions
+  exec "$UC_DIR/bin/ultracode" --model "$UC_ORCH" --permission-mode bypassPermissions
 }
 
 # ---- fallback ladders (issue #5) ----------------------------------------------
@@ -903,6 +985,9 @@ main() {
   pick_ladder main "$MAIN_ID"
   pick_advisor
   pick_ladder advisor "$ADVISOR_ID"
+  if [ "$LAUNCH" = "ultracode" ]; then
+    pick_ultracode
+  fi
 
   apply_seat
   # After apply_seat: its merge step reloads the stock chains, so the picked

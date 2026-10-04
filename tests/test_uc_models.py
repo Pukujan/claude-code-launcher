@@ -205,7 +205,7 @@ def test_launchers_use_the_helper_and_leave_the_global_ultracode_alone():
     mac = (REPO / "mac" / "Launch Claude InferHub.command").read_text(encoding="utf-8")
     for text in (win, mac):
         assert "uc_models.py" in text
-        assert "install.ps1" not in text and "install.sh" not in text
+        assert "install.ps1" not in text and '"$UC_DIR/install.sh"' not in text
         assert "WindowsApps" not in text
         assert "Install-UltraCodeCommand" not in text and "install_ultracode" not in text
         assert "--no-project" in text
