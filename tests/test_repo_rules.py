@@ -20,7 +20,8 @@ def test_only_env_example_is_tracked():
 def test_every_copied_file_has_a_commit_in_sources():
     for path in ("windows/launch-claude-inferhub.ps1", "windows/litellm/start-litellm.ps1",
                  "windows/litellm/stop-litellm.ps1", "mac/Launch Claude InferHub.command",
-                 "mac/tests/dry_run.sh", "shared/litellm/sitecustomize.py",
+                 "mac/tests/dry_run.sh", "mac/lib/nav.sh", "mac/setup.sh", "mac/tests/unit_tests.sh",
+                 "shared/litellm/sitecustomize.py",
                  "shared/litellm/config/config.yaml", "shared/litellm/config/inferhub_fallbacks.yaml",
                  "shared/litellm/scripts/apply_inferhub_seat.py",
                  "shared/litellm/scripts/merge_litellm_config.py",
@@ -70,3 +71,11 @@ def test_tests_never_use_port_4000():
     for p in (REPO / "tests").glob("*.py"):
         assert "127.0.0.1:4000" not in p.read_text(encoding="utf-8") or p.name == "test_repo_rules.py"
     assert 'PORT" = "4000" ] && { echo "refusing' in (REPO / "mac/tests/dry_run.sh").read_text()
+
+
+def test_one_mac_launcher():
+    assert not (REPO / "macos").exists()
+    assert not (REPO / ".github" / "workflows" / "macos-shim.yml").exists()
+    ci = (REPO / ".github" / "workflows" / "launcher-ci.yml").read_text(encoding="utf-8")
+    assert "name: bash 3.2 compatibility" in ci
+    assert "paths:" not in ci  # every PR must report every required check

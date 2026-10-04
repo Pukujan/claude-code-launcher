@@ -23,6 +23,39 @@ Windows as it stands today is [docs/PARITY.md](../docs/PARITY.md).
 - `tests/dry_run.sh` copies this checkout instead of cloning the workbench,
   asserts the keyless and loopback behaviour, and stops its test proxy by PID.
 
+## What changed when `macos/` was folded in (issue #11)
+
+There used to be a second Mac launcher in `macos/` (PR #7). Its useful parts
+are now here, and the folder is gone. `SOURCES.md` lists exactly what came over
+and what didn't.
+
+- `mac/setup.sh` is the one-script installer: install, `--check`,
+  `--uninstall`, and a `claude-acs` command in `~/.local/bin` that runs this
+  checkout's launcher. It runs the launcher with `CLAUDE_IH_SETUP_ONLY=1`, so
+  both paths install the same way.
+- The folder picker keeps its numbered list (the dry run pipes answers into
+  it), and adds `b` (arrow-key browser in the terminal), `q` (quick picks), `t`
+  (type a path), `n` (new folder) and recent folders. The Finder dialog is
+  gone. The functions live in `mac/lib/nav.sh`. `x` quits the folder picker
+  now, because `q` means quick picks there.
+- The model table comes from `shared/ire/ire_fetch.py` when it answers (live,
+  else its cache, else its built-in defaults). The launcher's own `MODELS` is
+  the last resort. The fetched Top 20 is also written to
+  `shared/litellm/config/top20.csv`, and `inferhub_top20.yaml` is rebuilt when
+  that file changes. The optional IRE frontier list rides in the
+  same `ire.json` (`CCL_IRE_JSON`) under its `frontier` key; `f` at the model
+  prompts picks from it through `shared/ladder/ladder_cli.py primary`.
+- `ANTHROPIC_SMALL_FAST_MODEL` is `small-fast`, the fast seat alias
+  (`ali/qwen3.8-flash` by default), as on Windows.
+- With no master key, the proxy process gets
+  `LITELLM_DANGEROUSLY_PERMIT_WEAK_OR_UNSET_MASTER_KEY=true`. LiteLLM 1.104
+  needs it to start keyless. The pinned 1.103.0 doesn't, but the flag costs
+  nothing and only the proxy sees it.
+- `mac/stop-litellm.sh` stops the proxy by the PID in `litellm.pid`, and only
+  if that PID is this checkout's LiteLLM.
+- The launcher can be sourced without running (`tests/unit_tests.sh` does
+  that), and it logs the bash version it runs under.
+
 The rest of this file is the ACS record and still talks about the workbench
 checkout. Read "workbench" as `shared/litellm/`.
 
@@ -90,7 +123,8 @@ follow-up and is not part of this module.
   - `ANTHROPIC_API_KEY` is the LiteLLM master key
   - `ANTHROPIC_BASE_URL` is `http://127.0.0.1:4000`
   - `ANTHROPIC_MODEL` is `sonnet`
-  - `ANTHROPIC_SMALL_FAST_MODEL` is `ih/ali/qwen3.8-flash`
+  - `ANTHROPIC_SMALL_FAST_MODEL` is `ih/ali/qwen3.8-flash` (now `small-fast`,
+    see the issue #11 section above)
 
   `ANTHROPIC_AUTH_TOKEN` is never set, and experimental betas stay on.
 - **Command.** `claude --model sonnet --permission-mode bypassPermissions`, run
