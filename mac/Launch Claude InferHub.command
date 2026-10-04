@@ -698,7 +698,7 @@ pick_launch() {
   LAUNCH="${CLAUDE_IH_LAUNCH:-}"
   if [ -n "$LAUNCH" ] || [ ! -t 0 ] || ! _have_tty; then LAUNCH="${LAUNCH:-claude}"; return 0; fi
   grep -q '"launch": *"ultracode"' "$LAST_PICKS" 2>/dev/null && idx=1
-  PICKER_LINES=("Claude Code" "UltraCode (UltraCode-Shim in front of the proxy)")
+  PICKER_LINES=("Claude Code" "UltraCode (the ultracode command, through the proxy)")
   while :; do
     show_picker 2 "$idx" "Launch with" "Up/Down move. Enter launches. Left = back to the folder. Esc quits."
     key="$(read_menu_key)"
@@ -713,8 +713,9 @@ pick_launch() {
   mkdir -p "$STATE_DIR" && printf '{\n  "launch": "%s"\n}\n' "$LAUNCH" > "$LAST_PICKS"
 }
 
-# OnlyTerp/UltraCode-Shim (MIT, standard-library Python) in front of the proxy.
-# Fetched on demand at a pinned commit into a per-user cache, never vendored here.
+# OnlyTerp/UltraCode-Shim (MIT, standard-library Python) provides the `ultracode`
+# command. Fetched on demand at a pinned commit into a per-user cache (never
+# vendored here) and installed from there with its install.sh.
 UC_COMMIT="1870e58e2622c8946c9c7cd45483aa47d7bd5867"
 UC_DIR="$HOME/.cache/claude-code-launcher/ultracode-shim"
 
@@ -731,15 +732,30 @@ ensure_ultracode() {
   rm -rf "$tmp"
 }
 
-# Writes the shim's config.json (claude-main and claude-worker, both passed
-# through to the keyless proxy as the seat alias), starts proxy.py on a free
-# port from 4100 (never 4000). Sets UC_PID and UC_BASE.
-start_ultracode() {
-  local port=4100 i
+# Makes `ultracode` a real command that points at the pinned checkout, using
+# the shim's own install.sh (self-test, then ~/.local/bin/ultracode). Sets UC_CMD.
+install_ultracode() {
+  local c
+  for c in "$(command -v ultracode 2>/dev/null)" "$HOME/.local/bin/ultracode"; do
+    [ -n "$c" ] && grep -qF "$UC_DIR/bin/ultracode" "$c" 2>/dev/null && { UC_CMD="$c"; return 0; }
+  done
+  log "Installing the ultracode command (UltraCode-Shim install.sh) ..."
+  bash "$UC_DIR/install.sh" >> "$LOG_FILE" 2>&1 || die "UltraCode-Shim install.sh failed; see $LOG_FILE"
+  UC_CMD="$HOME/.local/bin/ultracode"
+  [ -x "$UC_CMD" ] || die "install.sh did not create $UC_CMD"
+}
+
+# Runs the real `ultracode` command in the chosen folder with --model <seat
+# alias>. Its config.json lists claude-main and claude-worker (both the seat
+# alias on the keyless proxy) for /model, and the upstream is the proxy too, so
+# the seat, the tier pins, the advisor and count_tokens never reach
+# api.anthropic.com. The shim's own proxy listens on 4141 + the LiteLLM port.
+run_ultracode() {
+  local port=$((LITELLM_PORT + 4141)) state="${XDG_STATE_HOME:-$HOME/.local/state}/ultracode-shim"
   ensure_ultracode
-  while (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; do port=$((port + 1)); done
   cat > "$UC_DIR/config.json" <<EOF
 {
+  "proxy": {"listen_port": $port, "anthropic_upstream": "$PROXY_BASE"},
   "models": [{"id": "claude-main", "display_name": "Main seat ($SEAT_ALIAS)"},
              {"id": "claude-worker", "display_name": "Worker ($SEAT_ALIAS)"}],
   "routes": {
@@ -748,18 +764,14 @@ start_ultracode() {
   }
 }
 EOF
-  # UC_UPSTREAM: count_tokens and anything unrouted go to the proxy, not api.anthropic.com.
-  UC_UPSTREAM="$PROXY_BASE" UC_SELECTOR=0 UC_CONFIG="$UC_DIR/config.json" UC_LISTEN_PORT="$port" \
-    uv run --no-project python "$UC_DIR/proxy.py" >> "$UC_DIR/shim.log" 2>&1 &
-  UC_PID=$!
-  UC_BASE="http://127.0.0.1:$port"
-  for i in $(seq 1 60); do
-    curl -fsS -m 2 -o /dev/null "$UC_BASE/healthz" 2>/dev/null && return 0
-    kill -0 "$UC_PID" 2>/dev/null || die "UltraCode-Shim exited early; see $UC_DIR/shim.log"
-    sleep 0.5
-  done
-  kill "$UC_PID" 2>/dev/null
-  die "UltraCode-Shim did not come up on $UC_BASE; see $UC_DIR/shim.log"
+  # Start with no orchestrator/worker pick; a leftover one would reroute the seat.
+  mkdir -p "$state" && printf '{"orch": null, "worker": null, "worker_explicit": false}\n' > "$state/selection.json"
+  install_ultracode
+  export UC_UPSTREAM="$PROXY_BASE" UC_SELECTOR=0   # our pickers already chose the seats
+  unset UC_LISTEN_PORT
+  log "ultracode=$UC_CMD (shim http://127.0.0.1:$port -> $PROXY_BASE)"
+  log "Starting UltraCode..."
+  exec "$UC_CMD" --model "$SEAT_ALIAS" --permission-mode bypassPermissions
 }
 
 # ---- fallback ladders (issue #5) ----------------------------------------------
@@ -933,13 +945,7 @@ main() {
   log "permission=bypassPermissions (auto mode is Anthropic-only)"
   log "betas=experimental ON (advisor_20260301 via LiteLLM orchestration)"
   if [ "$LAUNCH" = "ultracode" ]; then
-    start_ultracode
-    export ANTHROPIC_BASE_URL="$UC_BASE"
-    log "ultracode=$UC_BASE (UltraCode-Shim PID $UC_PID) -> $PROXY_BASE"
-    log "Starting Claude Code through UltraCode-Shim..."
-    trap 'kill "$UC_PID" 2>/dev/null' EXIT
-    claude --model claude-main --permission-mode bypassPermissions
-    exit $?
+    run_ultracode
   fi
   log "Starting Claude Code..."
   exec claude --model "$SEAT_ALIAS" --permission-mode bypassPermissions
