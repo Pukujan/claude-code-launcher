@@ -4,3 +4,5 @@
 # (uv --override on the Mac, a second pip install on Windows).
 litellm[proxy]==1.103.0
 PyYAML==6.0.3
+# Keyless web search for Claude Code's WebSearch (web_search.py).
+ddgs==9.16.0

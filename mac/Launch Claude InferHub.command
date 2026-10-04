@@ -251,7 +251,7 @@ ensure_venv() {
   fi
   if [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$REQUIREMENTS
 $OVERRIDES" ] \
-     && "$VENV_PY" -c "import litellm, yaml" >/dev/null 2>&1; then
+     && "$VENV_PY" -c "import litellm, yaml, ddgs" >/dev/null 2>&1; then
     return 0
   fi
   log "Installing pinned LiteLLM into $VENV ..."
@@ -261,7 +261,7 @@ $OVERRIDES" ] \
   printf '%s\n' "$OVERRIDES" > "$req.overrides"
   quiet uv pip install --python "$VENV_PY" -r "$req" --override "$req.overrides" \
     || die "LiteLLM install failed (details in the log). Check your network and run again."
-  "$VENV_PY" -c "import litellm, yaml" >/dev/null 2>&1 || die "LiteLLM installed but does not import"
+  "$VENV_PY" -c "import litellm, yaml, ddgs" >/dev/null 2>&1 || die "LiteLLM installed but does not import"
   printf '%s\n%s' "$REQUIREMENTS" "$OVERRIDES" > "$stamp"
 }
 

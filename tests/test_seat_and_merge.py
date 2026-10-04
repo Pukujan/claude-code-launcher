@@ -175,6 +175,16 @@ def test_merge_honors_ccl_retries_and_cooldown(tmp_path, monkeypatch):
     assert info["allowed_fails_policy"]["ServiceUnavailableErrorAllowedFails"] == 2
 
 
+def test_web_search_is_intercepted_without_overriding_config():
+    doc = merge.apply_web_search({"litellm_settings": {"drop_params": True}})
+    assert doc["litellm_settings"]["callbacks"] == ["websearch_interception"]
+    assert doc["litellm_settings"]["websearch_interception_params"] == {"enabled_providers": ["openai"]}
+    assert doc["search_tools"][0]["litellm_params"]["search_provider"] == "duckduckgo"
+    mine = [{"search_tool_name": "t", "litellm_params": {"search_provider": "tavily"}}]
+    doc = merge.apply_web_search({"search_tools": mine, "litellm_settings": {"callbacks": ["websearch_interception"]}})
+    assert doc["search_tools"] == mine and doc["litellm_settings"]["callbacks"] == ["websearch_interception"]
+
+
 def test_master_key_is_only_an_env_reference_when_set():
     assert merge.apply_master_key_setting({}, {"LITELLM_MASTER_KEY": "sk-x"}) == {
         "master_key": "os.environ/LITELLM_MASTER_KEY"}
