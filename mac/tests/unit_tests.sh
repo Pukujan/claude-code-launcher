@@ -91,6 +91,25 @@ check "ckff cleared" "${CKFF_API_KEY:-}${ckff_api_url:-}" ""
 check "oauth cleared" "${CLAUDE_CODE_OAUTH_TOKEN:-}" ""
 check "unrelated kept" "${SHIM_KEEP_ME:-}" "keep"
 
+echo "== claude.ai login check =="
+mock_status() {
+  printf '{\n  "loggedIn": %s,\n  "authMethod": "%s",\n  "apiProvider": "firstParty"\n}\n' "$1" "$2"
+  [ "$1" = true ]
+}
+# shellcheck disable=SC2329  # called by claude_ai_logged_in
+claude() { mock_status true claude.ai; }
+if claude_ai_logged_in; then ok "claude.ai login seen"; else bad "claude.ai login seen"; fi
+# shellcheck disable=SC2329  # called by claude_ai_logged_in
+claude() { mock_status false none; }
+if claude_ai_logged_in; then bad "logged out is not a login"; else ok "logged out is not a login"; fi
+# shellcheck disable=SC2329  # called by claude_ai_logged_in
+claude() { mock_status true api_key; }
+if claude_ai_logged_in; then bad "API key is not a claude.ai login"; else ok "API key is not a claude.ai login"; fi
+# shellcheck disable=SC2329  # called by claude_ai_logged_in
+claude() { echo "not json"; return 1; }
+if claude_ai_logged_in; then bad "broken claude is not a login"; else ok "broken claude is not a login"; fi
+unset -f claude
+
 echo "== folder helpers =="
 NAVDIR="$SCRATCH/nav"; NAVRECENTS="$NAVDIR/recent-folders"
 base="$SCRATCH/f"; mkdir -p "$base"
