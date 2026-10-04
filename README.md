@@ -61,7 +61,7 @@ InferHub seats you picked:
 | --- | --- |
 | `sonnet`, `main`, `claude-sonnet-5` | the main seat |
 | `opus`, `advisor`, `claude-opus-5-5`, `claude-fable-5` | the advisor seat, or main when the advisor is OFF |
-| `haiku`, `small-fast`, `claude-haiku-5` | the fast seat, `cb/deepseek-v4.1-flash` unless the seat file says otherwise, with its own fallback chain ending on `ali/qwen3.8-flash`. Both launchers point Claude Code's small, fast requests here. |
+| `haiku`, `small-fast`, `claude-haiku-5`, `claude-haiku-4-5-20251001` | the fast seat, `cb/deepseek-v4.1-flash` unless the seat file says otherwise, with its own fallback chain ending on `ali/qwen3.8-flash`. Both launchers point Claude Code's small, fast requests here. |
 | `ih/<model id>` | that InferHub model directly |
 
 If a seat fails, the proxy falls back along the chains in

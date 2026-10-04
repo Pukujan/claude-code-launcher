@@ -79,7 +79,7 @@ expect "ANTHROPIC_SMALL_FAST_MODEL=small-fast"
 expect "ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet-5"
 expect "ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-5-5"
 expect "ANTHROPIC_DEFAULT_FABLE_MODEL=claude-fable-5"
-expect "ANTHROPIC_DEFAULT_HAIKU_MODEL=claude-haiku-5"
+expect "ANTHROPIC_DEFAULT_HAIKU_MODEL=claude-haiku-4-5-20251001"
 expect "ire_json: present"
 expect "ire_frontier_key: present"
 grep -q "weak_key_flag_leaked" "$T/claude-call.txt" && { echo "keyless flag reached claude (proxy only)"; fail=1; }

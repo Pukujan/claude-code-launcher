@@ -12,12 +12,13 @@ Aliases (InferHub seats; include Claude Code API ids so local Claude works):
   advisor / opus / claude-opus-5-5 / claude-fable-5 / claude-fable-5-1 /
     ih-advisor / ih-opus / inferhub-opus -> advisor seat
   (if advisor OFF, advisor aliases also point at main so /advisor opus still resolves)
-  haiku / claude-haiku-5 / small-fast / ih-haiku / ih-small-fast / inferhub-haiku
+  haiku / claude-haiku-5 / claude-haiku-4-5-20251001 / small-fast / ih-haiku / ih-small-fast / inferhub-haiku
     -> fast seat (Claude Code background/small-fast calls). Default fast seat is
     cb/deepseek-v4.1-flash; set "fast_inferhub_id" in the seat file or pass --fast
     (empty string = use the main seat). The fast aliases get their own fallback
-    chain in config/inferhub_fallbacks.yaml (role "fast"). claude-haiku-4-5 is NOT aliased here
-    because CKFF already serves that name.
+    chain in config/inferhub_fallbacks.yaml (role "fast"). claude-haiku-4-5 (no date) is NOT
+    aliased here because CKFF already serves that name. The dated id is Claude
+    Code's own haiku name, so the launchers pin the haiku tier to it.
 
 Opt-in seats (never the default): cx/gpt-6.1-sol may be picked as main or
 advisor with --main/--advisor or in the seat file. cx routes go over chat
@@ -46,7 +47,7 @@ DEFAULT_OUT = ROOT / "config" / "inferhub_aliases.yaml"
 DEFAULT_API_BASE = "https://api.inferhub.dev/v1"
 
 MAIN_ALIASES = ["main", "sonnet", "claude-sonnet-5", "ih-main", "ih-sonnet", "inferhub-sonnet"]
-FAST_ALIASES = ["haiku", "claude-haiku-5", "small-fast", "ih-haiku", "ih-small-fast", "inferhub-haiku"]
+FAST_ALIASES = ["haiku", "claude-haiku-5", "claude-haiku-4-5-20251001", "small-fast", "ih-haiku", "ih-small-fast", "inferhub-haiku"]
 DEFAULT_FAST_ID = "cb/deepseek-v4.1-flash"
 # The old default. Every seat file written before the change carries it even though no
 # launcher ever offered a fast-seat pick, so it is read as "not picked".

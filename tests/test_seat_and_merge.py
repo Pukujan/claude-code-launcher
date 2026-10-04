@@ -60,7 +60,7 @@ def test_fast_seat_aliases_default_to_deepseek_flash(tmp_path):
             "--main", "cbcn/glm-5.3-flash", "--advisor", "", "--no-merge", "--no-reload")
     assert r.returncode == 0, r.stderr
     a = aliases(out)
-    for name in ("haiku", "claude-haiku-5", "small-fast", "ih-haiku", "ih-small-fast", "inferhub-haiku"):
+    for name in ("haiku", "claude-haiku-5", "claude-haiku-4-5-20251001", "small-fast", "ih-haiku", "ih-small-fast", "inferhub-haiku"):
         assert a[name] == "openai/cb/deepseek-v4.1-flash"
     # CKFF serves claude-haiku-4-5, so the seat must not shadow it.
     assert "claude-haiku-4-5" not in a
@@ -109,7 +109,7 @@ def test_fallback_chains_skip_seat_and_other_seats_vendor(tmp_path):
 def test_fast_seat_aliases_get_a_fallback_chain():
     # small-fast had no fallbacks, so one content-filter 400 (Alibaba DataInspectionFailed)
     # killed every WebFetch summary. The chain skips the seat itself and ends on qwen.
-    fast = ("small-fast", "haiku", "claude-haiku-5", "ih-haiku", "ih-small-fast", "inferhub-haiku")
+    fast = ("small-fast", "haiku", "claude-haiku-5", "claude-haiku-4-5-20251001", "ih-haiku", "ih-small-fast", "inferhub-haiku")
     rungs = ("cb/deepseek-v4.1-flash", "ali/qwen3.8-flash", "cbcn/deepseek-v4-flash")
     ih = [{"model_name": n, "litellm_params": {"model": "openai/cb/deepseek-v4.1-flash"}} for n in fast]
     ih += [{"model_name": f"ih/{m}", "litellm_params": {"model": f"openai/{m}"}} for m in rungs]
@@ -196,7 +196,8 @@ def test_master_key_is_only_an_env_reference_when_set():
 GOLDEN = SCRIPTS.parents[2] / "tests" / "fixtures" / "seat"
 # Written by the unmodified upstream apply_inferhub_seat.py at litellm-ckff-ops
 # de69e68 (no cx change, includes the haiku/small-fast aliases); only the
-# "# Generated:" timestamp line is dropped.
+# "# Generated:" timestamp line is dropped. The claude-haiku-4-5-20251001 block
+# (a copy of the claude-haiku-5 one) was added by hand when that alias was added.
 GOLDEN_CASES = [
     ("cb/deepseek-v4.1-flash", "ali/qwen3.8-flash", "cb-deepseek-v4.1-flash_ali-qwen3.8-flash.yaml"),
     ("ag/gemini-3.8-flash-high", "", "ag-gemini-3.8-flash-high_.yaml"),

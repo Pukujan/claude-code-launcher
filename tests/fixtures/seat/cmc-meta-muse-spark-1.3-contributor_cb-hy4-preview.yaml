@@ -132,6 +132,14 @@ model_list:
     model_info:
       description: "InferHub Claude seat (fast) -> ali/qwen3.8-flash"
 
+  - model_name: claude-haiku-4-5-20251001
+    litellm_params:
+      model: openai/ali/qwen3.8-flash
+      api_base: https://api.inferhub.dev/v1
+      api_key: os.environ/INFERHUB_API_KEY
+    model_info:
+      description: "InferHub Claude seat (fast) -> ali/qwen3.8-flash"
+
   - model_name: small-fast
     litellm_params:
       model: openai/ali/qwen3.8-flash
