@@ -28,8 +28,15 @@
     "claim_queue": [],
     "standby": [],
     "grace_minutes": 10,
-    "who_is_boss_now": null,
-    "as_of_history": []
+    "who_is_boss_now": "executor-claude-code-launcher",
+    "as_of_history": [
+      {
+        "agent_id": "executor-claude-code-launcher",
+        "from": "2026-10-04T22:37:58Z",
+        "task": "CCL-0061",
+        "reason": "first live continuer; seat was vacant"
+      }
+    ]
   },
   "watchdog": {
     "watchdog_interval_minutes": 10,
@@ -123,7 +130,9 @@
   },
   "ticket_links": {
     "parent_issue": null,
-    "child_issues": [],
+    "child_issues": [
+      "https://github.com/Pukujan/claude-code-launcher/issues/61"
+    ],
     "notes": "Parent/child notes only; no full DAG engine."
   }
 }
