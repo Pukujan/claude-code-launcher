@@ -29,6 +29,13 @@ LL="$REPO/shared/litellm"
 echo '{"theme":"dark"}' > "$T/home/.claude/settings.json"
 cat > "$T/bin/claude" <<'MOCK'
 #!/bin/bash
+if [ "$1 $2" = "auth status" ]; then
+  # MOCK_CLAUDE_AUTH=claude.ai pretends a /login session exists.
+  if [ "${MOCK_CLAUDE_AUTH:-}" = "claude.ai" ]; then
+    printf '{\n  "loggedIn": true,\n  "authMethod": "claude.ai"\n}\n'; exit 0
+  fi
+  printf '{\n  "loggedIn": false,\n  "authMethod": "none"\n}\n'; exit 1
+fi
 {
   echo "argv: $*"
   echo "cwd: $(pwd)"
@@ -96,6 +103,18 @@ fi
 if grep -rq fake-inferhub-key "$T/launcher-output.txt" "$LL/logs" "$T/home/.local/state" "$T/home/Library/Logs" 2>/dev/null; then
   echo "key leaked into output or logs"; fail=1
 fi
+# With a claude.ai login and a keyless proxy, no key at all: the login stays the
+# active credential (Artifacts need it) and traffic still goes to the proxy.
+printf '3\ny\n2\n10\n' | run_env env MOCK_CLAUDE_OUT="$T/claude-call-login.txt" MOCK_CLAUDE_AUTH=claude.ai \
+  "$BASH_BIN" "$SHIM" > "$T/launcher-login-output.txt" 2>&1
+if [ -f "$T/claude-call-login.txt" ]; then
+  grep -q '^ANTHROPIC_API_KEY=' "$T/claude-call-login.txt" && { echo "API key set despite a claude.ai login"; fail=1; }
+  grep -qxF "ANTHROPIC_BASE_URL=http://127.0.0.1:$PORT" "$T/claude-call-login.txt" || { echo "login run lost the proxy base URL"; fail=1; }
+  grep -q "auth=claude.ai login" "$T/launcher-login-output.txt" || { echo "login run did not report claude.ai auth"; fail=1; }
+else
+  echo "mock claude never ran with a claude.ai login"; tail -20 "$T/launcher-login-output.txt"; fail=1
+fi
+grep -q "auth=dummy API key" "$T/launcher-output.txt" || { echo "logged-out run did not report the dummy key"; fail=1; }
 # Keyless hot reload: the picked seat must have reached the running proxy.
 grep -q "Reloaded scope=seat" "$T/home/.local/state/claude-inferhub/launcher.log" "$T/home/Library/Logs/claude-inferhub/launcher.log" 2>/dev/null \
   || { echo "seat was not hot-reloaded into the running proxy"; fail=1; }

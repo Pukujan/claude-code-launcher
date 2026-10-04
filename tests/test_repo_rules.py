@@ -99,3 +99,20 @@ def test_launchers_pin_every_claude_tier_to_a_seat_alias():
         m = re.search(rf'export ANTHROPIC_DEFAULT_{tier}_MODEL="([^"]+)"', mac)
         assert w and w.group(1) in names, tier
         assert m and m.group(1) == w.group(1), tier
+
+
+def test_launchers_leave_the_claude_ai_login_in_charge_when_keyless():
+    # Any ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN / apiKeyHelper outranks the
+    # claude.ai login and blocks Artifacts (issue #41). With a keyless proxy and
+    # a claude.ai login, both launchers must set no key at all.
+    win = (REPO / "windows" / "launch-claude-inferhub.ps1").read_text(encoding="utf-8")
+    mac = (REPO / "mac" / "Launch Claude InferHub.command").read_text(encoding="utf-8")
+    for text in (win, mac):
+        assert "claude auth status --json" in text
+        assert "ANTHROPIC_AUTH_TOKEN =" not in text and "export ANTHROPIC_AUTH_TOKEN" not in text
+    w = re.search(r'if \(\$master -eq "local" -and \(Test-ClaudeAiLogin\)\) \{(.*?)\} else \{(.*?)\n\}', win, re.S)
+    assert w and "ANTHROPIC_API_KEY" not in w.group(1) and "$env:ANTHROPIC_API_KEY = $master" in w.group(2)
+    assert len(re.findall(r'\$env:ANTHROPIC_API_KEY =', win)) == 1
+    m = re.search(r'if \[ "\$master" = "local" \] && claude_ai_logged_in; then(.*?)else(.*?)\n  fi\n', mac, re.S)
+    assert m and "ANTHROPIC_API_KEY" not in m.group(1) and 'export ANTHROPIC_API_KEY="$master"' in m.group(2)
+    assert len(re.findall(r'export ANTHROPIC_API_KEY=', mac)) == 1
