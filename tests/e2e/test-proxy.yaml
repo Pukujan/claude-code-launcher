@@ -1,0 +1,16 @@
+# Keyless, loopback-only test proxy for the fallback-ladder fault-injection run.
+# Seat primaries point at the deliberately broken upstream on 127.0.0.1:4019.
+# No ladders are configured here: they are applied live through /launcher/ladder.
+model_list:
+  - model_name: sonnet
+    litellm_params:
+      model: openai/cb/deepseek-v4.1-flash
+      api_base: http://127.0.0.1:4019/v1
+      api_key: fault-injection-dummy
+  - model_name: opus
+    litellm_params:
+      model: openai/cbcn/glm-5.3-flash
+      api_base: http://127.0.0.1:4019/v1
+      api_key: fault-injection-dummy
+litellm_settings:
+  drop_params: true

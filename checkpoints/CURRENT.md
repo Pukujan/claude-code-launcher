@@ -20,7 +20,8 @@ Phase: launcher move.
 ## Queued
 
 - Re-sync `windows/launch-claude-inferhub.ps1` from the PC after the pending fixes there.
-- `shared/ire/` on-demand IRE fetch and the fallback ladder picker (another worker; see `docs/HOOKS.md`).
+- `shared/ire/` on-demand IRE fetch (CCL-0004, [issue #4](https://github.com/Pukujan/claude-code-launcher/issues/4); handed to a new worker on branch `task/CCL-0004-ire-fetch`).
+- **CCL-0006**: fallback ladder picker for main and advisor, applied live ([issue #5](https://github.com/Pukujan/claude-code-launcher/issues/5), branch `task/CCL-0006-fallback-ladder`).
 
 ## Blockers
 
