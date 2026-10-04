@@ -283,7 +283,7 @@ function Write-LastPicks {
   $c = Read-LastPicks
   foreach ($k in @($Values.Keys)) { $c[$k] = $Values[$k] }
   $o = [ordered]@{}
-  foreach ($k in @("main", "main1", "main2", "adv", "adv1", "adv2", "start_dir", "launch")) { if ($c.ContainsKey($k)) { $o[$k] = $c[$k] } }
+  foreach ($k in @("main", "main1", "main2", "adv", "adv1", "adv2", "start_dir", "launch", "uc_orch", "uc_worker")) { if ($c.ContainsKey($k)) { $o[$k] = $c[$k] } }
   try { [IO.File]::WriteAllText($p, ($o | ConvertTo-Json), [Text.UTF8Encoding]::new($false)) } catch {}
 }
 
@@ -440,12 +440,12 @@ function Invoke-FolderStep {
 }
 
 function Invoke-LaunchStep {
-  # Last step: launch with Claude Code (default) or UltraCode. Returns "claude",
-  # "ultracode", or $null when Left goes back to the folder.
+  # Launch with Claude Code (default) or UltraCode (then Steps 9 and 10).
+  # Returns "claude", "ultracode", or $null when Left goes back to the folder.
   param($Last = @{})
   $ids = @("claude", "ultracode")
   $index = $(if ($Last["launch"] -eq "ultracode") { 1 } else { 0 })
-  $r = Select-FromList -Title "Step 8: launch with" -Lines @("Claude Code", "UltraCode (the ultracode command, through the proxy)") -Index $index `
+  $r = Select-FromList -Title "Step 8: launch with" -Lines @("Claude Code", "UltraCode (pick an orchestrator and a worker next)") -Index $index `
     -Help @("Up/Down move. Enter launches. Left = back to the folder. Esc quits.")
   $script:NavTrace.Add(("  step launch  {0,-7} -> {1}" -f $r.Action, $(if ($r.Action -eq "back") { "(back)" } else { $ids[$r.Index] }))) | Out-Null
   if ($r.Action -eq "back") { return $null }
@@ -453,11 +453,11 @@ function Invoke-LaunchStep {
 }
 
 function Invoke-LaunchWizard {
-  # Returns @{ Main; Advisor; MainFallbacks; AdvisorFallbacks; Folder; Launch }.
-  $S = @{ main = $null; main1 = $null; main2 = $null; adv = $null; adv1 = $null; adv2 = $null }
+  # Returns @{ Main; Advisor; MainFallbacks; AdvisorFallbacks; Folder; Launch; UcOrch; UcWorker }.
+  $S = @{ main = $null; main1 = $null; main2 = $null; adv = $null; adv1 = $null; adv2 = $null; uc_orch = $null; uc_worker = $null }
   $last = Read-LastPicks
   $folderState = @{ Path = (Get-StartDir); Index = 0; Message = "" }
-  $steps = @("main", "main1", "main2", "adv", "adv1", "adv2", "folder", "launch")
+  $steps = @("main", "main1", "main2", "adv", "adv1", "adv2", "folder", "launch", "uc_orch", "uc_worker")
   $i = 0; $dir = 1; $folder = $null; $launch = $null
   while ($i -lt $steps.Count) {
     if ($i -lt 0) { $i = 0 }
@@ -471,17 +471,28 @@ function Invoke-LaunchWizard {
       $dir = -1; $i--; $folderState = @{ Path = (Get-StartDir); Index = 0; Message = "" }; continue
     }
     if ($slot -eq "launch") {
-      $launch = Invoke-LaunchStep -Last $last
-      if ($launch) { Save-LastPicks -S $S; Write-LastPicks @{ launch = $launch }; break }
-      $dir = -1; $i--; continue
+      # Coming back from Step 9 highlights this session's pick, not last time's.
+      $launch = Invoke-LaunchStep -Last $(if ($launch) { @{ launch = $launch } } else { $last })
+      if (-not $launch) { $dir = -1; $i--; continue }
+      if ($launch -ne "ultracode") { break }
+      $dir = 1; $i++; continue
+    }
+    if ($slot -eq "uc_orch" -or $slot -eq "uc_worker") {
+      $action = Invoke-UltraCodeStep -Slot $slot -S $S -Last $last
+      if ($action -eq "back") { $dir = -1; $i-- } else { $dir = 1; $i++ }
+      continue
     }
     $action = Invoke-ModelStep -Slot $slot -S $S -Last $last
     if ($action -eq "back") { $dir = -1; $i-- } else { $dir = 1; $i++ }
   }
+  Save-LastPicks -S $S
+  $picks = @{ launch = $launch }
+  if ($launch -eq "ultracode") { $picks["uc_orch"] = $S.uc_orch; $picks["uc_worker"] = $(if ($S.uc_worker) { $S.uc_worker } else { "" }) }
+  Write-LastPicks $picks
   $main = $Models | Where-Object { $_.Id -eq $S.main } | Select-Object -First 1
   $adv = $(if ($S.adv) { $Models | Where-Object { $_.Id -eq $S.adv } | Select-Object -First 1 } else { @{ Rank = 0; Name = "OFF (no advisor)"; Id = ""; Eligible = $true; Cost = "-" } })
   return @{
-    Main = $main; Advisor = $adv; Folder = $folder; Launch = $launch
+    Main = $main; Advisor = $adv; Folder = $folder; Launch = $launch; UcOrch = $S.uc_orch; UcWorker = $S.uc_worker
     MainFallbacks = @($(if ($S.main1) { @($S.main1, $S.main2) }) | Where-Object { $_ })
     AdvisorFallbacks = @($(if ($S.adv -and $S.adv1) { @($S.adv1, $S.adv2) }) | Where-Object { $_ })
   }
@@ -564,9 +575,14 @@ function Sync-ModelPicker {
 }
 
 # ---- UltraCode (optional "launch with" target) ----
-# OnlyTerp/UltraCode-Shim (MIT, standard-library Python) provides the
-# `ultracode` command. Fetched on demand at a pinned commit into a per-user
-# cache (never vendored here) and installed from there with its install.ps1.
+# OnlyTerp/UltraCode-Shim (MIT, standard-library Python) runs Claude Code with
+# two models: the ORCHESTRATOR (the main loop) and the WORKER (every parallel
+# sub-agent and background call). It is fetched on demand at a pinned commit
+# into a per-user cache (never vendored here) and run from there with its own
+# bin\ultracode.cmd. The global `ultracode` command is never installed or
+# changed. shared\ultracode\uc_models.py writes the cache's config.json (the
+# InferHub seats, UltraCode's own usable options without CKFF, and the IRE Top
+# 20, all through LiteLLM) and preselects the two picks from Steps 9 and 10.
 $UltraCodeCommit = "1870e58e2622c8946c9c7cd45483aa47d7bd5867"
 
 function Get-UltraCodeShim {
@@ -587,53 +603,101 @@ function Get-UltraCodeShim {
   return $dir
 }
 
-function Install-UltraCodeCommand {
-  # Makes `ultracode` a real command that points at the pinned checkout. The
-  # shim's own install.ps1 does it: it runs the offline self-test and writes
-  # %LOCALAPPDATA%\Microsoft\WindowsApps\ultracode.cmd (already on PATH). It
-  # does not touch the Claude Code install or ~/.claude. Returns the command path.
-  param([string]$Dir)
-  $target = Join-Path $Dir "bin\ultracode.cmd"
-  foreach ($try in 1..2) {
-    $cmd = Get-Command ultracode -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($cmd -and ("" + (Get-Content -LiteralPath $cmd.Source -Raw -ErrorAction SilentlyContinue)).Contains($target)) { return $cmd.Source }
-    if ($try -eq 2) { break }
-    Write-Host "Installing the ultracode command (UltraCode-Shim install.ps1) ..."
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Dir "install.ps1") | Out-Host
-    if ($LASTEXITCODE -ne 0) { throw "UltraCode-Shim install.ps1 failed (exit $LASTEXITCODE)" }
+function Get-UltraCodePort {
+  # The shim's own proxy port: 4241 + the LiteLLM port (8241 for 4000). Not the
+  # shim's default 8141, so a standalone ultracode on that port is never reused.
+  return (4241 + $ProxyPort)
+}
+
+function Invoke-UcModels {
+  # Runs shared\ultracode\uc_models.py with uv (stdlib only, no project). Its
+  # notes go to stderr; stdout is returned. Values go as --name=value so
+  # Windows PowerShell 5.1 does not drop empty arguments.
+  param([string[]]$UcArgs)
+  $uv = Get-Command uv -ErrorAction SilentlyContinue
+  if (-not $uv) { throw "UltraCode needs uv (https://docs.astral.sh/uv/) to run shared\ultracode\uc_models.py" }
+  $helper = Join-Path $RepoRoot "shared\ultracode\uc_models.py"
+  $ErrorActionPreference = "Continue"   # the helper reports on stderr; that is not a failure
+  $out = & $uv.Source run --no-project python $helper @UcArgs
+  if ($LASTEXITCODE -ne 0) { throw "uc_models.py $($UcArgs[0]) failed (exit $LASTEXITCODE)" }
+  return $out
+}
+
+function Get-UltraCodeChoices {
+  # Writes the cache's config.json and returns the choices (@{ Id; Label }) for
+  # Steps 9 and 10. Rebuilt only when the main or advisor seat changes.
+  param($S)
+  $key = "" + $S.main + "|" + $S.adv
+  if ($script:UcChoices -and $script:UcChoicesKey -eq $key) { return $script:UcChoices }
+  $dir = Get-UltraCodeShim
+  $mainName = "" + ($Models | Where-Object { $_.Id -eq $S.main } | Select-Object -First 1).Name
+  $advName = $(if ($S.adv) { "" + ($Models | Where-Object { $_.Id -eq $S.adv } | Select-Object -First 1).Name } else { "" })
+  $tmp = [IO.Path]::Combine([IO.Path]::GetTempPath(), "ccl-uc-" + [guid]::NewGuid().ToString("N"))
+  $top = $tmp + "-top20.txt"
+  $list = $tmp + "-choices.tsv"
+  $rows = @(foreach ($m in $Models) { "{0}|{1}|{2}|{3}|{4}" -f $m.Rank, $m.Name, $m.Id, $(if ($m.Eligible) { "true" } else { "false" }), $m.Cost })
+  [IO.File]::WriteAllLines($top, [string[]]$rows, [Text.UTF8Encoding]::new($false))
+  try {
+    $null = Invoke-UcModels @("build", ("--example=" + (Join-Path $dir "config.example.json")), ("--top20=" + $top),
+      ("--proxy-base=" + $ProxyBase), ("--port=" + (Get-UltraCodePort)), ("--main-name=" + $mainName),
+      ("--advisor-name=" + $advName), ("--config-out=" + (Join-Path $dir "config.json")), ("--list-out=" + $list))
+    $choices = @(foreach ($line in [IO.File]::ReadAllLines($list, [Text.Encoding]::UTF8)) {
+      $parts = $line.Split([char]9, 2)
+      if ($parts.Count -eq 2 -and $parts[0]) { [pscustomobject]@{ Id = $parts[0]; Label = $parts[1] } }
+    })
+  } finally {
+    Remove-Item -LiteralPath $top, $list -ErrorAction SilentlyContinue
   }
-  throw "the ultracode command on PATH does not point at $target"
+  if ($choices.Count -eq 0) { throw "uc_models.py offered no UltraCode models" }
+  $script:UcChoices = $choices
+  $script:UcChoicesKey = $key
+  return $choices
+}
+
+function Invoke-UltraCodeStep {
+  # Step 9 (uc_orch) or Step 10 (uc_worker), after "launch with" = UltraCode.
+  # Writes the pick to $S ("" = worker same as orchestrator).
+  param([string]$Slot, $S, $Last = @{})
+  $choices = @(Get-UltraCodeChoices -S $S)
+  if ($Slot -eq "uc_worker") {
+    $choices = @([pscustomobject]@{ Id = ""; Label = "Same as orchestrator" }) + $choices
+    $title = "Step 10: UltraCode WORKER (runs every parallel sub-agent and background call)."
+    $dflt = ""
+  } else {
+    $title = "Step 9: UltraCode ORCHESTRATOR (runs the main loop)."
+    $dflt = "claude-ih-main"
+  }
+  $lines = @(foreach ($c in $choices) { if ($c.Id) { "{0,-58} {1}" -f $c.Label, $c.Id } else { $c.Label } })
+  $help = @("Up/Down move. Enter picks. Left = previous step, Right = next step (keeps the highlighted pick). Esc quits.",
+            "Orchestrator = the main loop, worker = every parallel sub-agent. Everything goes through the local LiteLLM; CKFF is never offered.")
+  $want = Get-StartPick -S $S -Last $Last -Slot $Slot -Choices $choices -Default $dflt
+  $index = 0
+  for ($i = 0; $i -lt $choices.Count; $i++) { if ($choices[$i].Id -eq $want) { $index = $i; break } }
+  $r = Select-FromList -Title $title -Lines $lines -Index $index -Help $help
+  if ($r.Action -ne "back") { $S[$Slot] = $choices[$r.Index].Id }
+  $script:NavTrace.Add(("  step {0,-9} {1,-7} -> {2}" -f $Slot, $r.Action, $(if ($r.Action -eq "back") { "(back)" } elseif ($S[$Slot]) { $S[$Slot] } else { "(same)" }))) | Out-Null
+  return $r.Action
 }
 
 function Invoke-UltraCode {
-  # Runs the real `ultracode` command (UltraCode-Shim's Start-UltraCode.ps1) in
-  # the current folder with --model <seat alias>. Its config.json lists
-  # claude-main and claude-worker (both the seat alias on the keyless proxy) for
-  # /model, and anthropic_upstream is the proxy too, so the seat alias, the tier
-  # pins, the advisor and count_tokens all pass through to the proxy and nothing
-  # goes to api.anthropic.com. The shim's own proxy listens on 4141 + the
-  # LiteLLM port (8141 for 4000), never on 4000.
-  param([string]$Model, [string[]]$ClaudeArgs = @())
+  # Preselects the orchestrator/worker pick (POST /uc/select when a shim with
+  # this config already runs, else the shim's selection.json, read when its
+  # proxy starts), then runs the cache's own bin\ultracode.cmd in the current
+  # folder with the shim's TUI off and --model <orchestrator>. The shim starts,
+  # reuses and stops its own proxy; its upstream is the local LiteLLM.
+  param([string]$Orch, [string]$Worker, [string[]]$ClaudeArgs = @())
+  if (-not $Orch) { throw "no UltraCode orchestrator picked" }
   $dir = Get-UltraCodeShim
-  $port = 4141 + $ProxyPort
-  $route = [ordered]@{ upstream = $ProxyBase; model = $Model }
-  $conf = [ordered]@{
-    proxy = [ordered]@{ listen_port = $port; anthropic_upstream = $ProxyBase }
-    models = @([ordered]@{ id = "claude-main"; display_name = "Main seat ($Model)" }, [ordered]@{ id = "claude-worker"; display_name = "Worker ($Model)" })
-    routes = [ordered]@{ "claude-main" = $route; "claude-worker" = $route }
-  }
-  [IO.File]::WriteAllText((Join-Path $dir "config.json"), ($conf | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
-  # Start with no orchestrator/worker pick. A pick left over from an earlier
-  # ultracode session would reroute the seat and advisor traffic to that model.
-  $state = Join-Path $env:LOCALAPPDATA "UltraCode-Shim"
-  New-Item -ItemType Directory -Force -Path $state | Out-Null
-  [IO.File]::WriteAllText((Join-Path $state "selection.json"), '{"orch": null, "worker": null, "worker_explicit": false}', [Text.UTF8Encoding]::new($false))
-  $env:UC_UPSTREAM = $ProxyBase   # Start-UltraCode.ps1 reads anthropic_upstream; bin/ultracode reads this
-  $env:UC_SELECTOR = "0"          # our wizard already picked the seats
-  $uc = Install-UltraCodeCommand -Dir $dir
+  $config = Join-Path $dir "config.json"
+  if (-not (Test-Path -LiteralPath $config)) { throw "UltraCode config.json missing; run the wizard again" }
+  $state = Join-Path $env:LOCALAPPDATA "UltraCode-Shim\selection.json"
+  $port = Invoke-UcModels @("preselect", ("--config=" + $config), ("--state-file=" + $state), ("--orch=" + $Orch), ("--worker=" + $Worker)) | Select-Object -Last 1
+  Remove-Item Env:UC_UPSTREAM, Env:UC_LISTEN_PORT -ErrorAction SilentlyContinue   # config.json decides both
+  $env:UC_SELECTOR = "0"   # Steps 9 and 10 replace the shim's own picker
+  $uc = Join-Path $dir "bin\ultracode.cmd"
   Write-Host ("ultracode=" + $uc + "  (shim http://127.0.0.1:" + $port + " -> " + $ProxyBase + ")")
   Write-Host "Starting UltraCode..."
-  & $uc --model $Model @ClaudeArgs
+  & $uc --model $Orch @ClaudeArgs
 }
 
 function Test-ProxyHealth {
@@ -882,7 +946,8 @@ Write-Host ("advisor=" + $advisorLabel)
 Write-Host "permission=bypassPermissions (auto mode is Anthropic-only)"
 Write-Host "betas=experimental ON (advisor_20260301 via LiteLLM orchestration)"
 if ($w.Launch -eq "ultracode") {
-  Invoke-UltraCode -Model $seatAlias -ClaudeArgs @("--permission-mode", "bypassPermissions")
+  Write-Host ("ultracode orchestrator=" + $w.UcOrch + "  worker=" + $(if ($w.UcWorker) { $w.UcWorker } else { "(same as orchestrator)" }))
+  Invoke-UltraCode -Orch $w.UcOrch -Worker $w.UcWorker -ClaudeArgs @("--permission-mode", "bypassPermissions")
 } else {
   Write-Host "Starting Claude Code..."
   & claude --model $seatAlias --permission-mode bypassPermissions
