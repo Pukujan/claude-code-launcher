@@ -843,6 +843,7 @@ main() {
   export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-opus-5-5"     # advisor seat (main when advisor is OFF)
   export ANTHROPIC_DEFAULT_FABLE_MODEL="claude-fable-5"     # advisor seat
   export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-haiku-4-5-20251001"  # fast seat (an id Claude Code knows, so no "unrecognized model" warning)
+  export CLAUDE_CODE_WORKFLOWS=1
   master=""
 
   cd "$PROJECT_DIR" || die "cannot cd to $PROJECT_DIR"

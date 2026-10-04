@@ -650,6 +650,13 @@ def _install_bench_hook():
         _fmt.install()
     except Exception as e:
         print(f"[sitecustomize] fast seat max_tokens floor not installed: {e}", flush=True)
+    # Unknown claude-* ids, dangling tool calls, empty replies (see request_fixes.py).
+    try:
+        import request_fixes as _rf
+
+        _rf.install()
+    except Exception as e:
+        print(f"[sitecustomize] request fixes not installed: {e}", flush=True)
 
 
 async def _starlette_call_with_reload(self, scope, receive, send, _o=_prev_starlette_call):

@@ -773,6 +773,7 @@ $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "claude-sonnet-5"   # main seat
 $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "claude-opus-5-5"     # advisor seat (main when advisor is OFF)
 $env:ANTHROPIC_DEFAULT_FABLE_MODEL = "claude-fable-5"     # advisor seat
 $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "claude-haiku-4-5-20251001"  # fast seat (an id Claude Code knows, so no "unrecognized model" warning)
+$env:CLAUDE_CODE_WORKFLOWS = "1"
 # Do NOT set ANTHROPIC_AUTH_TOKEN (would win over API_KEY and risk CKFF).
 # Keep experimental betas ON - do not set CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS
 
