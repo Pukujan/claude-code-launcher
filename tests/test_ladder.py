@@ -39,14 +39,29 @@ class Defaults(unittest.TestCase):
 
     def test_load_inputs_uses_an_ire_bundle_when_given(self):
         import tempfile
-        bundle = dict(I.builtin_inputs(), source={"kind": "github", "detail": "x"},
-                      ladders={"main": {"fallbacks": ["cbcn/minimax-m3"]}, "advisor": {"fallbacks": []}})
+        top = I.builtin_inputs()["top20"]
+        bundle = {"source": "live", "top20": top,
+                  "price_policy": {"free_below_per_mtok": 0.1, "unit": "USDC per 1M tokens"},
+                  "ladders": {"main": ["cb/deepseek-v4.1-flash", "cbcn/minimax-m3"],
+                              "advisor": ["cbcn/glm-5.3-flash"]},
+                  "retries": 2, "cooldown_s": 60}
         with tempfile.TemporaryDirectory() as t:
             p = Path(t) / "b.json"
             p.write_text(json.dumps(bundle))
             b = I.load_inputs(p, use_ire=False)
         self.assertEqual(b["source"]["kind"], "ire")
         self.assertEqual(L.default_ladder(b, "main", "cb/deepseek-v4.1-flash"), ["cbcn/minimax-m3"])
+        self.assertEqual(b["retry"], {"retries": 2, "cooldown_seconds": 60})
+
+    def test_real_ire_module_output_is_understood(self):
+        sys.path.insert(0, str(ROOT / "shared" / "ire"))
+        import ire_fetch
+        raw = ire_fetch.get_recommendations(offline=True)
+        b = I.normalize(raw)
+        self.assertIsNotNone(b)
+        self.assertEqual(b["ladders"]["main"]["primary"], "cb/deepseek-v4.1-flash")
+        self.assertEqual(L.default_ladder(b, "main", "cb/deepseek-v4.1-flash"),
+                         ["ali/qwen3.8-flash", "cbcn/deepseek-v4-flash"])
 
     def test_bad_ire_bundle_is_ignored(self):
         import tempfile

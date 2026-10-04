@@ -26,9 +26,11 @@ again.
 
 ## Where the default comes from
 
-`inputs.py` has one function, `load_inputs()`. It uses an IRE bundle when one
-is available, either passed with `--bundle` or returned by the `shared/ire`
-module once it lands. Otherwise it uses the launchers' Top 20 table
+`inputs.py` has one function, `load_inputs()`. It reads the JSON that
+`shared/ire/ire_fetch.py` writes at launch (both launchers put its path in
+`CCL_IRE_JSON`; `--bundle` overrides it). If that file is missing it asks
+`ire_fetch.get_recommendations()` directly. The IRE answer already falls back
+to its cache and then its own defaults. If even that fails, it uses the launchers' Top 20 table
 (`shared/litellm/config/top20.csv`, or `top20-builtin.csv`) and these fixed
 chains:
 

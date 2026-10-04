@@ -11,9 +11,9 @@ It returns a dict shaped like this, from the best source available:
   }
 
 Sources, in order:
-  1. a bundle file produced by the IRE module (shared/ire, issue #4), if one
-     is passed in (argument or CCL_IRE_BUNDLE), or the module is present and
-     returns one from get_bundle();
+  1. the IRE module's JSON (shared/ire, issue #4; schema in shared/ire/README.md):
+     the file passed in, else $CCL_IRE_JSON (both launchers set it at start-up),
+     else shared/ire/ire_fetch.py get_recommendations();
   2. otherwise the Top 20 table the launchers already use
      (shared/litellm/config/top20.csv when synced, else top20-builtin.csv)
      plus the fixed chains below.
@@ -73,6 +73,34 @@ def builtin_inputs() -> dict:
     raise FileNotFoundError("no Top 20 table under shared/litellm/config")
 
 
+def normalize(raw) -> dict | None:
+    """Turn shared/ire's output into the shape above. None if it isn't usable.
+
+    shared/ire gives {source, top20, price_policy{free_below_per_mtok},
+    ladders{main: [primary, ...], advisor: [...]}, retries, cooldown_s}.
+    """
+    if not isinstance(raw, dict) or not raw.get("top20"):
+        return None
+    pp = raw.get("price_policy") or {}
+    cap = pp.get("free_below_per_mtok", pp.get("max_cost_per_mtok"))
+    lad = {}
+    for role, v in (raw.get("ladders") or {}).items():
+        if isinstance(v, list) and v:
+            lad[role] = {"primary": v[0], "fallbacks": list(v[1:])}
+        elif isinstance(v, dict):
+            lad[role] = {"primary": v.get("primary"), "fallbacks": list(v.get("fallbacks") or [])}
+    for role, v in FIXED_LADDERS.items():
+        lad.setdefault(role, json.loads(json.dumps(v)))
+    retry = raw.get("retry") or {"retries": raw.get("retries", FIXED_RETRY["retries"]),
+                                 "cooldown_seconds": raw.get("cooldown_s", FIXED_RETRY["cooldown_seconds"])}
+    src = raw.get("source")
+    detail = src if isinstance(src, str) else (src or {}).get("kind", "?")
+    out = {"source": {"kind": "ire", "detail": str(detail)},
+           "price_policy": {"max_cost_per_mtok": cap},
+           "top20": raw["top20"], "ladders": lad, "retry": retry}
+    return out if _usable(out) else None
+
+
 def _usable(b) -> bool:
     try:
         return bool(b.get("top20")) and float(b["price_policy"]["max_cost_per_mtok"]) > 0
@@ -81,14 +109,14 @@ def _usable(b) -> bool:
 
 
 def _from_ire_module():
-    """Ask the IRE module (if installed) for its bundle. Any failure -> None."""
+    """Ask shared/ire (if present) for its answer. Any failure -> None."""
     ire = SHARED / "ire"
     if not (ire / "ire_fetch.py").is_file():
         return None
     try:
         sys.path.insert(0, str(ire))
         import ire_fetch  # type: ignore
-        return ire_fetch.get_bundle()
+        return ire_fetch.get_recommendations()
     except Exception as e:  # never block a launch on IRE
         print(f"[ladder] IRE module unavailable ({type(e).__name__}); using built-in chains", file=sys.stderr)
         return None
@@ -97,20 +125,16 @@ def _from_ire_module():
 def load_inputs(bundle_path: Path | None = None, use_ire: bool = True) -> dict:
     import os
 
-    b = None
-    if bundle_path is None and os.environ.get("CCL_IRE_BUNDLE"):
-        bundle_path = Path(os.environ["CCL_IRE_BUNDLE"])
+    raw = None
+    if bundle_path is None and use_ire:
+        env = os.environ.get("CCL_IRE_JSON") or os.environ.get("CCL_IRE_BUNDLE")
+        bundle_path = Path(env) if env else None
     if bundle_path and Path(bundle_path).is_file():
         try:
-            b = json.loads(Path(bundle_path).read_text(encoding="utf-8"))
+            raw = json.loads(Path(bundle_path).read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            b = None
-    if b is None and use_ire:
-        b = _from_ire_module()
-    if _usable(b):
-        b.setdefault("ladders", json.loads(json.dumps(FIXED_LADDERS)))
-        b.setdefault("retry", dict(FIXED_RETRY))
-        src = b.get("source") or {}
-        b["source"] = {"kind": "ire", "detail": f"{src.get('kind', '?')}: {src.get('detail', '')}"}
-        return b
-    return builtin_inputs()
+            raw = None
+    if raw is None and use_ire:
+        raw = _from_ire_module()
+    b = normalize(raw)
+    return b if b else builtin_inputs()
