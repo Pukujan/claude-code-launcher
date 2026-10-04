@@ -1,8 +1,13 @@
 #!/usr/bin/env pwsh
-# Start the ONE local LiteLLM proxy (CKFF + InferHub model groups) from this
-# repository's shared/litellm folder. No litellm-ckff-ops checkout is needed.
-# The launcher passes the env files it chose: -CkffEnvFile (CKFF keys) and
-# -InferHubEnvFile (INFERHUB_API_KEY etc.). Values are never printed.
+# Start the ONE local LiteLLM proxy (InferHub; CKFF only when switched on) from
+# this repository's shared/litellm folder. No litellm-ckff-ops checkout is needed.
+# CKFF is OFF by default since 2026-10-04 (Alex: unstable, never use it). The
+# switch is ckff_enabled in shared\litellm\config\providers.yaml, overridden by
+# LITELLM_ENABLE_CKFF (1 on, 0 off). While it is off no ckff* name is loaded
+# from any env file and none is passed to the proxy.
+# The launcher passes the env files it chose: -DesktopEnvFile (the desktop
+# configs .env; -CkffEnvFile is the old name) and -InferHubEnvFile
+# (INFERHUB_API_KEY etc.). Values are never printed.
 # An optional machine-local env file (-LocalEnvFile, default
 # shared\litellm\.env.local, gitignored) is loaded last, for per-PC settings
 # such as CCL_WEB_SEARCH_CHAIN and SEARXNG_API_BASE. A missing file is fine.
@@ -20,7 +25,8 @@ param(
     [switch]$SkipSync,
     [switch]$ForceInstall,
     [int]$Port = 4000,
-    [string]$CkffEnvFile = '',
+    [Alias('CkffEnvFile')]
+    [string]$DesktopEnvFile = '',
     [string]$InferHubEnvFile = '',
     [string]$LocalEnvFile = '',
     [string]$Top20Csv = ''
@@ -43,15 +49,36 @@ $Requirements = Join-Path $LiteLLMRoot 'requirements.txt'
 $Overrides = Join-Path $LiteLLMRoot 'requirements-overrides.txt'
 if (-not $InferHubEnvFile) { $InferHubEnvFile = Join-Path $RepoRoot '.env' }
 if (-not $LocalEnvFile) { $LocalEnvFile = Join-Path $LiteLLMRoot '.env.local' }
-if (-not $CkffEnvFile) {
+if (-not $DesktopEnvFile) {
     # Default to the real Desktop known folder; no user name is hardcoded.
     $DesktopDir = [Environment]::GetFolderPath('Desktop')
     if (-not $DesktopDir) { $DesktopDir = Join-Path $env:USERPROFILE 'Desktop' }
-    $CkffEnvFile = Join-Path $DesktopDir 'configs\.env'
+    $DesktopEnvFile = Join-Path $DesktopDir 'configs\.env'
 }
 
+# --- CKFF switch: env LITELLM_ENABLE_CKFF wins, else config\providers.yaml, else off ---
+function Get-CkffEnabled {
+    $raw = [Environment]::GetEnvironmentVariable('LITELLM_ENABLE_CKFF', 'Process')
+    if (-not [string]::IsNullOrWhiteSpace($raw)) {
+        $v = $raw.Trim().Trim('"', "'").ToLowerInvariant()
+        if (@('1', 'true', 'yes', 'on') -contains $v) { return $true }
+        if (@('0', 'false', 'no', 'off') -contains $v) { return $false }
+    }
+    $providers = Join-Path $LiteLLMRoot 'config\providers.yaml'
+    if (Test-Path -LiteralPath $providers) {
+        foreach ($line in Get-Content -LiteralPath $providers) {
+            if ($line -match '^\s*ckff_enabled\s*:\s*([^#\s]+)') {
+                return (@('1', 'true', 'yes', 'on') -contains $Matches[1].Trim('"', "'").ToLowerInvariant())
+            }
+        }
+    }
+    return $false
+}
+$CkffEnabled = Get-CkffEnabled
+
 function Import-DotEnvFile {
-    param([string]$Path, [string]$Label)
+    # -SkipCkff: leave out every ckff*/CKFF* name (ckff-*, ckff_*, CKFF_*, ckff_astra).
+    param([string]$Path, [string]$Label, [switch]$SkipCkff)
     if (-not (Test-Path -LiteralPath $Path)) {
         Write-Host "note: $Label env not found at $Path"
         return
@@ -60,6 +87,7 @@ function Import-DotEnvFile {
         if ($line -match '^\s*([A-Za-z0-9_.-]+)\s*=\s*(.*?)\s*$') {
             $key = $Matches[1]
             $val = $Matches[2]
+            if ($SkipCkff -and $key -match '^ckff') { continue }
             if ($val.StartsWith('"') -and $val.EndsWith('"') -and $val.Length -ge 2) {
                 $val = $val.Substring(1, $val.Length - 2)
             } elseif ($val.StartsWith("'") -and $val.EndsWith("'") -and $val.Length -ge 2) {
@@ -74,13 +102,25 @@ function Import-DotEnvFile {
 # --- Load secrets (names only ever logged) ---
 # A missing desktop env is not fatal: Import-DotEnvFile prints a note and the
 # InferHub env (or the shell environment) can still supply the keys.
-Import-DotEnvFile -Path $CkffEnvFile -Label 'desktop-configs'
-if ($InferHubEnvFile -ne $CkffEnvFile) {
-    Import-DotEnvFile -Path $InferHubEnvFile -Label 'inferhub'
+# The desktop env is still read with CKFF off: it holds other keys, e.g. the
+# web search ones CCL_ENV_ALIASES points at. Its ckff* names are skipped.
+$skip = -not $CkffEnabled
+if ($CkffEnabled) {
+    Write-Host 'CKFF provider group: ON (LITELLM_ENABLE_CKFF or config\providers.yaml)'
+} else {
+    Write-Host 'CKFF provider group: OFF (default since 2026-10-04). ckff* keys are not loaded.'
+    # Nothing CKFF inherited from the user/machine environment reaches the proxy either.
+    foreach ($item in @(Get-ChildItem Env: | Where-Object { $_.Name -match '^ckff' })) {
+        [Environment]::SetEnvironmentVariable($item.Name, $null, 'Process')
+    }
+}
+Import-DotEnvFile -Path $DesktopEnvFile -Label 'desktop-configs' -SkipCkff:$skip
+if ($InferHubEnvFile -ne $DesktopEnvFile) {
+    Import-DotEnvFile -Path $InferHubEnvFile -Label 'inferhub' -SkipCkff:$skip
 }
 # Per-PC settings (e.g. the web search chain). Optional, so no note when absent.
 if (Test-Path -LiteralPath $LocalEnvFile) {
-    Import-DotEnvFile -Path $LocalEnvFile -Label 'local'
+    Import-DotEnvFile -Path $LocalEnvFile -Label 'local' -SkipCkff:$skip
 }
 # CCL_ENV_ALIASES=TARGET=source,... (usually set in the local env file) copies an
 # already-loaded value to the name LiteLLM reads, e.g.
@@ -104,7 +144,7 @@ if (-not [string]::IsNullOrWhiteSpace($aliasSpec)) {
     }
 }
 
-# Map CKFF secrets to the names LiteLLM expects
+# Map CKFF secrets to the names LiteLLM expects (only used when CKFF is on)
 $envMap = @{
     'CKFF_DEFAULT_KEY'      = 'ckff-cortex-default'
     'CKFF_GROK_KEY'         = 'ckff-cortex-grok'
@@ -126,14 +166,18 @@ if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable('LITELLM_
     [Environment]::SetEnvironmentVariable('LITELLM_DANGEROUSLY_PERMIT_WEAK_OR_UNSET_MASTER_KEY', 'true', 'Process')
 }
 
-foreach ($secretName in $envMap.Keys) {
-    $envKey = $envMap[$secretName]
-    $value = [Environment]::GetEnvironmentVariable($envKey, 'Process')
-    if ([string]::IsNullOrWhiteSpace($value)) {
-        throw "Missing value for $envKey ($secretName)"
+if ($CkffEnabled) {
+    foreach ($secretName in $envMap.Keys) {
+        $envKey = $envMap[$secretName]
+        $value = [Environment]::GetEnvironmentVariable($envKey, 'Process')
+        if ([string]::IsNullOrWhiteSpace($value)) {
+            throw "Missing value for $envKey ($secretName)"
+        }
+        [Environment]::SetEnvironmentVariable($secretName, $value, 'Process')
     }
-    [Environment]::SetEnvironmentVariable($secretName, $value, 'Process')
 }
+# The Python helpers (seat, merge) read the same switch; pass the resolved value on.
+$env:LITELLM_ENABLE_CKFF = if ($CkffEnabled) { '1' } else { '0' }
 
 if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable('INFERHUB_API_KEY', 'Process'))) {
     throw 'INFERHUB_API_KEY missing after loading env files'
@@ -229,12 +273,13 @@ Write-Host 'Applying InferHub Claude seat aliases ...'
 & $Python (Join-Path $PythonScripts 'apply_inferhub_seat.py') --api-base $ihUrl --no-reload
 if ($LASTEXITCODE -ne 0) { throw "apply_inferhub_seat.py failed: $LASTEXITCODE" }
 
-Write-Host 'Merging CKFF + InferHub into config/runtime.yaml ...'
+Write-Host 'Merging InferHub (and CKFF only when on) into config/runtime.yaml ...'
 & $Python (Join-Path $PythonScripts 'merge_litellm_config.py') --no-reload
 if ($LASTEXITCODE -ne 0) { throw "merge_litellm_config.py failed: $LASTEXITCODE" }
 
 $ConfigPath = Join-Path $LiteLLMRoot 'config\runtime.yaml'
-Write-Host "Starting unified LiteLLM proxy on http://127.0.0.1:$Port (CKFF + InferHub)"
+$groups = if ($CkffEnabled) { 'CKFF + InferHub' } else { 'InferHub only; CKFF off' }
+Write-Host "Starting unified LiteLLM proxy on http://127.0.0.1:$Port ($groups)"
 
 # Never take over a port someone else holds (port 4000 is the live proxy).
 $listener = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
@@ -255,7 +300,7 @@ if ($Background) {
     # Win32_Process.Create does not run a shell, so wrap in cmd.exe /c for the log redirection to work.
     # The child reruns this script in the foreground; -SkipSync is safe because
     # inferhub_top20.yaml was just written above.
-    $fwd = " -SkipSync -CkffEnvFile `"$CkffEnvFile`" -InferHubEnvFile `"$InferHubEnvFile`" -LocalEnvFile `"$LocalEnvFile`""
+    $fwd = " -SkipSync -DesktopEnvFile `"$DesktopEnvFile`" -InferHubEnvFile `"$InferHubEnvFile`" -LocalEnvFile `"$LocalEnvFile`""
     $cmd = "cmd.exe /c powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$PSCommandPath`" -Port $Port$fwd 1> `"$StdoutLog`" 2> `"$StderrLog`""
     $proc = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd }
     if ($proc.ReturnValue -ne 0) {

@@ -16,9 +16,11 @@ Aliases (InferHub seats; include Claude Code API ids so local Claude works):
     -> fast seat (Claude Code background/small-fast calls). Default fast seat is
     cb/deepseek-v4.1-flash; set "fast_inferhub_id" in the seat file or pass --fast
     (empty string = use the main seat). The fast aliases get their own fallback
-    chain in config/inferhub_fallbacks.yaml (role "fast"). claude-haiku-4-5 (no date) is NOT
-    aliased here because CKFF already serves that name. The dated id is Claude
-    Code's own haiku name, so the launchers pin the haiku tier to it.
+    chain in config/inferhub_fallbacks.yaml (role "fast"). claude-haiku-4-5 (no date) is
+    also aliased to the fast seat while CKFF is off (the default since 2026-10-04,
+    config/providers.yaml); with CKFF on it is left alone because CKFF serves that
+    name. The dated id is Claude Code's own haiku name, so the launchers pin the
+    haiku tier to it.
 
 Opt-in seats (never the default): cx/gpt-6.1-sol may be picked as main or
 advisor with --main/--advisor or in the seat file. cx routes go over chat
@@ -41,6 +43,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import provider_switch  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SEAT = ROOT / "config" / "inferhub_seat.json"
 DEFAULT_OUT = ROOT / "config" / "inferhub_aliases.yaml"
@@ -48,6 +53,8 @@ DEFAULT_API_BASE = "https://api.inferhub.dev/v1"
 
 MAIN_ALIASES = ["main", "sonnet", "claude-sonnet-5", "ih-main", "ih-sonnet", "inferhub-sonnet"]
 FAST_ALIASES = ["haiku", "claude-haiku-5", "claude-haiku-4-5-20251001", "small-fast", "ih-haiku", "ih-small-fast", "inferhub-haiku"]
+# Only used when CKFF is off; with CKFF on, CKFF owns this name.
+CKFF_OWNED_FAST_ALIASES = ["claude-haiku-4-5"]
 DEFAULT_FAST_ID = "cb/deepseek-v4.1-flash"
 # The old default. Every seat file written before the change carries it even though no
 # launcher ever offered a fast-seat pick, so it is read as "not picked".
@@ -168,7 +175,10 @@ def main() -> int:
         lines.extend(entry(a, main_id, args.api_base.rstrip("/"), "main"))
     for a in ADVISOR_ALIASES:
         lines.extend(entry(a, advisor_effective, args.api_base.rstrip("/"), advisor_role))
-    for a in FAST_ALIASES:
+    fast_aliases = list(FAST_ALIASES)
+    if not provider_switch.ckff_enabled():
+        fast_aliases += CKFF_OWNED_FAST_ALIASES
+    for a in fast_aliases:
         lines.extend(entry(a, fast_effective, args.api_base.rstrip("/"), "fast" if fast_id else "fast-fallback-main"))
 
     out_seat = {

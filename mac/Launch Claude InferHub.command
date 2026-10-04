@@ -109,8 +109,9 @@ MODEL_COUNT="$(printf '%s\n' "$MODELS" | grep -c '|')"
 # shellcheck source=SCRIPTDIR/lib/nav.sh
 . "$REPO_ROOT/mac/lib/nav.sh"
 
-# Env names handed to the LiteLLM process (values never logged).
-PROXY_ENV_NAMES="INFERHUB_API_KEY INFERHUB_API_URL LITELLM_MASTER_KEY CKFF_DEFAULT_KEY CKFF_GROK_KEY CKFF_KIRO_KEY CKFF_KIMI_KEY CKFF_GEMINI_CLI_KEY CKFF_CODEX_CC_KEY CKFF_CODEX_PLUS_KEY CKFF_CODEX_PRO_KEY CKFF_IMAGEGEN_KEY CKFF_EMBED_KEY"
+# Env names handed to the LiteLLM process (values never logged). No CKFF keys:
+# CKFF is off since 2026-10-04 (shared/litellm/config/providers.yaml).
+PROXY_ENV_NAMES="INFERHUB_API_KEY INFERHUB_API_URL LITELLM_MASTER_KEY"
 
 # Tools installed by this script land here; put them first on PATH.
 PATH="$HOME/.local/bin:$STATE_DIR/node/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
@@ -459,6 +460,8 @@ ensure_proxy() {
   log "Starting LiteLLM on $PROXY_BASE (background; logs in $logs) ..."
   (
     cd "$LITELLM_DIR" || exit 1
+    # CKFF is off: nothing CKFF inherited from the shell reaches the proxy.
+    for n in $(env | awk -F= 'tolower($1) ~ /^ckff[a-z0-9_]*$/ {print $1}'); do unset "$n"; done
     export_proxy_env
     export PYTHONUTF8=1 LITELLM_LOCAL_MODEL_COST_MAP=True
     # Keyless on 127.0.0.1: LiteLLM 1.104+ refuses to start without a master
@@ -747,9 +750,12 @@ uc_models() {
   uv run --no-project python "$REPO_ROOT/shared/ultracode/uc_models.py" "$@"
 }
 
-# last_pick KEY: a value from last-picks.json ("" when missing).
+# last_pick KEY: a value from last-picks.json ("" when missing). A saved CKFF
+# model (Astra included; CKFF is off since 2026-10-04) reads as "", so the
+# step falls back to its default.
 last_pick() {
-  sed -n "s/.*\"$1\": *\"\([^\"]*\)\".*/\1/p" "$LAST_PICKS" 2>/dev/null | head -1
+  sed -n "s/.*\"$1\": *\"\([^\"]*\)\".*/\1/p" "$LAST_PICKS" 2>/dev/null | head -1 \
+    | grep -viE 'ckff|astra' || true
 }
 
 # Writes last-picks.json: the launch target and the UltraCode picks (kept from
@@ -1171,7 +1177,7 @@ main() {
   cd "$PROJECT_DIR" || die "cannot cd to $PROJECT_DIR"
   log ""
   log "cwd=$PROJECT_DIR"
-  log "proxy=$ANTHROPIC_BASE_URL  (unified CKFF+InferHub LiteLLM)"
+  log "proxy=$ANTHROPIC_BASE_URL  (local LiteLLM, InferHub only; CKFF off)"
   log "small_fast=$ANTHROPIC_SMALL_FAST_MODEL  (InferHub cheap side model for search/hooks)"
   log "seat_alias=$SEAT_ALIAS  behavesAs=claude-sonnet-5"
   log "tiers=sonnet:claude-sonnet-5 opus:claude-opus-5-5 fable:claude-fable-5 haiku:claude-haiku-4-5-20251001 (all proxy seat aliases)"

@@ -1,0 +1,12 @@
+# Which provider groups the local proxy serves.
+#
+# CKFF has been turned off by default since 2026-10-04 because it is unstable.
+# Its config (config/config.yaml, catalog/, models.yaml) is kept as-is so it can
+# come back at any time.
+#
+# To turn CKFF back on, either:
+#   - change the line below to: ckff_enabled: true
+#   - or set the environment variable LITELLM_ENABLE_CKFF=1 before starting
+#     (LITELLM_ENABLE_CKFF=0 forces it off; the variable wins over this file).
+# Then run start-litellm.ps1 again, or re-run scripts/merge_litellm_config.py.
+ckff_enabled: false

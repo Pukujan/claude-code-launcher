@@ -115,6 +115,9 @@ def normalize(raw) -> dict | None:
     """
     if not isinstance(raw, dict) or not raw.get("top20"):
         return None
+    raw = _without_ckff(raw)
+    if not raw.get("top20"):
+        return None
     pp = raw.get("price_policy") or {}
     cap = pp.get("free_below_per_mtok", pp.get("max_cost_per_mtok"))
     lad = {}
@@ -134,6 +137,18 @@ def normalize(raw) -> dict | None:
            "top20": raw["top20"], "frontier": list(raw.get("frontier") or []),
            "ladders": lad, "retry": retry}
     return out if _usable(out) else None
+
+
+def _without_ckff(raw: dict) -> dict:
+    """CKFF is off (2026-10-04): drop CKFF/Astra routes from an IRE bundle, even an
+    old ire.json passed in, with shared/ire's own filter. Empty ladders fall back
+    to the fixed chains below."""
+    ire = SHARED / "ire"
+    if str(ire) not in sys.path:
+        sys.path.insert(0, str(ire))
+    import ire_fetch  # type: ignore
+    fixed = {k: [v["primary"], *v["fallbacks"]] for k, v in FIXED_LADDERS.items()}
+    return ire_fetch.without_ckff(raw, fixed)
 
 
 def _usable(b) -> bool:

@@ -11,9 +11,13 @@ from conftest import LITELLM, SCRIPTS
 import merge_litellm_config as merge
 
 
-def run(script, *args):
+def run(script, *args, ckff=None):
+    env = dict(os.environ)
+    env.pop("LITELLM_ENABLE_CKFF", None)
+    if ckff is not None:
+        env["LITELLM_ENABLE_CKFF"] = "1" if ckff else "0"
     return subprocess.run([sys.executable, str(SCRIPTS / script), *args],
-                          capture_output=True, text=True, check=False)
+                          capture_output=True, text=True, check=False, env=env)
 
 
 def aliases(path):
@@ -62,9 +66,14 @@ def test_fast_seat_aliases_default_to_deepseek_flash(tmp_path):
     a = aliases(out)
     for name in ("haiku", "claude-haiku-5", "claude-haiku-4-5-20251001", "small-fast", "ih-haiku", "ih-small-fast", "inferhub-haiku"):
         assert a[name] == "openai/cb/deepseek-v4.1-flash"
-    # CKFF serves claude-haiku-4-5, so the seat must not shadow it.
-    assert "claude-haiku-4-5" not in a
+    # CKFF is off by default, so claude-haiku-4-5 goes to the fast seat too.
+    assert a["claude-haiku-4-5"] == "openai/cb/deepseek-v4.1-flash"
     assert json.loads(seat.read_text())["fast_inferhub_id"] == "cb/deepseek-v4.1-flash"
+    # With CKFF switched back on, CKFF owns claude-haiku-4-5 and the seat leaves it alone.
+    r = run("apply_inferhub_seat.py", "--seat", str(seat), "--out", str(out),
+            "--main", "cbcn/glm-5.3-flash", "--advisor", "", "--no-merge", "--no-reload", ckff=True)
+    assert r.returncode == 0, r.stderr
+    assert "claude-haiku-4-5" not in aliases(out)
 
 
 def test_old_default_fast_seat_in_seat_file_moves_to_new_default(tmp_path):
@@ -209,7 +218,7 @@ def _seat_yaml(tmp_path, main, advisor):
     out = tmp_path / "aliases.yaml"
     r = run("apply_inferhub_seat.py", "--seat", str(tmp_path / "s.json"), "--out", str(out),
             "--main", main, "--advisor", advisor, "--fast", "ali/qwen3.8-flash",  # goldens predate the deepseek fast default
-            "--no-merge", "--no-reload")
+            "--no-merge", "--no-reload", ckff=True)  # goldens predate the CKFF switch
     assert r.returncode == 0, r.stderr
     text = out.read_text(encoding="utf-8")
     return "".join(ln for ln in text.splitlines(keepends=True) if not ln.startswith("# Generated: "))
