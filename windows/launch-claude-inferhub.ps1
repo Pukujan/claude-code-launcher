@@ -245,16 +245,61 @@ function Get-DefaultChain {
   return $chain
 }
 
+function Get-LastPicksPath {
+  # Next to this script (windows\last-picks.json, git-ignored). CCL_LAST_PICKS overrides (tests).
+  if ($env:CCL_LAST_PICKS) { return $env:CCL_LAST_PICKS }
+  return (Join-Path $PSScriptRoot "last-picks.json")
+}
+
+function Read-LastPicks {
+  # The cache file (model picks by slot, "" = OFF/none, plus start_dir). Empty when missing or unreadable.
+  $out = @{}
+  $p = Get-LastPicksPath
+  if (-not (Test-Path -LiteralPath $p)) { return $out }
+  try {
+    $j = Get-Content -LiteralPath $p -Raw -Encoding UTF8 | ConvertFrom-Json
+    foreach ($prop in $j.PSObject.Properties) { if ($null -ne $prop.Value) { $out[$prop.Name] = [string]$prop.Value } }
+  } catch {}
+  return $out
+}
+
+function Write-LastPicks {
+  # Merge $Values into the cache file and write it back.
+  param($Values)
+  $p = Get-LastPicksPath
+  $c = Read-LastPicks
+  foreach ($k in @($Values.Keys)) { $c[$k] = $Values[$k] }
+  $o = [ordered]@{}
+  foreach ($k in @("main", "main1", "main2", "adv", "adv1", "adv2", "start_dir")) { if ($c.ContainsKey($k)) { $o[$k] = $c[$k] } }
+  try { [IO.File]::WriteAllText($p, ($o | ConvertTo-Json), [Text.UTF8Encoding]::new($false)) } catch {}
+}
+
+function Save-LastPicks {
+  param($S)
+  $v = @{}
+  foreach ($k in @("main", "main1", "main2", "adv", "adv1", "adv2")) { $v[$k] = $(if ($null -ne $S[$k]) { $S[$k] } else { "" }) }
+  Write-LastPicks $v
+}
+
+function Get-StartPick {
+  # Highlight for a step: this session's pick, else last session's (if still listed), else the default.
+  param($S, $Last, [string]$Slot, $Choices, [string]$Default)
+  $ids = @($Choices | ForEach-Object { $_.Id })
+  if ($null -ne $S[$Slot] -and $ids -contains $S[$Slot]) { return $S[$Slot] }
+  if ($null -ne $Last -and $Last.ContainsKey($Slot) -and $ids -contains $Last[$Slot]) { return $Last[$Slot] }
+  return $Default
+}
+
 function Invoke-ModelStep {
   # A model step. $Slot: main, main1, main2, adv, adv1, adv2. Writes the pick to $S.
-  param([string]$Slot, $S)
+  param([string]$Slot, $S, $Last = @{})
   $role = $(if ($Slot -like "main*") { "main" } else { "advisor" })
   $seat = $(if ($role -eq "main") { "MAIN" } else { "ADVISOR" })
   $help = @("Up/Down move. Enter picks. Left = previous step, Right = next step (keeps the highlighted pick). Esc quits.")
   if ($Slot -eq "main") {
     $choices = @($Models)
     $lines = @(foreach ($m in $choices) { Format-OldModelLine $m $(if ($m.Id -eq $DefaultModelId) { "*" } else { " " }) })
-    $want = $(if ($null -ne $S.main) { $S.main } else { $DefaultModelId })
+    $want = Get-StartPick -S $S -Last $Last -Slot $Slot -Choices $choices -Default $DefaultModelId
     $title = "Step 1: choose MAIN model (IRE Top 20). Default DeepSeek V4.1 Flash."
     $help += "MAIN executor (maps to alias sonnet/main). gated = ranked but not currently recommendation-eligible."
   } elseif ($Slot -eq "adv") {
@@ -262,7 +307,7 @@ function Invoke-ModelStep {
     $lines = @(foreach ($m in $choices) {
       if ($m.Id -eq "") { "   OFF  (disable advisor tool / seat aliases fall back to main)" } else { Format-OldModelLine $m }
     })
-    $want = $(if ($null -ne $S.adv) { $S.adv } else { "" })
+    $want = Get-StartPick -S $S -Last $Last -Slot $Slot -Choices $choices -Default ""
     $title = "Step 4: choose ADVISOR model (IRE Top 20) or OFF."
     $help += "Mid-session use /advisor opus or /advisor sonnet (aliases), not raw InferHub ids."
   } else {
@@ -276,7 +321,7 @@ function Invoke-ModelStep {
     })
     $chain = @(Get-DefaultChain -Role $role -PrimaryId $primary | Where-Object { $taken -notcontains $_ })
     $dflt = $(if ($chain.Count -gt 0) { $chain[0] } else { "" })
-    $want = $(if ($null -ne $S[$Slot] -and ($taken -notcontains $S[$Slot] -or $S[$Slot] -eq "")) { $S[$Slot] } else { $dflt })
+    $want = Get-StartPick -S $S -Last $Last -Slot $Slot -Choices $choices -Default $dflt
     $n = $(if ($isSecond) { "2nd" } else { "3rd" })
     $step = @{ main1 = 2; main2 = 3; adv1 = 5; adv2 = 6 }[$Slot]
     $title = "Step " + $step + ": " + $seat + " " + $n + " model (fallback " + $(if ($isSecond) { 1 } else { 2 }) + ") after " + $primary + "   default: " + $(if ($dflt) { $dflt } else { "none" })
@@ -290,17 +335,10 @@ function Invoke-ModelStep {
 }
 
 function Get-StartDir {
-  # Per-PC start folder: $env:CCL_START_DIR, else "start_dir" in
-  # %LOCALAPPDATA%\claude-code-launcher\settings.json, else $Root.
-  $cands = @($env:CCL_START_DIR)
-  $base = $(if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $HOME "AppData\Local" })
-  $settings = Join-Path $base "claude-code-launcher\settings.json"
-  if (Test-Path -LiteralPath $settings) {
-    try { $cands += [string](Get-Content -LiteralPath $settings -Raw -Encoding UTF8 | ConvertFrom-Json).start_dir } catch {}
-  }
-  $cands += @($Root, $SecondaryRoot)
-  foreach ($c in $cands) {
-    if ($c -and (Test-Path -LiteralPath $c -PathType Container)) { return (Resolve-Path -LiteralPath $c).Path }
+  # Folder step start: start_dir saved with the D key (cache file), else D:\development, else home.
+  $c = Read-LastPicks
+  foreach ($d in @($c["start_dir"], "D:\development", $HOME)) {
+    if ($d -and (Test-Path -LiteralPath $d -PathType Container)) { return (Resolve-Path -LiteralPath $d).Path }
   }
   return ""
 }
@@ -324,15 +362,21 @@ function Get-FolderView {
 function Step-FolderNav {
   # One key of the folder step. $State = @{ Path; Index }; Path "" = drive list.
   # Returns @{ Done = $false }, @{ Done = $true; Path = <dir> } for a pick, or
-  # @{ Done = $true; Back = $true } for Left at the drive list.
+  # @{ Done = $true; Back = $true } for Backspace (back to the model steps).
   param($State, [ConsoleKey]$Key, [int]$PageSize = 10)
   $view = @(Get-FolderView -Path $State.Path)
   switch ($Key) {
     ([ConsoleKey]::RightArrow) {
       if ($view.Count -gt 0) { $State.Path = $view[$State.Index].FullName; $State.Index = 0 }
     }
+    ([ConsoleKey]::Backspace) { return @{ Done = $true; Back = $true } }   # back to the last model step
+    ([ConsoleKey]::D) {
+      # Highlighted folder (or this one) becomes this PC's default start folder.
+      $d = $(if ($view.Count -gt 0) { $view[$State.Index].FullName } else { $State.Path })
+      if ($d) { Write-LastPicks @{ start_dir = $d }; $State.Message = "Default start folder set: " + $d }
+    }
     ([ConsoleKey]::LeftArrow) {
-      if (-not $State.Path) { return @{ Done = $true; Back = $true } }
+      if (-not $State.Path) { return @{ Done = $false } }                  # drive list: nothing above
       $child = $State.Path.TrimEnd('\')
       if ($child -match '^[A-Za-z]:$') { $parent = "" }          # D:\ -> drive list
       else { $parent = [IO.Path]::GetDirectoryName($child) }       # D:\development -> D:\
@@ -355,10 +399,10 @@ function Step-FolderNav {
 }
 
 function Invoke-FolderStep {
-  # Folder step. Returns the folder, or $null when Left at the drive list goes back.
+  # Folder step. Returns the folder, or $null when Backspace goes back to the models.
   param($State)
   $help = @(
-    "Up/Down move. Right opens the highlighted folder, Left goes up (from the drive list: previous step).",
+    "Up/Down move. Right opens the highlighted folder. Left goes up a folder. Backspace: back to models. D: set default.",
     "Enter launches Claude in the highlighted folder (in this folder when it has no subfolders). Esc quits."
   )
   while ($true) {
@@ -369,11 +413,12 @@ function Invoke-FolderStep {
       $title = "Step 7: choose a project folder.   " + $(if ($State.Path) { $State.Path } else { "(drives)" })
       $lines = @($view | ForEach-Object { $_.Label })
       if ($lines.Count -eq 0) { $lines = @() }
-      Show-Picker -Title $title -Lines $lines -Index $State.Index -Help $help
+      $h = $(if ($State.Message) { @($help) + $State.Message } else { $help })
+      Show-Picker -Title $title -Lines $lines -Index $State.Index -Help $h
     }
     $k = Read-NavKey
     $r = Step-FolderNav -State $State -Key $k -PageSize $page
-    $script:NavTrace.Add(("  folder key={0,-10} at {1}" -f $k, $(if ($State.Path) { $State.Path } else { "(drives)" }))) | Out-Null
+    $script:NavTrace.Add(("  folder key={0,-10} at {1}{2}" -f $k, $(if ($State.Path) { $State.Path } else { "(drives)" }), $(if ($k -eq [ConsoleKey]::D) { "   [" + $State.Message + "]" } else { "" }))) | Out-Null
     if ($r.Done) {
       if ($r.Back) { return $null }
       return $r.Path
@@ -384,29 +429,30 @@ function Invoke-FolderStep {
 function Invoke-LaunchWizard {
   # Returns @{ Main; Advisor; MainFallbacks; AdvisorFallbacks; Folder }.
   $S = @{ main = $null; main1 = $null; main2 = $null; adv = $null; adv1 = $null; adv2 = $null }
-  $folderState = @{ Path = (Get-StartDir); Index = 0 }
+  $last = Read-LastPicks
+  $folderState = @{ Path = (Get-StartDir); Index = 0; Message = "" }
   $steps = @("main", "main1", "main2", "adv", "adv1", "adv2", "folder")
   $i = 0; $dir = 1; $folder = $null
   while ($i -lt $steps.Count) {
     if ($i -lt 0) { $i = 0 }
     $slot = $steps[$i]
     if (($slot -eq "adv1" -or $slot -eq "adv2") -and -not $S.adv) { $i += $dir; continue }   # advisor OFF
-    if ($slot -eq "main2" -and -not $S.main1) { $S.main2 = ""; $i += $dir; continue }          # no 2nd, no 3rd
-    if ($slot -eq "adv2" -and -not $S.adv1) { $S.adv2 = ""; $i += $dir; continue }
+    if ($slot -eq "main2" -and -not $S.main1) { $i += $dir; continue }   # no 2nd, no 3rd
+    if ($slot -eq "adv2" -and -not $S.adv1) { $i += $dir; continue }
     if ($slot -eq "folder") {
       $folder = Invoke-FolderStep -State $folderState
-      if ($folder) { break }
-      $dir = -1; $i--; continue
+      if ($folder) { Save-LastPicks -S $S; break }
+      $dir = -1; $i--; $folderState = @{ Path = (Get-StartDir); Index = 0; Message = "" }; continue
     }
-    $action = Invoke-ModelStep -Slot $slot -S $S
+    $action = Invoke-ModelStep -Slot $slot -S $S -Last $last
     if ($action -eq "back") { $dir = -1; $i-- } else { $dir = 1; $i++ }
   }
   $main = $Models | Where-Object { $_.Id -eq $S.main } | Select-Object -First 1
   $adv = $(if ($S.adv) { $Models | Where-Object { $_.Id -eq $S.adv } | Select-Object -First 1 } else { @{ Rank = 0; Name = "OFF (no advisor)"; Id = ""; Eligible = $true; Cost = "-" } })
   return @{
     Main = $main; Advisor = $adv; Folder = $folder
-    MainFallbacks = @(@($S.main1, $S.main2) | Where-Object { $_ })
-    AdvisorFallbacks = @(@($S.adv1, $S.adv2) | Where-Object { $_ })
+    MainFallbacks = @($(if ($S.main1) { @($S.main1, $S.main2) }) | Where-Object { $_ })
+    AdvisorFallbacks = @($(if ($S.adv -and $S.adv1) { @($S.adv1, $S.adv2) }) | Where-Object { $_ })
   }
 }
 
