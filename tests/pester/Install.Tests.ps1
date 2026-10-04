@@ -204,7 +204,8 @@ s.serve_forever()
 '@
         function Start-FakeServer([string]$Instance) {
             $psi = [Diagnostics.ProcessStartInfo]::new($script:py)
-            $psi.ArgumentList.Add($script:srv); $psi.ArgumentList.Add($Instance)
+            # ProcessStartInfo.ArgumentList is .NET Core only; Windows PowerShell 5.1 needs Arguments.
+            $psi.Arguments = '"' + $script:srv + '" ' + $Instance
             $psi.RedirectStandardOutput = $true; $psi.UseShellExecute = $false
             $p = [Diagnostics.Process]::Start($psi)
             $port = [int]$p.StandardOutput.ReadLine()
@@ -400,11 +401,13 @@ Describe 'Relations between runs' -Tag 'Metamorphic' {
             '{"z":[1,2],"advisorModel":"opus","env":{"A":"1"},"theme":"dark"}' | Set-Content (Join-Path $b.ClaudeDir 'settings.json')
             Invoke-SandboxInstall $a -Extra @{ InferHubKey = 'ih-r' } | Should -Be 0
             Invoke-SandboxInstall $b -Extra @{ InferHubKey = 'ih-r' } | Should -Be 0
-            $ja = Get-Content (Join-Path $a.ClaudeDir 'settings.json') -Raw | ConvertFrom-Json -AsHashtable
-            $jb = Get-Content (Join-Path $b.ClaudeDir 'settings.json') -Raw | ConvertFrom-Json -AsHashtable
-            ($ja | ConvertTo-Json -Depth 10 -Compress) -eq ($ja | ConvertTo-Json -Depth 10 -Compress) | Should -BeTrue
-            foreach ($k in $ja.Keys) { ($ja[$k] | ConvertTo-Json -Depth 10 -Compress) | Should -Be ($jb[$k] | ConvertTo-Json -Depth 10 -Compress) }
-            @($ja.Keys | Sort-Object) | Should -Be @($jb.Keys | Sort-Object)
+            # Compare key-order-independently (ConvertFrom-Json -AsHashtable is pwsh 7 only).
+            $py = (Get-Command python3, python -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+            $canon = 'import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding="utf-8-sig")), sort_keys=True))'
+            $ca = & $py -c $canon (Join-Path $a.ClaudeDir 'settings.json')
+            $cb = & $py -c $canon (Join-Path $b.ClaudeDir 'settings.json')
+            $ca | Should -Not -BeNullOrEmpty
+            $ca | Should -Be $cb
         } finally { Remove-Sandbox $a; Remove-Sandbox $b }
     }
 }
