@@ -190,6 +190,7 @@ $script:NavKeys = $null
 $script:NavQuiet = $false
 $script:NavTrace = New-Object System.Collections.ArrayList
 $script:ChainCache = @{}
+$script:FrontierRows = $null
 
 function Read-NavKey {
   if ($null -ne $script:NavKeys) {
@@ -202,8 +203,9 @@ function Read-NavKey {
 
 function Select-FromList {
   # One pointer list. Returns @{ Action = "pick"|"forward"|"back"; Index = n }.
-  param([string]$Title, [string[]]$Lines, [int]$Index, [string[]]$Help)
-  if ($Index -lt 0 -or $Index -ge $Lines.Count) { $Index = 0 }
+  # $Skip: row index the pointer never stops on (the Frontier divider), -1 = none.
+  param([string]$Title, [string[]]$Lines, [int]$Index, [string[]]$Help, [int]$Skip = -1)
+  if ($Index -lt 0 -or $Index -ge $Lines.Count -or $Index -eq $Skip) { $Index = 0 }
   while ($true) {
     if (-not $script:NavQuiet) { Show-Picker -Title $Title -Lines $Lines -Index $Index -Help $Help }
     $k = Read-NavKey
@@ -213,7 +215,14 @@ function Select-FromList {
       ([ConsoleKey]::RightArrow) { return @{ Action = "forward"; Index = $Index } }
       ([ConsoleKey]::LeftArrow)  { return @{ Action = "back"; Index = $Index } }
       ([ConsoleKey]::Escape)     { throw "Cancelled." }
-      default { $Index = Move-MenuIndex -Index $Index -Count $Lines.Count -KeyCode ([int]$k) -PageSize $page }
+      default {
+        $old = $Index
+        $Index = Move-MenuIndex -Index $Index -Count $Lines.Count -KeyCode ([int]$k) -PageSize $page
+        if ($Index -eq $Skip) {
+          if ($Index -lt $old) { $Index-- } else { $Index++ }
+          if ($Index -lt 0 -or $Index -ge $Lines.Count) { $Index = $old }
+        }
+      }
     }
   }
 }
@@ -222,6 +231,28 @@ function Format-OldModelLine {
   param($m, [string]$Star = " ")
   $tag = $(if ($m.Eligible) { "eligible" } else { "gated" })
   "{0}{1,2}  {2,-28} {3,-42} {4}  ~{5}/Mtok" -f $Star, $m.Rank, $m.Name, $m.Id, $tag, $m.Cost
+}
+
+function Get-FrontierModels {
+  # IRE frontier list: the "frontier" key of ire_fetch.py's JSON ($env:CCL_IRE_JSON),
+  # else the last fetched copy. Empty when there is none. Loaded once.
+  if ($null -ne $script:FrontierRows) { return $script:FrontierRows }
+  $rows = @()
+  $base = $(if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $HOME "AppData\Local" })
+  foreach ($f in @($env:CCL_IRE_JSON, (Join-Path $base "claude-code-launcher\ire.json"))) {
+    if (-not $f -or -not (Test-Path -LiteralPath $f)) { continue }
+    try { $j = Get-Content -LiteralPath $f -Raw -Encoding UTF8 | ConvertFrom-Json } catch { continue }
+    $rows = @(foreach ($r in @($j.frontier)) {
+      if (-not $r.route) { continue }
+      $c = $(if ($null -ne $r.cost_per_mtok) { [double]$r.cost_per_mtok } else { $null })
+      @{ Rank = $r.rank; Name = [string]$r.name; Id = [string]$r.route; Eligible = [bool]$r.eligible
+         Cost = $(if ($null -ne $c) { $c.ToString("0.000", [Globalization.CultureInfo]::InvariantCulture) } else { "?" })
+         Over = ($null -ne $c -and $c -gt 0.10) }
+    })
+    if ($rows.Count -gt 0) { break }
+  }
+  $script:FrontierRows = $rows
+  return $rows
 }
 
 function Get-DefaultChain {
@@ -296,6 +327,7 @@ function Invoke-ModelStep {
   $role = $(if ($Slot -like "main*") { "main" } else { "advisor" })
   $seat = $(if ($role -eq "main") { "MAIN" } else { "ADVISOR" })
   $help = @("Up/Down move. Enter picks. Left = previous step, Right = next step (keeps the highlighted pick). Esc quits.")
+  $taken = @()
   if ($Slot -eq "main") {
     $choices = @($Models)
     $lines = @(foreach ($m in $choices) { Format-OldModelLine $m $(if ($m.Id -eq $DefaultModelId) { "*" } else { " " }) })
@@ -326,9 +358,25 @@ function Invoke-ModelStep {
     $step = @{ main1 = 2; main2 = 3; adv1 = 5; adv2 = 6 }[$Slot]
     $title = "Step " + $step + ": " + $seat + " " + $n + " model (fallback " + $(if ($isSecond) { 1 } else { 2 }) + ") after " + $primary + "   default: " + $(if ($dflt) { $dflt } else { "none" })
   }
+  # Frontier section under the Top 20, after a divider the pointer skips.
+  $skip = -1
+  $fr = @(Get-FrontierModels | Where-Object { $taken -notcontains $_.Id })
+  if ($fr.Count -gt 0) {
+    $skip = $choices.Count
+    $choices += @{ Rank = 0; Name = "divider"; Id = $null; Eligible = $false; Cost = "-" }
+    $lines += "   -- Frontier --"
+    foreach ($m in $fr) {
+      $choices += $m
+      $lines += ((Format-OldModelLine $m) + $(if ($m.Over) { "  OVER `$0.10" } else { "" }))
+    }
+    $help += "Frontier rows are above the Top 20 price band. OVER `$0.10 = more than `$0.10 per 1M tokens."
+    if ($null -ne $S[$Slot] -or ($null -ne $Last -and $Last.ContainsKey($Slot))) {
+      $want = Get-StartPick -S $S -Last $Last -Slot $Slot -Choices $choices -Default $want
+    }
+  }
   $index = 0
-  for ($i = 0; $i -lt $choices.Count; $i++) { if ($choices[$i].Id -eq $want) { $index = $i; break } }
-  $r = Select-FromList -Title $title -Lines $lines -Index $index -Help $help
+  for ($i = 0; $i -lt $choices.Count; $i++) { if ($null -ne $choices[$i].Id -and $choices[$i].Id -eq $want) { $index = $i; break } }
+  $r = Select-FromList -Title $title -Lines $lines -Index $index -Help $help -Skip $skip
   if ($r.Action -ne "back") { $S[$Slot] = $choices[$r.Index].Id }
   $script:NavTrace.Add(("  step {0,-6} {1,-7} -> {2}" -f $Slot, $r.Action, $(if ($r.Action -eq "back") { "(back)" } elseif ($S[$Slot]) { $S[$Slot] } else { "OFF/none" }))) | Out-Null
   return $r.Action
@@ -447,8 +495,9 @@ function Invoke-LaunchWizard {
     $action = Invoke-ModelStep -Slot $slot -S $S -Last $last
     if ($action -eq "back") { $dir = -1; $i-- } else { $dir = 1; $i++ }
   }
-  $main = $Models | Where-Object { $_.Id -eq $S.main } | Select-Object -First 1
-  $adv = $(if ($S.adv) { $Models | Where-Object { $_.Id -eq $S.adv } | Select-Object -First 1 } else { @{ Rank = 0; Name = "OFF (no advisor)"; Id = ""; Eligible = $true; Cost = "-" } })
+  $all = @($Models) + @(Get-FrontierModels)
+  $main = $all | Where-Object { $_.Id -eq $S.main } | Select-Object -First 1
+  $adv = $(if ($S.adv) { $all | Where-Object { $_.Id -eq $S.adv } | Select-Object -First 1 } else { @{ Rank = 0; Name = "OFF (no advisor)"; Id = ""; Eligible = $true; Cost = "-" } })
   return @{
     Main = $main; Advisor = $adv; Folder = $folder
     MainFallbacks = @($(if ($S.main1) { @($S.main1, $S.main2) }) | Where-Object { $_ })
