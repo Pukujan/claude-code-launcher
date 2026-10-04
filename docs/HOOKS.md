@@ -67,3 +67,12 @@ right after each seat is picked, and once more after the last seat apply. See
   strict backends such as DeepSeek don't answer 400. A non-streaming reply with
   no text and no tool call raises a retryable 500, so retries and fallbacks
   take over; streaming replies are not checked.
+- **Advisor.** LiteLLM runs Claude Code's advisor tool itself for
+  non-Anthropic providers, and it sends the advisor model the agent's history
+  with its tool calls and tool results still in it, no system prompt and no
+  tools. DeepSeek reads that as its own agent loop and writes its next tool
+  call as raw `DSML` text, which comes back as the "advice".
+  `shared/litellm/advisor_fix.py` rewrites that request as plain text (tool
+  calls and results spelled out, thinking dropped) and puts a short "you are the
+  advisor, reply with plain-text advice" framing in front of the question. The
+  start-up log says `[sitecustomize] advisor fix installed`.
