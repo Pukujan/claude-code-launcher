@@ -340,7 +340,7 @@ nav_browse() {
         RIGHT|ENTER)
           [ ${#entries[@]} -gt 0 ] || continue
           target="${entries[$idx]}"
-          [ -n "$target" ] && [ -d "$target" ] || continue
+          if [ -z "$target" ] || [ ! -d "$target" ]; then continue; fi
           cur="$target"
           break ;;
         s)
