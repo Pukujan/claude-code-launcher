@@ -37,5 +37,9 @@ right after each seat is picked, and once more after the last seat apply. See
 - The choice goes to the running proxy as `POST /workbench/reload_runtime`
   with `{"scope": "ladder", "plan": ...}`. That is a partial, in-memory update
   that leaves the seat targets alone.
+- Failure policy: each model gets 3 retries, then the request moves to the
+  next rung. A model that used up its retries is benched for 180 s, then
+  tried again. `CCL_RETRIES` and `CCL_COOLDOWN_S` change this on one machine
+  (details in `shared/ladder/README.md`).
 - `inferhub_fallbacks.yaml` is still the starting point after a proxy restart.
   The next launch puts the picked ladder back on top.

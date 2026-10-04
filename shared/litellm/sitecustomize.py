@@ -616,7 +616,31 @@ async def _wb_handle_reload(scope, receive, send):
 _prev_starlette_call = _sa.Starlette.__call__
 
 
+_bench_hook = {"tried": False}
+
+
+def _install_bench_hook():
+    # Bench a seat or rung once it has used up its retries (see bench_after_retries.py:
+    # on the proxy LiteLLM counts all retries of one request as a single failure, so
+    # allowed_fails alone never benches it). Lazy, once, never fatal.
+    if _bench_hook["tried"]:
+        return
+    _bench_hook["tried"] = True
+    try:
+        import sys as _sys
+
+        if str(_REPO_ROOT) not in _sys.path:
+            _sys.path.insert(0, str(_REPO_ROOT))
+        import bench_after_retries as _bar
+
+        _bar.install()
+    except Exception as e:
+        print(f"[sitecustomize] bench-after-retries hook not installed: {e}", flush=True)
+
+
 async def _starlette_call_with_reload(self, scope, receive, send, _o=_prev_starlette_call):
+    if scope.get("type") == "http" and not _bench_hook["tried"]:
+        _install_bench_hook()
     if scope.get("type") == "http" and str(scope.get("path", "")) == _RELOAD_PATH:
         return await _wb_handle_reload(scope, receive, send)
     return await _o(self, scope, receive, send)

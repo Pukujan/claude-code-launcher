@@ -31,7 +31,9 @@ def test_apply_sets_fallbacks_and_keeps_seat_targets():
     seats = {d["model_name"]: d["litellm_params"]["model"] for d in r.model_list}
     assert seats["sonnet"] == "openai/cb/deepseek-v4.1-flash"  # seat routing untouched
     assert seats["ih/cbcn/minimax-m3"] == "openai/cbcn/minimax-m3"
-    assert r.model_group_retry_policy["sonnet"].InternalServerErrorRetries == 1
+    assert r.model_group_retry_policy["sonnet"].InternalServerErrorRetries == 3
+    # rungs get the same retries as the seats
+    assert r.model_group_retry_policy["ih/ali/qwen3.8-flash"].ServiceUnavailableErrorRetries == 3
     # applying again replaces, never duplicates
     proxy_apply.apply_plan(r, L.build_plan("cb/deepseek-v4.1-flash", ["cbcn/deepseek-v4-flash"], None, [], "x"))
     fb = {k: v for d in r.fallbacks for k, v in d.items()}

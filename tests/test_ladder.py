@@ -30,7 +30,7 @@ class Defaults(unittest.TestCase):
     def test_fixed_chains_are_the_builtin_defaults(self):
         self.assertEqual(I.FIXED_LADDERS["main"]["fallbacks"], ["ali/qwen3.8-flash", "cbcn/deepseek-v4-flash"])
         self.assertEqual(I.FIXED_LADDERS["advisor"]["fallbacks"], ["cbcn/minimax-m3"])
-        self.assertEqual(I.FIXED_RETRY, {"retries": 1, "cooldown_seconds": 180})
+        self.assertEqual(I.FIXED_RETRY, {"retries": 3, "cooldown_seconds": 180})
 
     def test_load_inputs_falls_back_without_ire(self):
         b = I.load_inputs(None, use_ire=False)
@@ -278,6 +278,60 @@ class CxOptIn(unittest.TestCase):
         self.assertEqual(L.litellm_model("cbcn/minimax-m3"), "openai/cbcn/minimax-m3")
 
 
+class FailurePolicySettings(unittest.TestCase):
+    def tearDown(self):
+        for k in ("CCL_RETRIES", "CCL_COOLDOWN_S"):
+            os.environ.pop(k, None)
+
+    def test_defaults_are_3_retries_and_180_s(self):
+        for k in ("CCL_RETRIES", "CCL_COOLDOWN_S"):
+            os.environ.pop(k, None)
+        self.assertEqual(I.retry_settings(), {"retries": 3, "cooldown_seconds": 180})
+        self.assertEqual(I.builtin_inputs()["retry"], {"retries": 3, "cooldown_seconds": 180})
+        ire = json.loads((ROOT / "shared" / "ire" / "defaults.json").read_text())
+        self.assertEqual((ire["retries"], ire["cooldown_s"]), (3, 180))
+
+    def test_env_overrides_win_over_ire_and_defaults(self):
+        os.environ["CCL_RETRIES"] = "2"
+        os.environ["CCL_COOLDOWN_S"] = "20"
+        self.assertEqual(I.retry_settings({"retries": 5, "cooldown_seconds": 600}),
+                         {"retries": 2, "cooldown_seconds": 20})
+        b = I.normalize({"source": "live", "top20": I.builtin_inputs()["top20"],
+                         "price_policy": {"free_below_per_mtok": 0.1},
+                         "ladders": {"main": ["cb/deepseek-v4.1-flash"], "advisor": ["cbcn/glm-5.3-flash"]},
+                         "retries": 3, "cooldown_s": 180})
+        self.assertEqual(b["retry"], {"retries": 2, "cooldown_seconds": 20})
+
+    def test_bad_env_values_are_ignored(self):
+        os.environ["CCL_RETRIES"] = "lots"
+        os.environ["CCL_COOLDOWN_S"] = "0"
+        self.assertEqual(I.retry_settings(), {"retries": 3, "cooldown_seconds": 180})
+
+    def test_apply_reads_env_at_apply_time(self):
+        import subprocess
+        import tempfile
+        cli = ROOT / "shared" / "ladder" / "ladder_cli.py"
+        with tempfile.TemporaryDirectory() as t:
+            st = Path(t) / "state.json"
+            env = {k: v for k, v in os.environ.items() if k not in ("CCL_RETRIES", "CCL_COOLDOWN_S")}
+            subprocess.run([sys.executable, str(cli), "choose", "--state", str(st), "--role", "main",
+                            "--primary", "cb/deepseek-v4.1-flash", "--no-ire", "--non-interactive"],
+                           env=env, check=True, capture_output=True)
+            env.update(CCL_RETRIES="1", CCL_COOLDOWN_S="20")
+            subprocess.run([sys.executable, str(cli), "apply", "--state", str(st),
+                            "--base-url", "http://127.0.0.1:9"], env=env, capture_output=True)
+            plan = json.loads((Path(t) / "ladder-plan.json").read_text())
+        self.assertEqual(plan["retry_policy"]["ServiceUnavailableErrorRetries"], 1)
+        self.assertEqual(plan["cooldown"]["cooldown_time"], 20.0)
+        self.assertEqual(plan["cooldown"]["allowed_fails_policy"]["ServiceUnavailableErrorAllowedFails"], 1)
+
+    def test_picker_says_it_plainly(self):
+        out = io.StringIO()
+        L.prompt_ladder(I.builtin_inputs(), "main", "cb/deepseek-v4.1-flash", (), inp=lambda _: "", out=out)
+        self.assertIn("each model gets 3 retries, then the next rung; a model that fails is benched for 180 s",
+                      out.getvalue())
+
+
 class Plan(unittest.TestCase):
     def test_plan_shape(self):
         p = L.build_plan("cb/deepseek-v4.1-flash", ["ali/qwen3.8-flash"], "cbcn/glm-5.3-flash",
@@ -285,8 +339,12 @@ class Plan(unittest.TestCase):
         self.assertEqual(p["fallbacks"]["sonnet"], ["ih/ali/qwen3.8-flash"])
         self.assertEqual(p["fallbacks"]["opus"], ["ih/cbcn/minimax-m3"])
         self.assertEqual({d["model_name"] for d in p["deployments"]}, {"ih/ali/qwen3.8-flash", "ih/cbcn/minimax-m3"})
-        self.assertEqual(p["retry_policy"]["InternalServerErrorRetries"], 1)
+        self.assertEqual(p["retry_policy"]["InternalServerErrorRetries"], 3)
+        self.assertEqual(p["retry_policy"]["ServiceUnavailableErrorRetries"], 3)
+        self.assertEqual(p["retry_policy"]["TimeoutErrorRetries"], 0)
         self.assertEqual(p["cooldown"]["cooldown_time"], 180.0)
+        # benched by the failure that uses up the last retry
+        self.assertEqual(p["cooldown"]["allowed_fails_policy"]["ServiceUnavailableErrorAllowedFails"], 3)
         self.assertNotIn("sk-", json.dumps(p))
         for d in p["deployments"]:
             self.assertEqual(d["litellm_params"]["api_key"], "os.environ/INFERHUB_API_KEY")

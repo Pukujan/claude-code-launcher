@@ -1,9 +1,34 @@
 # Fallback ladders for the main and advisor seats
 
 A ladder is the ordered list of routes the proxy tries when a seat's primary
-model fails. Each failure gets one retry, and then the request goes to the
-next rung. A route that keeps failing is benched for 180 seconds, so later
-requests skip it and go straight to a working rung.
+model fails.
+
+## Failure policy
+
+- When the 1st model fails, the proxy tries the 2nd, then the 3rd.
+- Each model gets **3 retries** before the request moves on, so it's tried up
+  to 4 times in all. Retries cover rate limits (including InferHub's 402
+  "no provider under bid") and 5xx errors. Timeouts, bad requests and auth
+  errors aren't retried.
+- The failure that uses up a model's last retry **benches** it for
+  **180 seconds**. While it's benched, new requests skip it and go straight
+  to the next rung. When the bench time is up, the 1st model is tried again.
+- The bench is done by `shared/litellm/bench_after_retries.py`, not by
+  LiteLLM's allowed-fails counter. On the proxy, LiteLLM 1.103 logs a failed
+  request once, no matter how many retries it used. So with 3 allowed fails a
+  model was only benched after 4 failed requests, which in practice meant
+  never. The hook listens for LiteLLM's fallback event, which fires only when a
+  model's retries are spent, and benches that model for its `cooldown_time`.
+  It leaves cooldowns alone for bad requests and connection errors, and it
+  doesn't extend a bench that's already running.
+- This applies to both seats (main and advisor) and to every rung. It comes
+  from three places: `shared/ire/defaults.json` (`retries`, `cooldown_s`),
+  the picker's live apply, and the proxy config
+  (`shared/litellm/config/inferhub_fallbacks.yaml`).
+- To change it on one machine, set these environment variables before
+  launching. They win over IRE and the built-in defaults:
+  - `CCL_RETRIES`: retries per model, a whole number from 0 to 10 (default 3).
+  - `CCL_COOLDOWN_S`: bench time in seconds, from 1 to 86400 (default 180).
 
 ## What Alex sees
 
@@ -11,7 +36,8 @@ After he picks the main model, the launcher shows that seat's default ladder:
 
 ```
 MAIN seat: cb/deepseek-v4.1-flash
-Default fallback ladder (IRE source: builtin; cap $0.1/1M; 1 retry, then next rung; 180 s cooldown):
+Default fallback ladder (IRE source: builtin; cap $0.1/1M):
+  each model gets 3 retries, then the next rung; a model that fails is benched for 180 s, then tried again
   1. ali/qwen3.8-flash
   2. cbcn/deepseek-v4-flash
 
@@ -39,7 +65,7 @@ chains:
 | main | `cb/deepseek-v4.1-flash` | `ali/qwen3.8-flash`, then `cbcn/deepseek-v4-flash` |
 | advisor | `cbcn/glm-5.3-flash` | `cbcn/minimax-m3` |
 
-The retry count is 1 and the cooldown is 180 seconds.
+Retries and bench time follow the failure policy above (3 retries, 180 s).
 
 From that base, the primary itself is dropped, along with any rung the Top 20
 no longer marks as eligible or that costs $0.10 per 1M tokens or more. Each
@@ -68,9 +94,9 @@ proxy's existing no-restart path, `POST /workbench/reload_runtime`, with
 
 `shared/litellm/sitecustomize.py` hands that request to `proxy_apply.py`. The
 update is partial and in memory. It adds or replaces the `ih/<route>` rung
-deployments, sets the fallback list and retry policy for each seat alias, and
-puts a 180-second cooldown with an allowed-fails policy on the seat and rung
-deployments. It never changes which model a seat alias points to.
+deployments, sets the fallback list for each seat alias, gives the seat
+aliases and the rungs the same retry policy, and puts the cooldown (180 s
+by default) and an allowed-fails policy on the seat and rung deployments. It never changes which model a seat alias points to.
 
 When the proxy has no key, the endpoint only answers loopback callers. When a
 key is set, it must be sent, and `apply` sends `LITELLM_MASTER_KEY` if it is in

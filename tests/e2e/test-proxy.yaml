@@ -1,6 +1,6 @@
 # Keyless, loopback-only test proxy for the fallback-ladder fault-injection run.
 # Seat primaries point at the deliberately broken upstream on 127.0.0.1:4019.
-# No ladders are configured here: they are applied live through /launcher/ladder.
+# No ladders are configured here: they are applied live through /workbench/reload_runtime.
 model_list:
   - model_name: sonnet
     litellm_params:
