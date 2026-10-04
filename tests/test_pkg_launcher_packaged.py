@@ -225,3 +225,16 @@ def test_a_different_port_changes_only_the_base_url(inst):
     finally:
         a.shutdown()
         b.shutdown()
+
+
+@pytest.mark.spec
+def test_packaged_env_files_read_the_tinyfish_secret_between_inferhub_and_local(inst):
+    write_state(inst, 4998)
+    script = (f"$env:CCL_LAUNCHER_LIBRARY_ONLY='1'; . '{WIN}'; "
+              "Get-CclLaunchConfig | ConvertTo-Json -Depth 5 -Compress")
+    out = subprocess.run(["pwsh", "-NoProfile", "-Command", script], env=env_for(inst), capture_output=True,
+                         text=True, timeout=120)
+    assert out.returncode == 0, out.stderr
+    files = json.loads(out.stdout.strip().splitlines()[-1])["EnvFiles"]
+    names = [f.replace("\\", "/").rsplit("/", 1)[-1] for f in files]
+    assert names == ["inferhub.env", "tinyfish.env", "local.env"], files

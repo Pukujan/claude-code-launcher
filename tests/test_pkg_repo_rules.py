@@ -70,3 +70,31 @@ def test_ci_runs_the_windows_installer_job_and_publishes_install_ps1():
     assert "Invoke-Pester" in ci
     assert "upload-artifact" in ci and "windows/install.ps1" in ci
     assert "hypothesis==" in ci
+
+
+START = REPO / "windows" / "litellm" / "start-litellm.ps1"
+
+
+@pytest.mark.spec
+def test_installer_asks_for_a_tinyfish_key():
+    text = INSTALL.read_text(encoding="utf-8-sig")
+    for p in ("TinyFishKey", "SkipTinyFish", "ChangeTinyFishKey"):
+        assert re.search(r"\$" + p + r"\b", text), p
+    for name in ("CCL_TINYFISH_KEY", "TINYFISH_API_KEY", "tinyfish.env", "agent.tinyfish.ai", "--set-tinyfish-key"):
+        assert name in text, name
+    assert "Read-Host -AsSecureString" in text
+
+
+@pytest.mark.spec
+def test_packaged_proxy_loads_the_tinyfish_secret():
+    text = START.read_text(encoding="utf-8-sig")
+    assert "secrets\\tinyfish.env" in text
+
+
+@pytest.mark.spec
+def test_friend_readme_explains_the_free_tinyfish_key():
+    text = README.read_text(encoding="utf-8")
+    assert "TinyFish" in text and "free" in text.lower()
+    assert "agent.tinyfish.ai" in text
+    assert "--set-tinyfish-key" in text
+    assert "-TinyFishKey" in text

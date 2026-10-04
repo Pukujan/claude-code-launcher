@@ -46,12 +46,15 @@ gets the script, and the installer fetches the source through `gh` when it's log
 | `-StartPort` | int | `4000` | First port tried for the proxy. |
 | `-Uninstall` | switch | off | Remove the install (see Uninstall). |
 | `-ChangeKey` | switch | off | Replace the stored key only, then restart the proxy if it runs. |
+| `-TinyFishKey` | string | none | The TinyFish Search API key (free). Wins over every other TinyFish source. |
+| `-SkipTinyFish` | switch | off | Don't ask for a TinyFish key; keep a stored one if there is one. |
+| `-ChangeTinyFishKey` | switch | off | Replace (or, with an empty answer, remove) the stored TinyFish key only, then restart the proxy if it runs. |
 | `-SkipPrereqs` | switch | off | Only check uv, git, Node, pnpm and Claude Code and warn about missing ones; never install them. |
 | `-SkipVenv` | switch | off | Don't build the LiteLLM venv (tests). |
 | `-NoTask` | switch | off | Don't register the logon task. |
 | `-NoPath` | switch | off | Don't add `bin\` to the user PATH. |
 | `-NoStart` | switch | off | Don't start the proxy at the end. |
-| `-NonInteractive` | switch | off | Never prompt. A missing key is an error (exit 4). |
+| `-NonInteractive` | switch | off | Never prompt. A missing InferHub key is an error (exit 4); a missing TinyFish key is only a warning. |
 
 ### Environment variables
 
@@ -59,6 +62,8 @@ gets the script, and the installer fetches the source through `gh` when it's log
 |---|---|
 | `CCL_INFERHUB_KEY` | The key, when `-InferHubKey` isn't given. |
 | `INFERHUB_API_KEY` | The key, when neither of the above is set. |
+| `CCL_TINYFISH_KEY` | The TinyFish key, when `-TinyFishKey` isn't given. |
+| `TINYFISH_API_KEY` | The TinyFish key, when neither of the above is set. |
 | `CCL_INSTALL_DIR` | Default for `-InstallDir`. |
 | `CCL_INSTALL_LIBRARY_ONLY` | `1` = define the functions and return without doing anything (tests). |
 | `CCL_HOME` | Set by the `claude-inferhub` shim to the install folder; makes the launcher run in packaged mode. |
@@ -67,6 +72,14 @@ Key precedence: `-InferHubKey`, then `CCL_INFERHUB_KEY`, then `INFERHUB_API_KEY`
 key already stored by an earlier install, then a masked prompt (`Read-Host -AsSecureString`).
 A key is trimmed. It must be non-empty, at most 4096 characters, and contain no CR, LF, NUL
 or double quote. Anything else is rejected with exit 2 and a message that doesn't echo the key.
+
+TinyFish key precedence: `-TinyFishKey`, then `CCL_TINYFISH_KEY`, then `TINYFISH_API_KEY`, then
+the key stored by an earlier install, then a masked prompt. The prompt says the key is free and
+where to get it (`https://agent.tinyfish.ai/api-keys`), and an empty answer skips it. Skipping
+(empty answer, `-SkipTinyFish`, or `-NonInteractive` with no key found) is never an error: the
+install goes on and prints a warning that web search can be unreliable without it and how to
+add it later (`claude-inferhub --set-tinyfish-key`). The same shape rules apply; a bad TinyFish
+key is exit 2 and checked before anything changes on disk.
 
 ## Outputs
 
@@ -77,8 +90,9 @@ or double quote. Anything else is rejected with exit 2 and a message that doesn'
 | `app\` | The launcher files at `-Ref` (replaced on every install). |
 | `install.json` | Install state (schema below). |
 | `secrets\inferhub.env` | One line, `INFERHUB_API_KEY=<key>`, UTF-8 without BOM. ACL limited to the current user on Windows. |
+| `secrets\tinyfish.env` | One line, `TINYFISH_API_KEY=<key>`, same format and ACL. Only there when a TinyFish key was given. |
 | `state\last-picks.json` | The saved slot picks and the default start folder. |
-| `state\local.env` | Optional per-user proxy settings (e.g. `TINYFISH_API_KEY`). Never created by the installer, never removed by a reinstall. |
+| `state\local.env` | Optional per-user proxy settings (e.g. `CCL_WEB_SEARCH_CHAIN`). Never created by the installer, never removed by a reinstall. |
 | `venv\` | The LiteLLM venv, built with `uv venv --python 3.12` and the pinned requirements. |
 | `logs\` | Proxy logs and PID file. |
 | `bin\claude-inferhub.cmd` | The launch command. `bin\` is added to the user PATH once. |
@@ -107,6 +121,7 @@ Nothing else in `install.json`. It never holds the key.
 | Command | Does |
 |---|---|
 | `claude-inferhub --set-key` | Runs `install.ps1 -ChangeKey` against this install (prompt, flag or env as above). |
+| `claude-inferhub --set-tinyfish-key` | Runs `install.ps1 -ChangeTinyFishKey` against this install. |
 | `claude-inferhub --uninstall` | Runs `install.ps1 -Uninstall` against this install. |
 | `claude-inferhub --non-interactive ...` | The launcher's existing non-interactive mode (Paseo, scripts). |
 
@@ -120,8 +135,8 @@ No window shows. It's re-registered whenever the port changes.
 
 ### Install (also re-install)
 
-1. Resolve and check the key (precedence above) before changing anything, so a missing or bad
-   key leaves no partial install.
+1. Resolve and check the InferHub key, then the TinyFish key (precedence above), before
+   changing anything, so a missing or bad key leaves no partial install.
 2. Check for uv, git, Node, pnpm and `claude`. Install what's missing unless `-SkipPrereqs`:
    uv from its official installer, git and Node LTS through winget, pnpm through
    corepack (falling back to its official installer), Claude Code through its official
@@ -131,7 +146,7 @@ No window shows. It's re-registered whenever the port changes.
    (`codeload.github.com`), then `gh repo clone` when gh is logged in, then
    `git clone --depth 1 --branch <ref>`. Exit 5 if all of them fail. Copying skips `.git`,
    `.env` files (except `.env.example`), `last-picks.json`, venvs, logs, tests and caches.
-   Then store the key.
+   Then store the keys (`secrets\tinyfish.env` only when there is a TinyFish key).
 4. Build the venv unless `-SkipVenv`. Exit 6 if that fails.
 5. Pick the port (below) and write `install.json`, keeping the existing `instance_id`.
 6. Write `bin\claude-inferhub.cmd`, add `bin\` to the user PATH once (unless `-NoPath`).
@@ -168,7 +183,8 @@ moves to a new free port, saves it, re-registers the task and points Claude at i
 Packaged mode is on when `CCL_HOME` is set, or `install.json` sits in the folder above the
 launcher's repo root. In packaged mode:
 
-- The only env files read are `secrets\inferhub.env` and `state\local.env` (if present).
+- The only env files read are `secrets\inferhub.env`, `secrets\tinyfish.env` and
+  `state\local.env` (each if present), in that order.
   No Desktop `configs\.env`, no `inference-recommendation-engine\.env`, no `D:\development`,
   no `C:\work`, no `shared\litellm\.env.local`, and no `CCL_ENV_ALIASES` default.
 - The folder picker starts at the saved start folder, else the user's home.
@@ -207,6 +223,8 @@ The launcher calls `sync` on every interactive launch and in non-interactive mod
 `web_search.chain_from_env(env)`: when `CCL_WEB_SEARCH_CHAIN` is unset or blank, the chain is
 `tinyfish` (only when `TINYFISH_API_KEY` is non-blank), then `ddgs`, then `you_com`. An explicit
 chain is used as given (aliases mapped, `duckduckgo` dropped, `["ddgs"]` if nothing is left).
+In a packaged install the proxy gets `TINYFISH_API_KEY` from `secrets\tinyfish.env`, so with a
+key the chain is `tinyfish`, `ddgs`, `you_com`, and without one it's `ddgs`, `you_com`.
 
 ### IRE
 
@@ -216,8 +234,10 @@ GitHub API without auth (the IRE repo is public). If that fails too, it uses the
 
 ### Key handling
 
-The key is never written to stdout, stderr, the install log, `install.json`, the task command
-line or any file except `secrets\inferhub.env`. The proxy reads it from that file at start.
+Neither key is ever written to stdout, stderr, the install log, `install.json`, the task command
+line, the shim or any file except its own `secrets\*.env`. The proxy reads them from those files
+at start. The same TinyFish key given by prompt, flag or either env variable gives the same
+stored state.
 
 ### Uninstall
 
@@ -240,7 +260,8 @@ With `CCL_INSTALL_LIBRARY_ONLY=1`, dot-sourcing `install.ps1` defines these and 
 |---|---|
 | `Test-CclKeyShape -Key <string>` | `$true` when the trimmed key is valid (rules above). |
 | `Resolve-CclInferHubKey -Flag <string> -Environment <IDictionary> -StoredPath <path> -Prompt <scriptblock> [-NonInteractive]` | Returns the key by the precedence above. Throws `CCL_NO_KEY` (non-interactive, nothing found) or `CCL_BAD_KEY`. |
-| `Write-CclSecret -Path <path> -Key <string>` / `Read-CclSecret -Path <path>` | Write or read `secrets\inferhub.env`. |
+| `Resolve-CclTinyFishKey -Flag <string> -Environment <IDictionary> -StoredPath <path> -Prompt <scriptblock> [-NonInteractive] [-Skip]` | Returns the TinyFish key by its precedence, or `$null` when skipped (never throws for a missing key; the prompt is not called with `-Skip` or `-NonInteractive`). Throws `CCL_BAD_KEY` for a bad one. |
+| `Write-CclSecret -Path <path> -Key <string> [-Name <string>]` / `Read-CclSecret -Path <path> [-Name <string>]` | Write or read a `secrets\*.env` file. `-Name` is the variable, default `INFERHUB_API_KEY` (`TINYFISH_API_KEY` for `secrets\tinyfish.env`). |
 | `New-CclInstanceId` | 32 lowercase hex characters. |
 | `Read-CclInstallState -InstallDir <path>` / `Write-CclInstallState -InstallDir <path> -State <hashtable>` | `install.json`, exactly the schema keys. |
 | `Get-CclPortState -Port <int> -InstanceId <string>` | `free`, `ours` or `foreign`. |
@@ -248,7 +269,7 @@ With `CCL_INSTALL_LIBRARY_ONLY=1`, dot-sourcing `install.ps1` defines these and 
 | `Get-CclPrereqPlan -Have <IDictionary>` | The tools to install, in order (`uv`, `git`, `node`, `pnpm`, `claude`), for the ones whose value is false. |
 | `Get-CclShimText -InstallDir <path>` | The text of `bin\claude-inferhub.cmd`. |
 | `Get-CclTaskArguments -InstallDir <path> -Port <int>` | The logon task's argument string. Never contains the key. |
-| `Invoke-CclInstall` / `Invoke-CclUninstall` | The install and uninstall flows. Take the script's parameters and return an exit code. |
+| `Invoke-CclInstall` / `Invoke-CclUninstall` | The install and uninstall flows. Take the script's parameters and return an exit code. For tests `Invoke-CclInstall` also takes `-Environment <IDictionary>` (instead of the process environment), `-KeyPrompt` and `-TinyFishPrompt` (scriptblocks instead of the masked prompts). |
 
 ### Exit codes
 
@@ -288,5 +309,5 @@ user's window); it writes the error and returns.
 
 Hidden holdout tests are written by another owner outside the repo, against the interfaces in
 this spec: the `install.ps1` parameters, environment variables, exit codes, folder layout,
-`install.json` schema, `claude-inferhub` verbs, `/ccl/identity`, `Select-CclPort`,
+`install.json` schema, `claude-inferhub` verbs, the TinyFish key handling, `/ccl/identity`, `Select-CclPort`,
 `Get-CclLaunchConfig`, `settings_sync.py`, and `chain_from_env`.

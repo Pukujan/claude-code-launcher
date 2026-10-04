@@ -22,7 +22,8 @@ BeforeAll {
     }
 
     function Invoke-SandboxInstall {
-        param($Sandbox, [hashtable]$Extra = @{}, [scriptblock]$KeyPrompt = $null, [hashtable]$Environment = $null)
+        param($Sandbox, [hashtable]$Extra = @{}, [scriptblock]$KeyPrompt = $null, [hashtable]$Environment = $null,
+            [scriptblock]$TinyFishPrompt = $null)
         $env:CLAUDE_CONFIG_DIR = $Sandbox.ClaudeDir
         $p = @{
             InstallDir = $Sandbox.InstallDir; Source = $script:Repo; SkipPrereqs = $true; SkipVenv = $true
@@ -31,6 +32,10 @@ BeforeAll {
         }
         foreach ($k in $Extra.Keys) { $p[$k] = $Extra[$k] }
         if ($KeyPrompt) { $p.KeyPrompt = $KeyPrompt }
+        # Interactive runs never reach the real masked TinyFish prompt: default to skipping it.
+        if ($TinyFishPrompt) { $p.TinyFishPrompt = $TinyFishPrompt; $p.NonInteractive = $false }
+        elseif ($KeyPrompt) { $p.TinyFishPrompt = { '' } }
+        if ($TinyFishPrompt -and -not $KeyPrompt -and -not $p.ContainsKey('InferHubKey')) { $p.InferHubKey = 'ih-default' }
         if ($Environment) { $p.Environment = $Environment } else { $p.Environment = @{} }
         return Invoke-CclInstall @p
     }
@@ -409,6 +414,169 @@ Describe 'Relations between runs' -Tag 'Metamorphic' {
             $cb = & $py -c $canon (Join-Path $b.ClaudeDir 'settings.json')
             $ca | Should -Not -BeNullOrEmpty
             $ca | Should -Be $cb
+        } finally { Remove-Sandbox $a; Remove-Sandbox $b }
+    }
+}
+
+Describe 'TinyFish key' -Tag 'Spec' {
+    BeforeEach { $script:sb = New-Sandbox }
+    AfterEach { Remove-Sandbox $script:sb }
+
+    It 'picks <Expected> from flag=<Flag> ccl=<Ccl> env=<Env> stored=<Stored>' -ForEach @(
+        @{ Flag = 'F'; Ccl = 'C'; Env = 'E'; Stored = 'S'; Expected = 'F' }
+        @{ Flag = '';  Ccl = 'C'; Env = 'E'; Stored = 'S'; Expected = 'C' }
+        @{ Flag = '';  Ccl = '';  Env = 'E'; Stored = 'S'; Expected = 'E' }
+        @{ Flag = '';  Ccl = '';  Env = '';  Stored = 'S'; Expected = 'S' }
+        @{ Flag = '';  Ccl = '';  Env = '';  Stored = '';  Expected = 'P' }
+    ) {
+        $storedFile = Join-Path $TestDrive ('tf-' + [guid]::NewGuid().ToString('N') + '.env')
+        if ($Stored) { Write-CclSecret -Path $storedFile -Key $Stored -Name 'TINYFISH_API_KEY' }
+        $envs = @{}
+        if ($Ccl) { $envs.CCL_TINYFISH_KEY = $Ccl }
+        if ($Env) { $envs.TINYFISH_API_KEY = $Env }
+        Resolve-CclTinyFishKey -Flag $Flag -Environment $envs -StoredPath $storedFile -Prompt { 'P' } | Should -Be $Expected
+    }
+    It 'the InferHub variables never count as a TinyFish key' {
+        Resolve-CclTinyFishKey -Flag '' -Environment @{ CCL_INFERHUB_KEY = 'ih'; INFERHUB_API_KEY = 'ih' } -StoredPath 'nope' -Prompt { '' } | Should -BeNullOrEmpty
+    }
+    It 'returns null for an empty answer, -Skip or -NonInteractive, without calling the prompt for the last two' {
+        Resolve-CclTinyFishKey -Flag '' -Environment @{} -StoredPath 'nope' -Prompt { '   ' } | Should -BeNullOrEmpty
+        Resolve-CclTinyFishKey -Flag '' -Environment @{} -StoredPath 'nope' -Prompt { throw 'prompted' } -Skip | Should -BeNullOrEmpty
+        Resolve-CclTinyFishKey -Flag '' -Environment @{} -StoredPath 'nope' -Prompt { throw 'prompted' } -NonInteractive | Should -BeNullOrEmpty
+    }
+    It '-Skip still keeps a stored key' {
+        $storedFile = Join-Path $TestDrive 'kept.env'
+        Write-CclSecret -Path $storedFile -Key 'tf-kept' -Name 'TINYFISH_API_KEY'
+        Resolve-CclTinyFishKey -Flag '' -Environment @{} -StoredPath $storedFile -Prompt { throw 'prompted' } -Skip | Should -Be 'tf-kept'
+    }
+    It 'throws CCL_BAD_KEY for a bad key without echoing it' {
+        try { Resolve-CclTinyFishKey -Flag "tf-secret`nx" -Environment @{} -StoredPath 'nope' -Prompt { '' }; throw 'no error' }
+        catch { $_.Exception.Message | Should -Match 'CCL_BAD_KEY'; $_.Exception.Message | Should -Not -Match 'tf-secret' }
+    }
+    It 'writes secrets/tinyfish.env with exactly one TINYFISH_API_KEY line' {
+        Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-x'; TinyFishKey = 'tf-123' } | Should -Be 0
+        $p = Join-Path $sb.InstallDir 'secrets/tinyfish.env'
+        $bytes = [IO.File]::ReadAllBytes($p)
+        ($bytes[0] -eq 0xEF) | Should -BeFalse
+        [Text.Encoding]::UTF8.GetString($bytes) | Should -Be "TINYFISH_API_KEY=tf-123`n"
+        Read-CclSecret -Path $p -Name 'TINYFISH_API_KEY' | Should -Be 'tf-123'
+        Read-CclSecret -Path (Join-Path $sb.InstallDir 'secrets/inferhub.env') | Should -Be 'ih-x'
+    }
+    It 'installs without a TinyFish key in non-interactive mode, with a warning' {
+        $out = & { Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-x' } } 3>&1 | Out-String
+        (Read-CclInstallState -InstallDir $sb.InstallDir) | Should -Not -BeNullOrEmpty
+        Test-Path (Join-Path $sb.InstallDir 'secrets/tinyfish.env') | Should -BeFalse
+        $out | Should -Match 'TinyFish'
+        $out | Should -Match 'unreliable'
+        $out | Should -Match '--set-tinyfish-key'
+    }
+    It 'an empty answer at the prompt skips it with the same warning and exit 0' {
+        $out = & { Invoke-SandboxInstall $sb -TinyFishPrompt { '' } } 3>&1 | Out-String
+        @($out -split "`n" | Where-Object { $_ -match 'unreliable' }).Count | Should -BeGreaterThan 0
+        Test-Path (Join-Path $sb.InstallDir 'secrets/tinyfish.env') | Should -BeFalse
+        Test-Path (Join-Path $sb.InstallDir 'install.json') | Should -BeTrue
+    }
+    It 'exits 2 for a bad TinyFish key and changes nothing on disk' {
+        Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-x'; TinyFishKey = "bad`"key" } | Should -Be 2
+        Test-Path $sb.InstallDir | Should -BeFalse
+    }
+    It 'a reinstall keeps the stored TinyFish key' {
+        Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-x'; TinyFishKey = 'tf-keep' } | Should -Be 0
+        Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-x' } | Should -Be 0
+        Read-CclSecret -Path (Join-Path $sb.InstallDir 'secrets/tinyfish.env') -Name 'TINYFISH_API_KEY' | Should -Be 'tf-keep'
+    }
+    It 'ChangeTinyFishKey replaces only that key' {
+        Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-x'; TinyFishKey = 'tf-old' } | Should -Be 0
+        $before = Get-InstallSnapshot $sb -KeepInstance
+        Invoke-SandboxInstall $sb -Extra @{ TinyFishKey = 'tf-new'; ChangeTinyFishKey = $true } | Should -Be 0
+        Read-CclSecret -Path (Join-Path $sb.InstallDir 'secrets/tinyfish.env') -Name 'TINYFISH_API_KEY' | Should -Be 'tf-new'
+        $after = Get-InstallSnapshot $sb -KeepInstance
+        @($after.Keys | Where-Object { $after[$_] -ne $before[$_] }) | Should -Be @('/install/secrets/tinyfish.env')
+    }
+    It 'ChangeTinyFishKey adds a key to an install that skipped it' {
+        Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-x' } | Should -Be 0
+        Invoke-SandboxInstall $sb -TinyFishPrompt { 'tf-later' } -Extra @{ ChangeTinyFishKey = $true } | Should -Be 0
+        Read-CclSecret -Path (Join-Path $sb.InstallDir 'secrets/tinyfish.env') -Name 'TINYFISH_API_KEY' | Should -Be 'tf-later'
+    }
+    It 'ChangeTinyFishKey with an empty answer removes the key' {
+        Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-x'; TinyFishKey = 'tf-gone' } | Should -Be 0
+        Invoke-SandboxInstall $sb -TinyFishPrompt { '' } -Extra @{ ChangeTinyFishKey = $true } | Should -Be 0
+        Test-Path (Join-Path $sb.InstallDir 'secrets/tinyfish.env') | Should -BeFalse
+        Read-CclSecret -Path (Join-Path $sb.InstallDir 'secrets/inferhub.env') | Should -Be 'ih-x'
+    }
+    It 'the shim handles --set-tinyfish-key' {
+        $t = Get-CclShimText -InstallDir 'X:\inst'
+        $t | Should -Match '--set-tinyfish-key'
+        $t | Should -Match '-ChangeTinyFishKey'
+    }
+    It 'uninstall removes the TinyFish key with the folder' {
+        Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-x'; TinyFishKey = 'tf-u' } | Should -Be 0
+        Invoke-SandboxInstall $sb -Extra @{ Uninstall = $true } | Should -Be 0
+        Test-Path $sb.InstallDir | Should -BeFalse
+    }
+}
+
+Describe 'TinyFish key invariants' -Tag 'Property' {
+    It 'the TinyFish key never appears in any output stream or file except its secret file (key <_>)' -ForEach (0..6) {
+        $key = 'tf-' + $script:GoodKeys[$_] + '-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+        $sb = New-Sandbox
+        try {
+            $all = & { Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-other'; TinyFishKey = $key } } *>&1 | Out-String
+            $all | Should -Not -BeLike ('*' + $key.Trim() + '*')
+            $secret = (Resolve-Path (Join-Path $sb.InstallDir 'secrets/tinyfish.env')).Path
+            foreach ($f in Get-ChildItem $sb.Root -Recurse -File -Force) {
+                if ($f.FullName -eq $secret -or $f.Length -gt 5MB) { continue }
+                [IO.File]::ReadAllText($f.FullName).Contains($key.Trim()) | Should -BeFalse -Because $f.FullName
+            }
+            Read-CclSecret -Path $secret -Name 'TINYFISH_API_KEY' | Should -Be $key.Trim()
+            $chg = & { Invoke-SandboxInstall $sb -Extra @{ TinyFishKey = ($key + 'b'); ChangeTinyFishKey = $true } } *>&1 | Out-String
+            $chg | Should -Not -BeLike ('*' + $key.Trim() + '*')
+        } finally { Remove-Sandbox $sb }
+    }
+    It 'Resolve-CclTinyFishKey returns a trimmed valid key or null, never anything else (seed <_>)' -ForEach (1..40) {
+        $rng = [Random]::new(1000 + $_)
+        $len = $rng.Next(0, 40)
+        $k = -join $(for ($i = 0; $i -lt $len; $i++) { [char]$rng.Next(32, 127) })
+        if (Test-CclKeyShape -Key $k) {
+            Resolve-CclTinyFishKey -Flag $k -Environment @{} -StoredPath 'nope' -Prompt { throw 'prompted' } | Should -Be $k.Trim()
+        } elseif ([string]::IsNullOrWhiteSpace($k)) {
+            Resolve-CclTinyFishKey -Flag $k -Environment @{} -StoredPath 'nope' -Prompt { '' } | Should -BeNullOrEmpty
+        } else {
+            { Resolve-CclTinyFishKey -Flag $k -Environment @{} -StoredPath 'nope' -Prompt { '' } } | Should -Throw '*CCL_BAD_KEY*'
+        }
+    }
+}
+
+Describe 'TinyFish key relations' -Tag 'Metamorphic' {
+    It 'key via prompt, flag, CCL_TINYFISH_KEY or TINYFISH_API_KEY gives identical stored config' {
+        $boxes = 1..4 | ForEach-Object { New-Sandbox }
+        try {
+            Invoke-SandboxInstall $boxes[0] -Extra @{ InferHubKey = 'ih-same'; TinyFishKey = 'tf-same' } | Should -Be 0
+            Invoke-SandboxInstall $boxes[1] -Extra @{ InferHubKey = 'ih-same' } -Environment @{ CCL_TINYFISH_KEY = 'tf-same' } | Should -Be 0
+            Invoke-SandboxInstall $boxes[2] -Extra @{ InferHubKey = 'ih-same' } -Environment @{ TINYFISH_API_KEY = 'tf-same' } | Should -Be 0
+            Invoke-SandboxInstall $boxes[3] -Extra @{ InferHubKey = 'ih-same' } -TinyFishPrompt { 'tf-same' } | Should -Be 0
+            $ref = Get-InstallSnapshot $boxes[0]
+            $ref.Contains('/install/secrets/tinyfish.env') | Should -BeTrue
+            foreach ($i in 1..3) { Compare-Snapshot $ref (Get-InstallSnapshot $boxes[$i]) | Should -Be '' -Because "source $i" }
+        } finally { $boxes | ForEach-Object { Remove-Sandbox $_ } }
+    }
+    It 'skipping TinyFish differs from a keyed install only by secrets/tinyfish.env' {
+        $a = New-Sandbox; $b = New-Sandbox
+        try {
+            Invoke-SandboxInstall $a -Extra @{ InferHubKey = 'ih-s'; TinyFishKey = 'tf-s' } | Should -Be 0
+            Invoke-SandboxInstall $b -Extra @{ InferHubKey = 'ih-s'; SkipTinyFish = $true } | Should -Be 0
+            $sa = Get-InstallSnapshot $a; $sb2 = Get-InstallSnapshot $b
+            $sa.Remove('/install/secrets/tinyfish.env')
+            Compare-Snapshot $sa $sb2 | Should -Be ''
+        } finally { Remove-Sandbox $a; Remove-Sandbox $b }
+    }
+    It 'adding the key later with ChangeTinyFishKey equals giving it at install' {
+        $a = New-Sandbox; $b = New-Sandbox
+        try {
+            Invoke-SandboxInstall $a -Extra @{ InferHubKey = 'ih-l'; TinyFishKey = 'tf-l' } | Should -Be 0
+            Invoke-SandboxInstall $b -Extra @{ InferHubKey = 'ih-l' } | Should -Be 0
+            Invoke-SandboxInstall $b -Extra @{ TinyFishKey = 'tf-l'; ChangeTinyFishKey = $true } | Should -Be 0
+            Compare-Snapshot (Get-InstallSnapshot $a) (Get-InstallSnapshot $b) | Should -Be ''
         } finally { Remove-Sandbox $a; Remove-Sandbox $b }
     }
 }
