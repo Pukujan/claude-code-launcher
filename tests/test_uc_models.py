@@ -205,7 +205,12 @@ def test_launchers_use_the_helper_and_leave_the_global_ultracode_alone():
     mac = (REPO / "mac" / "Launch Claude InferHub.command").read_text(encoding="utf-8")
     for text in (win, mac):
         assert "uc_models.py" in text
-        assert "install.ps1" not in text and '"$UC_DIR/install.sh"' not in text
+        # The UltraCode installer is never run. (windows\install.ps1 here is this repo's
+        # own installer, dot-sourced in library mode for packaged installs, issue #61.)
+        for line in text.splitlines():
+            if "install.ps1" in line and not line.lstrip().startswith("#"):
+                assert line.strip() == '$CclInstaller = Join-Path $PSScriptRoot "install.ps1"', line
+        assert '"$UC_DIR/install.sh"' not in text
         assert "WindowsApps" not in text
         assert "Install-UltraCodeCommand" not in text and "install_ultracode" not in text
         assert "--no-project" in text

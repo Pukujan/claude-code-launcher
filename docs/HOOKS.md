@@ -57,7 +57,8 @@ In short:
   (`CCL_DDGS_BACKENDS` changes the list). Results without a URL don't count,
   successes are cached for 10 minutes, and when everything fails Claude Code
   gets `Search failed: ...` with the reasons instead of an empty result list.
-  `CCL_WEB_SEARCH_CHAIN` (default `ddgs`) can add LiteLLM search providers
+  `CCL_WEB_SEARCH_CHAIN` (default: `tinyfish` when `TINYFISH_API_KEY` is set,
+  then `ddgs`, then `you_com`, which needs no key) can add LiteLLM search providers
   around it, e.g. `searxng,ddgs,brave` with `SEARXNG_API_BASE` /
   `BRAVE_API_KEY` set. Each search logs a timestamped `[web_search]` line in
   `shared/litellm/logs/litellm.out.log`. A `search_tools` list already in

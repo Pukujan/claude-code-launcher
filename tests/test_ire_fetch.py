@@ -187,13 +187,21 @@ def test_offline_flag_never_touches_network(monkeypatch, env):
     assert F.get_recommendations(offline=True, directory=env)["source"] == "cache"
 
 
-def test_no_auth_goes_straight_to_cache(monkeypatch, env):
+def test_no_auth_tries_anonymously_then_uses_the_cache(monkeypatch, env):
+    # Issue #61: with no token the public repo is read anonymously; when that
+    # fails too (here: no network) the last good copy is used.
     monkeypatch.setenv("GH_TOKEN", TOKEN)
     online(monkeypatch)
     F.get_recommendations(directory=env)
     monkeypatch.delenv("GH_TOKEN")
-    monkeypatch.setattr(F.urllib.request, "urlopen", lambda *a, **k: pytest.fail("network used"))
+    seen = []
+
+    def down(req, timeout=None):
+        seen.append(req.get_header("Authorization"))
+        raise urllib.error.URLError(OSError("network is unreachable"))
+    monkeypatch.setattr(F.urllib.request, "urlopen", down)
     assert F.get_recommendations(directory=env)["source"] == "cache"
+    assert seen and all(a is None for a in seen)
 
 
 def test_corrupt_cache_falls_to_defaults(env):
@@ -283,7 +291,7 @@ def test_offline_no_cache_uses_defaults(monkeypatch, env):
 def test_gh_not_logged_in_uses_defaults(monkeypatch, env):
     monkeypatch.setattr(F.shutil, "which", lambda name: "/usr/bin/gh")
     monkeypatch.setattr(F.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, "", "not logged in"))
-    monkeypatch.setattr(F.urllib.request, "urlopen", lambda *a, **k: pytest.fail("network used"))
+    monkeypatch.setattr(F.urllib.request, "urlopen", no_network)   # the anonymous try fails too
     assert F.get_recommendations(directory=env)["source"] == "defaults"
 
 

@@ -4,19 +4,63 @@
 # CKFF is off), run from this repository's shared\litellm folder. Claude Code's
 # own model slots (sonnet, opus, fable, haiku) each get a chain of InferHub
 # routes in the proxy (issue #53); the picks are saved and reused, so the picker
-# only shows when you choose to change them. Points Claude at 127.0.0.1:4000.
+# only shows when you choose to change them. Points Claude at 127.0.0.1:4000 (packaged installs: the port in install.json).
 # The proxy is keyless and bound to 127.0.0.1 only.
 # Never sets CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1.
 # Source of truth: Pukujan/claude-code-launcher windows\ (see SOURCES.md).
 
-$Root = "D:\development"   # default project root (listed first in folder picker)
-$SecondaryRoot = "C:\work" # secondary project root, listed after the default root
 $RepoRoot = Split-Path -Parent $PSScriptRoot           # this repository
 $LiteLLMRoot = Join-Path $RepoRoot "shared\litellm"     # proxy config + scripts
 $LiteLLMOps = Join-Path $PSScriptRoot "litellm"         # start/stop scripts
-$ProxyPort = 4000
-$ProxyBase = "http://127.0.0.1:$ProxyPort"
 $DefaultModelId = "cb/deepseek-v4.1-flash"
+
+# ---- packaged mode (issue #61, docs/specs/windows-package.md) ----
+# On when CCL_HOME is set (the claude-inferhub shim sets it) or install.json sits in
+# the folder above this repository (install.ps1's layout). Then everything comes from
+# the install folder: the key in secrets\inferhub.env, optional state\local.env, the
+# port and instance id in install.json, the venv, logs and picks. None of the
+# PC-specific lookups below are used.
+function Get-CclHomeDir {
+  if ($env:CCL_HOME) { return $env:CCL_HOME }
+  $up = Split-Path -Parent $RepoRoot
+  if ($up -and (Test-Path -LiteralPath (Join-Path $up "install.json"))) { return $up }
+  return $null
+}
+$CclHome = Get-CclHomeDir
+$Packaged = [bool]$CclHome
+$CclState = $null
+if ($Packaged) {
+  try { $CclState = Get-Content -LiteralPath (Join-Path $CclHome "install.json") -Raw -Encoding UTF8 | ConvertFrom-Json } catch {}
+}
+# The installer's port and identity helpers (Get-CclPortState, Select-CclPort, ...).
+$CclInstaller = Join-Path $PSScriptRoot "install.ps1"
+if (Test-Path -LiteralPath $CclInstaller) {
+  $cclPrevLib = $env:CCL_INSTALL_LIBRARY_ONLY
+  $env:CCL_INSTALL_LIBRARY_ONLY = "1"
+  . $CclInstaller
+  if ($null -eq $cclPrevLib) { Remove-Item Env:CCL_INSTALL_LIBRARY_ONLY -ErrorAction SilentlyContinue } else { $env:CCL_INSTALL_LIBRARY_ONLY = $cclPrevLib }
+  $ErrorActionPreference = "Stop"
+}
+
+if ($Packaged) {
+  $Root = $HOME
+  $SecondaryRoot = $null
+  $ProxyPort = $(if ($CclState -and $CclState.port) { [int]$CclState.port } else { 4000 })
+  $InstanceId = $(if ($CclState) { [string]$CclState.instance_id } else { "" })
+  $VenvDir = Join-Path $CclHome "venv"
+  $LogDir = Join-Path $CclHome "logs"
+  $InferHubEnvFile = Join-Path $CclHome "secrets\inferhub.env"
+  # The "other keys" file of the packaged install (e.g. TINYFISH_API_KEY); optional.
+  $DesktopEnvFile = Join-Path $CclHome "state\local.env"
+  $LocalEnvFile = $DesktopEnvFile
+} else {
+$Root = "D:\development"   # default project root (listed first in folder picker)
+$SecondaryRoot = "C:\work" # secondary project root, listed after the default root
+$ProxyPort = 4000
+$InstanceId = ""
+$VenvDir = Join-Path $LiteLLMRoot ".litellm-venv"
+$LogDir = Join-Path $LiteLLMRoot "logs"
+$LocalEnvFile = Join-Path $LiteLLMRoot ".env.local"
 # Desktop env (other keys, e.g. web search; its ckff* names are never loaded
 # while CKFF is off): first existing file wins. The real Desktop known
 # folder comes first (it may or may not be redirected into OneDrive), then
@@ -40,6 +84,9 @@ $InferHubEnvCandidates = @(
 )
 $InferHubEnvFile = $InferHubEnvCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 if (-not $InferHubEnvFile) { $InferHubEnvFile = $InferHubEnvCandidates[0] }
+}
+$ProxyBase = "http://127.0.0.1:$ProxyPort"
+$VenvPy = Join-Path $VenvDir "Scripts\python.exe"
 
 # HOOK(ire-models): the picker table. It matches shared\litellm\config\top20-builtin.csv
 # (tests\test_top20_tables.py checks that). An IRE fetch can replace these rows.
@@ -277,8 +324,10 @@ function Format-OldModelLine {
 }
 
 function Get-LastPicksPath {
-  # Next to this script (windows\last-picks.json, git-ignored). CCL_LAST_PICKS overrides (tests).
+  # Next to this script (windows\last-picks.json, git-ignored); in packaged mode
+  # state\last-picks.json in the install folder. CCL_LAST_PICKS overrides (tests).
   if ($env:CCL_LAST_PICKS) { return $env:CCL_LAST_PICKS }
+  if ($Packaged) { return (Join-Path $CclHome "state\last-picks.json") }
   return (Join-Path $PSScriptRoot "last-picks.json")
 }
 
@@ -441,9 +490,11 @@ function Invoke-SlotStep {
 }
 
 function Get-StartDir {
-  # Folder step start: start_dir saved with the D key (cache file), else D:\development, else home.
+  # Folder step start: start_dir saved with the D key (cache file), else D:\development
+  # (not in packaged mode), else home.
   $c = Read-LastPicks
-  foreach ($d in @($c["start_dir"], "D:\development", $HOME)) {
+  $candidates = $(if ($Packaged) { @($c["start_dir"], $HOME) } else { @($c["start_dir"], "D:\development", $HOME) })
+  foreach ($d in $candidates) {
     if ($d -and (Test-Path -LiteralPath $d -PathType Container)) { return (Resolve-Path -LiteralPath $d).Path }
   }
   return ""
@@ -633,12 +684,12 @@ function Select-ProjectFolderNumbered {
 }
 
 function Sync-ModelPicker {
-  # ~/.claude/settings.json: the /model picker lists the four slots (then the direct
-  # ih/ models), the model stays sonnet, and the advisor is the fable slot. Nothing
-  # here touches plan mode or permissions.
+  # Claude Code's settings.json ($CLAUDE_CONFIG_DIR or ~/.claude): the /model picker lists
+  # the four slots (then the direct ih/ models), the model stays sonnet, and the advisor is
+  # the fable slot. shared\claude\settings_sync.py creates the file when it is missing and
+  # keeps every other key (issue #61). Nothing here touches plan mode or permissions.
+  # Its notes go to stderr only, so --print-env output stays clean. Never fatal.
   param([string]$SeatAlias)
-  $settingsPath = Join-Path $env:USERPROFILE ".claude\settings.json"
-  if (-not (Test-Path -LiteralPath $settingsPath)) { return }
   $options = @(
     [ordered]@{ model = $SeatAlias; label = "Sonnet slot (main)"; description = "Main chat chain via local LiteLLM"; behavesAs = "claude-sonnet-5" }
     [ordered]@{ model = "opus"; label = "Opus slot (planning)"; description = "Planning chain via local LiteLLM"; behavesAs = "claude-opus-5-5" }
@@ -653,19 +704,21 @@ function Sync-ModelPicker {
       behavesAs = "claude-sonnet-5"
     }
   }
+  $py = Get-LadderPython
+  if (-not $py) { [Console]::Error.WriteLine("warning: no Python found; settings.json not synced"); return }
+  $helper = Join-Path $RepoRoot "shared\claude\settings_sync.py"
+  $tmp = [IO.Path]::Combine([IO.Path]::GetTempPath(), "ccl-picker-" + [guid]::NewGuid().ToString("N") + ".json")
+  $prev = $ErrorActionPreference
   try {
-    $json = Get-Content -LiteralPath $settingsPath -Raw -Encoding UTF8 | ConvertFrom-Json
-    if (-not $json.modelPicker) {
-      $json | Add-Member -NotePropertyName modelPicker -NotePropertyValue ([pscustomobject]@{}) -Force
-    }
-    $json.modelPicker = [pscustomobject]@{ options = $options }
-    if ($json.PSObject.Properties["model"]) { $json.model = $SeatAlias } else { $json | Add-Member -NotePropertyName model -NotePropertyValue $SeatAlias -Force }
-    # The advisor is the fable slot (ANTHROPIC_DEFAULT_FABLE_MODEL pins it to claude-fable-5).
-    if ($json.PSObject.Properties["advisorModel"]) { $json.advisorModel = "fable" } else { $json | Add-Member -NotePropertyName advisorModel -NotePropertyValue "fable" -Force }
-    $out = $json | ConvertTo-Json -Depth 20
-    [System.IO.File]::WriteAllText($settingsPath, $out + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText($tmp, (ConvertTo-Json -InputObject @($options) -Depth 5), [Text.UTF8Encoding]::new($false))
+    $ErrorActionPreference = "Continue"
+    $out = & $py $helper sync ("--options-file=" + $tmp) 2>&1
+    foreach ($line in @($out)) { if ("$line".Trim()) { [Console]::Error.WriteLine([string]$line) } }
   } catch {
-    Write-Host ("warning: could not sync model picker: " + $_.Exception.Message)
+    [Console]::Error.WriteLine("warning: could not sync model picker: " + $_.Exception.Message)
+  } finally {
+    $ErrorActionPreference = $prev
+    Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue
   }
 }
 
@@ -815,8 +868,11 @@ function Invoke-UltraCode {
 }
 
 function Test-ProxyHealth {
+  # Packaged mode (issue #61): only this install's proxy counts (/ccl/identity names
+  # our instance), so a LiteLLM someone else runs on the port is never used.
   # Prefer /health/liveliness: /health can 500 on local setups without prisma,
   # and unauthenticated /v1/models also 500s when a master key is set.
+  if ($Packaged) { return ((Get-CclPortState -Port $ProxyPort -InstanceId $InstanceId) -eq "ours") }
   foreach ($path in @("/health/liveliness", "/health/readiness", "/health/liveness")) {
     try {
       $r = Invoke-WebRequest -Uri ($ProxyBase + $path) -UseBasicParsing -TimeoutSec 2
@@ -826,7 +882,32 @@ function Test-ProxyHealth {
   return $false
 }
 
+function Resolve-CclPackagedPort {
+  # Packaged mode: keep the saved port while it is free or ours; when another program
+  # took it, move to the lowest free port from 4000, save it and re-register the task.
+  if (-not $Packaged) { return }
+  $probe = { param($p) Get-CclPortState -Port $p -InstanceId $InstanceId }
+  $port = Select-CclPort -Start 4000 -Saved $ProxyPort -Probe $probe
+  if ($port -ne $ProxyPort) {
+    Write-Host ("Port " + $ProxyPort + " is taken by another program; moving the proxy to " + $port)
+    $state = @{ ref = $CclState.ref; port = $port; instance_id = $InstanceId; claude_settings_created = [bool]$CclState.claude_settings_created }
+    Write-CclInstallState -InstallDir $CclHome -State $state
+    if (Test-CclTaskRegistered) { $null = Register-CclProxyTask -InstallDir $CclHome -Port $port }
+    $script:ProxyPort = $port
+    $script:ProxyBase = "http://127.0.0.1:$port"
+  }
+}
+
 function Ensure-LiteLLMProxy {
+  if ($Packaged) {
+    if (Test-ProxyHealth) { Write-Host "LiteLLM proxy already up at $ProxyBase"; return }
+    Write-Host "Starting the LiteLLM proxy (hidden)..."
+    if (Start-CclProxy -InstallDir $CclHome -Port $ProxyPort -InstanceId $InstanceId) {
+      Write-Host "LiteLLM proxy is healthy at $ProxyBase"
+      return
+    }
+    throw "LiteLLM proxy did not come up at $ProxyBase. Check $LogDir"
+  }
   if (Test-ProxyHealth) {
     Write-Host "LiteLLM proxy already up at $ProxyBase"
     return
@@ -858,7 +939,7 @@ function Apply-InferHubSeat {
   # (apply_inferhub_seat.py + merge_litellm_config.py), then hot-reloads the
   # running proxy so the chains apply without a restart.
   param($Slots)
-  $py = Join-Path $LiteLLMRoot ".litellm-venv\Scripts\python.exe"
+  $py = $VenvPy
   if (-not (Test-Path -LiteralPath $py)) {
     # venv may not exist yet; start script creates it. Write seat JSON for start script.
     $seatPath = Join-Path $LiteLLMRoot "config\inferhub_seat.json"
@@ -888,8 +969,12 @@ function Get-IreRecommendations {
   $helper = Join-Path $RepoRoot "shared\ire\ire_fetch.py"
   $base = $(if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $HOME "AppData\Local" })
   $out = Join-Path $base "claude-code-launcher\ire.json"
+  if ($Packaged) {
+    $out = Join-Path $CclHome "state\ire.json"
+    $env:CCL_IRE_CACHE_DIR = Join-Path $CclHome "state\ire"
+  }
   $pyArgs = @()
-  $py = Join-Path $LiteLLMRoot ".litellm-venv\Scripts\python.exe"
+  $py = $VenvPy
   if (-not (Test-Path -LiteralPath $py)) {
     $cmd = Get-Command py -ErrorAction SilentlyContinue
     if ($cmd) { $py = $cmd.Source; $pyArgs = @("-3") }
@@ -911,9 +996,8 @@ function Get-IreRecommendations {
 # (The per-seat fallback ladders of issue #5 are gone: every slot's chain is now
 # generated into runtime.yaml by apply_inferhub_seat.py, issue #53.)
 function Get-LadderPython {
-  $venvPy = Join-Path $LiteLLMRoot ".litellm-venv\Scripts\python.exe"
-  if (Test-Path -LiteralPath $venvPy) { return $venvPy }
-  foreach ($name in @("python", "py")) {
+  if (Test-Path -LiteralPath $VenvPy) { return $VenvPy }
+  foreach ($name in @("python", "python3", "py")) {
     $cmd = Get-Command $name -ErrorAction SilentlyContinue
     if ($cmd) { return $cmd.Source }
   }
@@ -968,7 +1052,7 @@ function Initialize-ClaudeLaunchEnv {
   }
 
   # Force InferHub-via-local-LiteLLM for this Claude child only.
-  $env:ANTHROPIC_BASE_URL = $ProxyBase   # always http://127.0.0.1:4000
+  $env:ANTHROPIC_BASE_URL = $ProxyBase   # http://127.0.0.1:<port>; 4000 unless packaged or CCL_PROXY_PORT
   # Key = optional LiteLLM master key, else the dummy "local" (keyless proxy). NEVER CKFF.
   # Any key (ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN or apiKeyHelper) outranks the
   # claude.ai login, and Artifacts refuse to run without that login. So with a
@@ -1093,6 +1177,8 @@ function Invoke-NonInteractive {
     }
   }
   if (-not $Options.PrintEnv) { $null = Invoke-PlannerInstall -Quiet }
+  # advisorModel=fable in settings.json for Paseo and other non-interactive callers too (issue #61).
+  Sync-ModelPicker -SeatAlias "sonnet"
   $authLine = Initialize-ClaudeLaunchEnv -Master (Read-LiteLLMMasterKey) -SeatAlias "sonnet"
   $info["proxy_healthy"] = [bool]$healthy
   $info["auth"] = $authLine
@@ -1102,6 +1188,24 @@ function Invoke-NonInteractive {
   }
   if ($Options.Folder) { Set-Location -LiteralPath $Options.Folder }
   return "exec"   # the caller runs claude at script level, so its console stays attached
+}
+
+function Get-CclLaunchConfig {
+  # The resolved configuration (docs/specs/windows-package.md). Read only.
+  $roots = @(@($Root, $SecondaryRoot) | Where-Object { $_ })
+  $envFiles = $(if ($Packaged) { @($InferHubEnvFile, (Join-Path $CclHome "secrets\tinyfish.env"), $LocalEnvFile) } else { @($DesktopEnvFile, $InferHubEnvFile, $LocalEnvFile) })
+  return [ordered]@{
+    Packaged = [bool]$Packaged
+    Home = $CclHome
+    Port = [int]$ProxyPort
+    EnvFiles = @($envFiles | Where-Object { $_ } | Select-Object -Unique)
+    ProjectRoots = $roots
+    StartDir = (Get-StartDir)
+    LastPicks = (Get-LastPicksPath)
+    VenvDir = $VenvDir
+    LogDir = $LogDir
+    InstanceId = $InstanceId
+  }
 }
 
 # ---- interactive flow ----
@@ -1115,6 +1219,7 @@ if ($LauncherOptions.NonInteractive -or $LauncherOptions.Error) {
   & claude @claudeArgs
   exit $LASTEXITCODE
 }
+Resolve-CclPackagedPort
 Get-IreRecommendations
 if ([Console]::IsInputRedirected) {
   # No console keys: the saved slots (or the defaults), numbered folder list.

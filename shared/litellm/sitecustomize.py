@@ -616,6 +616,15 @@ async def _wb_handle_reload(scope, receive, send):
 
 _prev_starlette_call = _sa.Starlette.__call__
 
+try:
+    import ccl_identity as _ccl_identity
+except ImportError:  # loaded from PYTHONPATH=shared/litellm; keep the proxy up if it's missing
+    import sys as _sys0
+
+    _sys0.path.insert(0, str(_REPO_ROOT))
+    import ccl_identity as _ccl_identity
+_IDENTITY_PATH = _ccl_identity.IDENTITY_PATH
+
 
 _bench_hook = {"tried": False}
 
@@ -672,8 +681,13 @@ async def _starlette_call_with_reload(self, scope, receive, send, _o=_prev_starl
         _install_bench_hook()
     if scope.get("type") == "http" and str(scope.get("path", "")) == _RELOAD_PATH:
         return await _wb_handle_reload(scope, receive, send)
+    if scope.get("type") == "http" and str(scope.get("path", "")) == _IDENTITY_PATH:
+        # GET /ccl/identity (issue #61): loopback only; tells the launcher this proxy is its own.
+        if not _ccl_identity.is_loopback(_wb_client_host(scope)):
+            return await _wb_json_response(send, 403, {"error": "loopback only"})
+        return await _wb_json_response(send, 200, _ccl_identity.identity_payload(_os.environ))
     return await _o(self, scope, receive, send)
 
 
 _sa.Starlette.__call__ = _starlette_call_with_reload
-print("[sitecustomize] /workbench/reload_runtime hot-reload endpoint installed", flush=True)
+print("[sitecustomize] /workbench/reload_runtime hot-reload and /ccl/identity endpoints installed", flush=True)
