@@ -3,6 +3,9 @@
 # repository's shared/litellm folder. No litellm-ckff-ops checkout is needed.
 # The launcher passes the env files it chose: -CkffEnvFile (CKFF keys) and
 # -InferHubEnvFile (INFERHUB_API_KEY etc.). Values are never printed.
+# An optional machine-local env file (-LocalEnvFile, default
+# shared\litellm\.env.local, gitignored) is loaded last, for per-PC settings
+# such as CCL_WEB_SEARCH_CHAIN and SEARXNG_API_BASE. A missing file is fine.
 # Merges config/config.yaml + inferhub_top20.yaml + inferhub_aliases.yaml
 # into config/runtime.yaml and serves that on 127.0.0.1 only.
 # Keyless: no LITELLM_MASTER_KEY is required. If one is set in an env file it
@@ -19,6 +22,7 @@ param(
     [int]$Port = 4000,
     [string]$CkffEnvFile = '',
     [string]$InferHubEnvFile = '',
+    [string]$LocalEnvFile = '',
     [string]$Top20Csv = ''
 )
 
@@ -38,6 +42,7 @@ $PythonScripts = Join-Path $LiteLLMRoot 'scripts'
 $Requirements = Join-Path $LiteLLMRoot 'requirements.txt'
 $Overrides = Join-Path $LiteLLMRoot 'requirements-overrides.txt'
 if (-not $InferHubEnvFile) { $InferHubEnvFile = Join-Path $RepoRoot '.env' }
+if (-not $LocalEnvFile) { $LocalEnvFile = Join-Path $LiteLLMRoot '.env.local' }
 if (-not $CkffEnvFile) {
     # Default to the real Desktop known folder; no user name is hardcoded.
     $DesktopDir = [Environment]::GetFolderPath('Desktop')
@@ -72,6 +77,31 @@ function Import-DotEnvFile {
 Import-DotEnvFile -Path $CkffEnvFile -Label 'desktop-configs'
 if ($InferHubEnvFile -ne $CkffEnvFile) {
     Import-DotEnvFile -Path $InferHubEnvFile -Label 'inferhub'
+}
+# Per-PC settings (e.g. the web search chain). Optional, so no note when absent.
+if (Test-Path -LiteralPath $LocalEnvFile) {
+    Import-DotEnvFile -Path $LocalEnvFile -Label 'local'
+}
+# CCL_ENV_ALIASES=TARGET=source,... (usually set in the local env file) copies an
+# already-loaded value to the name LiteLLM reads, e.g.
+# TAVILY_API_KEY=my_tavily_key, so a key kept under another name in the
+# desktop env needs no second copy. A target that is already set wins.
+$aliasSpec = [Environment]::GetEnvironmentVariable('CCL_ENV_ALIASES', 'Process')
+if (-not [string]::IsNullOrWhiteSpace($aliasSpec)) {
+    foreach ($pair in ($aliasSpec -split ',')) {
+        $parts = $pair -split '=', 2
+        if ($parts.Count -ne 2) { continue }
+        $target = $parts[0].Trim()
+        $source = $parts[1].Trim()
+        if (-not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($target, 'Process'))) { continue }
+        $value = [Environment]::GetEnvironmentVariable($source, 'Process')
+        if ([string]::IsNullOrWhiteSpace($value)) {
+            Write-Host "note: env alias $target <- $source skipped, $source is not set"
+            continue
+        }
+        [Environment]::SetEnvironmentVariable($target, $value, 'Process')
+        Write-Host "env alias: $target <- $source [value not printed]"
+    }
 }
 
 # Map CKFF secrets to the names LiteLLM expects
@@ -225,7 +255,7 @@ if ($Background) {
     # Win32_Process.Create does not run a shell, so wrap in cmd.exe /c for the log redirection to work.
     # The child reruns this script in the foreground; -SkipSync is safe because
     # inferhub_top20.yaml was just written above.
-    $fwd = " -SkipSync -CkffEnvFile `"$CkffEnvFile`" -InferHubEnvFile `"$InferHubEnvFile`""
+    $fwd = " -SkipSync -CkffEnvFile `"$CkffEnvFile`" -InferHubEnvFile `"$InferHubEnvFile`" -LocalEnvFile `"$LocalEnvFile`""
     $cmd = "cmd.exe /c powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$PSCommandPath`" -Port $Port$fwd 1> `"$StdoutLog`" 2> `"$StderrLog`""
     $proc = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd }
     if ($proc.ReturnValue -ne 0) {

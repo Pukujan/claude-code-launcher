@@ -59,10 +59,15 @@ def clean_query(q):
     return _CLAUDE_CODE_PROMPT.sub("", str(q)).strip()
 
 
+# Short names for LiteLLM search providers, so CCL_WEB_SEARCH_CHAIN can say `exa`.
+PROVIDER_ALIASES = {"exa": "exa_ai"}
+
+
 def chain_from_env(env=None):
     env = os.environ if env is None else env
     raw = env.get("CCL_WEB_SEARCH_CHAIN") or "ddgs"
     chain = [p.strip().lower() for p in raw.split(",") if p.strip()]
+    chain = [PROVIDER_ALIASES.get(p, p) for p in chain]
     return [p for p in chain if p != "duckduckgo"] or ["ddgs"]  # duckduckgo would loop back here
 
 

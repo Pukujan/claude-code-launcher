@@ -161,5 +161,6 @@ def test_env_parsing():
     assert ws.chain_from_env({}) == ["ddgs"]
     assert ws.chain_from_env({"CCL_WEB_SEARCH_CHAIN": "searxng, ddgs ,brave"}) == ["searxng", "ddgs", "brave"]
     assert ws.chain_from_env({"CCL_WEB_SEARCH_CHAIN": "duckduckgo"}) == ["ddgs"]
+    assert ws.chain_from_env({"CCL_WEB_SEARCH_CHAIN": "searxng,ddgs,tavily,exa"}) == ["searxng", "ddgs", "tavily", "exa_ai"]
     assert ws.backends_from_env({}) == ws.DEFAULT_BACKENDS
     assert ws.backends_from_env({"CCL_DDGS_BACKENDS": "yahoo,auto"}) == ("yahoo", "auto")
