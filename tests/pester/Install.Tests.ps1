@@ -403,7 +403,8 @@ Describe 'Relations between runs' -Tag 'Metamorphic' {
             Invoke-SandboxInstall $b -Extra @{ InferHubKey = 'ih-r' } | Should -Be 0
             # Compare key-order-independently (ConvertFrom-Json -AsHashtable is pwsh 7 only).
             $py = (Get-Command python3, python -ErrorAction SilentlyContinue | Select-Object -First 1).Source
-            $canon = 'import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding="utf-8-sig")), sort_keys=True))'
+            # No double quotes in the code: Windows PowerShell 5.1 drops them when passing native arguments.
+            $canon = "import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding='utf-8-sig')), sort_keys=True))"
             $ca = & $py -c $canon (Join-Path $a.ClaudeDir 'settings.json')
             $cb = & $py -c $canon (Join-Path $b.ClaudeDir 'settings.json')
             $ca | Should -Not -BeNullOrEmpty
