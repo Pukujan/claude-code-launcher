@@ -5,14 +5,15 @@
 # process and its children. It never looks up or kills whatever owns a port,
 # so the live proxy on 127.0.0.1:4000 started some other way is left alone.
 
-param([switch]$WhatIf)
+param([switch]$WhatIf, [int]$Port = 4000)
 
 $ErrorActionPreference = 'Stop'
 
 $RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $LiteLLMRoot = Join-Path $RepoRoot 'shared\litellm'
 $VenvScripts = Join-Path $LiteLLMRoot '.litellm-venv\Scripts'
-$PidFile = Join-Path $LiteLLMRoot 'logs\litellm.pid'
+# -Port picks a test proxy's own PID file (start-litellm.ps1 -Port N writes litellm-N.pid).
+$PidFile = Join-Path $LiteLLMRoot $(if ($Port -eq 4000) { 'logs\litellm.pid' } else { "logs\litellm-$Port.pid" })
 
 if (-not (Test-Path -LiteralPath $PidFile)) {
     Write-Host "No PID file at $PidFile; nothing started by this repo is recorded. Not stopping anything."

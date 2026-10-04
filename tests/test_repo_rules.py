@@ -79,3 +79,23 @@ def test_one_mac_launcher():
     ci = (REPO / ".github" / "workflows" / "launcher-ci.yml").read_text(encoding="utf-8")
     assert "name: bash 3.2 compatibility" in ci
     assert "paths:" not in ci  # every PR must report every required check
+
+
+def test_launchers_pin_every_claude_tier_to_a_seat_alias():
+    # A tier Claude Code resolves on its own (e.g. haiku -> claude-haiku-4-5-20251001)
+    # is not served by the proxy and 400s, so both launchers pin all four tiers.
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "seat", REPO / "shared" / "litellm" / "scripts" / "apply_inferhub_seat.py")
+    seat = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(seat)
+    served = {"SONNET": seat.MAIN_ALIASES, "OPUS": seat.ADVISOR_ALIASES,
+              "FABLE": seat.ADVISOR_ALIASES, "HAIKU": seat.FAST_ALIASES}
+    win = (REPO / "windows" / "launch-claude-inferhub.ps1").read_text(encoding="utf-8")
+    mac = (REPO / "mac" / "Launch Claude InferHub.command").read_text(encoding="utf-8")
+    for tier, names in served.items():
+        w = re.search(rf'\$env:ANTHROPIC_DEFAULT_{tier}_MODEL = "([^"]+)"', win)
+        m = re.search(rf'export ANTHROPIC_DEFAULT_{tier}_MODEL="([^"]+)"', mac)
+        assert w and w.group(1) in names, tier
+        assert m and m.group(1) == w.group(1), tier

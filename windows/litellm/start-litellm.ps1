@@ -28,9 +28,12 @@ $RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $LiteLLMRoot = Join-Path $RepoRoot 'shared\litellm'
 $VenvPath = Join-Path $LiteLLMRoot '.litellm-venv'
 $LogDir = Join-Path $LiteLLMRoot 'logs'
-$PidFile = Join-Path $LogDir 'litellm.pid'
-$StdoutLog = Join-Path $LogDir 'litellm.out.log'
-$StderrLog = Join-Path $LogDir 'litellm.err.log'
+# A test proxy on another port gets its own PID and log files, so it never
+# overwrites the live proxy's litellm.pid (stop-litellm.ps1 reads that file).
+$LogTag = if ($Port -eq 4000) { 'litellm' } else { "litellm-$Port" }
+$PidFile = Join-Path $LogDir "$LogTag.pid"
+$StdoutLog = Join-Path $LogDir "$LogTag.out.log"
+$StderrLog = Join-Path $LogDir "$LogTag.err.log"
 $PythonScripts = Join-Path $LiteLLMRoot 'scripts'
 $Requirements = Join-Path $LiteLLMRoot 'requirements.txt'
 $Overrides = Join-Path $LiteLLMRoot 'requirements-overrides.txt'
