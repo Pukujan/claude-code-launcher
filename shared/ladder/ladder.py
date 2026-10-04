@@ -50,9 +50,17 @@ def litellm_model(route_id: str) -> str:
     seat's system prompt would not reach the model. In responses mode LiteLLM
     sends the system prompt as `instructions`, which cx keeps as sent.
     """
-    if is_cx(route_id):
+    if is_cx(route_id) or _prefers_responses(route_id):
         return f"openai/responses/{route_id}"
     return f"openai/{route_id}"
+
+
+def _prefers_responses(route_id: str) -> bool:
+    """IRE's frontier list marks routes with preferred_endpoint=/v1/responses."""
+    for x in load_extra_models(include_hidden=True):
+        if x.get("id") == route_id and x.get("preferred_endpoint") == "/v1/responses":
+            return True
+    return False
 
 
 def opted_in_ids() -> set:

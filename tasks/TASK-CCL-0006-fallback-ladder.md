@@ -50,3 +50,26 @@ At launch Alex sees which models each seat falls back to, can change them in a f
 ## Checkpoint log
 
 No checkpoints yet.
+
+### 2026-10-04 00:10:19 UTC — executor-task6
+
+<!-- continuity:checkpoint {"agent":"executor-task6","blocked":[],"changed":["none"],"completed":["Ladder picker for main and advisor in both launchers; live apply through the reload_runtime ladder scope; opt-in cx/gpt-6.1-sol with a price-cap hook"],"decisions":["no new decisions"],"evidence":["Fault injection on a keyless 127.0.0.1:4012 test proxy on the PC: a broken primary got 1 retry, then the request landed on ih/ali/qwen3.8-flash (main) and ih/cbcn/minimax-m3 (advisor); once benched, the primary got no more traffic. 21 ladder unit tests pass on the box and the PC, and the proxy_apply tests pass against real LiteLLM on the PC"],"next_action":"Read the CI result on the pull request and record it on issue #5","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"CCL-0006","timestamp":"2026-10-04T00:10:19Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"f5905e1049e06044b02eb8f6482dcea94a9ad48f7cca73a541670742cfa09182","request_id":"2064265e0932425e93141a73ffebafba","schema":"project-continuity.checkpoint-operation.v1","task_id":"CCL-0006"} -->
+
+Completed:
+- Ladder picker for main and advisor in both launchers; live apply through the reload_runtime ladder scope; opt-in cx/gpt-6.1-sol with a price-cap hook
+
+Evidence:
+- Fault injection on a keyless 127.0.0.1:4012 test proxy on the PC: a broken primary got 1 retry, then the request landed on ih/ali/qwen3.8-flash (main) and ih/cbcn/minimax-m3 (advisor); once benched, the primary got no more traffic. 21 ladder unit tests pass on the box and the PC, and the proxy_apply tests pass against real LiteLLM on the PC
+
+Decisions:
+- no new decisions
+
+Changed:
+- none
+
+Blocked/uncertain:
+- none
+
+Next:
+- Read the CI result on the pull request and record it on issue #5

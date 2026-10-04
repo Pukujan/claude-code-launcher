@@ -7,16 +7,18 @@
       "opt_in": true,
       "eligible": true,
       "input_cost_per_mtok": 0.02,
-      "output_cost_per_mtok": 0.10,
+      "output_cost_per_mtok": 0.1,
       "cost_per_mtok": 0.02,
-      "price_note": "Common seller rate $0.02 in / $0.10 out per 1M (seen from $0.016/$0.08 up to $1/$5). Not in the IRE Top 20.",
+      "price_note": "IRE frontier list (research_model_frontier_routes.csv, generated 2026-10-04T00:02Z): cheapest ask $0.016 in / $0.08 out per 1M with only 1 seller there; median $0.02 / $0.10; sellers seen up to $1 / $5. Not in the IRE Top 20.",
       "context_tokens": 272000,
       "max_output_tokens": 128000,
       "tools_confirmed": false,
       "stream_confirmed": false,
       "max_price_per_mtok": null,
       "max_price_env": "CCL_CX_SOL_MAX_PRICE",
-      "note": "Max-price cap hook: set max_price_per_mtok here or the CCL_CX_SOL_MAX_PRICE env var (value still to be decided by Alex). When set, the picker refuses this route if its listed output price is above the cap. cx/ routes are seated in Responses API mode so the system prompt arrives as instructions."
+      "note": "Max-price cap hook: set max_price_per_mtok here or the CCL_CX_SOL_MAX_PRICE env var (value still to be decided by Alex). When set, the picker refuses this route if its listed output price is above the cap. IRE marks cx routes preferred_endpoint=/v1/responses, so rungs are seated as openai/responses/cx/... and the system prompt arrives as instructions.",
+      "preferred_endpoint": "/v1/responses",
+      "system_prompt_handling": "developer_message"
     }
   ]
 }

@@ -12,7 +12,8 @@ It returns a dict shaped like this, from the best source available:
 
 Sources, in order:
   1. a bundle file produced by the IRE module (shared/ire, issue #4), if one
-     is passed in or the module is present and returns one;
+     is passed in (argument or CCL_IRE_BUNDLE), or the module is present and
+     returns one from get_bundle();
   2. otherwise the Top 20 table the launchers already use
      (shared/litellm/config/top20.csv when synced, else top20-builtin.csv)
      plus the fixed chains below.
@@ -94,7 +95,11 @@ def _from_ire_module():
 
 
 def load_inputs(bundle_path: Path | None = None, use_ire: bool = True) -> dict:
+    import os
+
     b = None
+    if bundle_path is None and os.environ.get("CCL_IRE_BUNDLE"):
+        bundle_path = Path(os.environ["CCL_IRE_BUNDLE"])
     if bundle_path and Path(bundle_path).is_file():
         try:
             b = json.loads(Path(bundle_path).read_text(encoding="utf-8"))
