@@ -961,6 +961,15 @@ clear_claude_env() {
   done
 }
 
+claude_ai_logged_in() {
+  # True when claude is signed in with a claude.ai account (/login). Call it
+  # after clear_claude_env, so a key in the environment cannot mask the login.
+  local st
+  st="$(claude auth status --json 2>/dev/null)" || return 1
+  printf '%s' "$st" | grep -q '"loggedIn": *true' &&
+    printf '%s' "$st" | grep -q '"authMethod": *"claude\.ai"'
+}
+
 # ---- main -------------------------------------------------------------------
 main() {
   log "=== Launch Claude InferHub (macOS) $(date '+%Y-%m-%d %H:%M:%S %Z') (bash $BASH_VERSION) ==="
@@ -1004,8 +1013,22 @@ main() {
   # InferHub through the local LiteLLM for this claude only. The key is the
   # optional LiteLLM master key or "local", never a CKFF key. Do NOT set ANTHROPIC_AUTH_TOKEN.
   # Experimental betas stay ON (CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS unset).
-  export ANTHROPIC_API_KEY="$master"
   export ANTHROPIC_BASE_URL="$PROXY_BASE"
+  # Any key (ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN or apiKeyHelper) outranks the
+  # claude.ai login, and Artifacts refuse to run without that login. So with a
+  # keyless proxy and a claude.ai login, set no key: model traffic still goes to
+  # ANTHROPIC_BASE_URL and the login rides along as the bearer the proxy ignores.
+  local auth_line
+  if [ "$master" = "local" ] && claude_ai_logged_in; then
+    auth_line="auth=claude.ai login (no API key, so Artifacts work)"
+  else
+    export ANTHROPIC_API_KEY="$master"
+    if [ "$master" = "local" ]; then
+      auth_line="auth=dummy API key (run /login with your claude.ai account to use Artifacts)"
+    else
+      auth_line="auth=LiteLLM master key (Artifacts need a keyless proxy)"
+    fi
+  fi
   export ANTHROPIC_MODEL="$SEAT_ALIAS"
   export ANTHROPIC_SMALL_FAST_MODEL="$SMALL_FAST_MODEL"
   # Pin every model tier to a name the proxy serves. Without these, a subagent or
@@ -1027,6 +1050,7 @@ main() {
   log "tiers=sonnet:claude-sonnet-5 opus:claude-opus-5-5 fable:claude-fable-5 haiku:claude-haiku-4-5-20251001 (all proxy seat aliases)"
   log "main=$MAIN_ID  ($MAIN_NAME)"
   if [ -n "$ADVISOR_ID" ]; then log "advisor=$ADVISOR_NAME ($ADVISOR_ID)"; else log "advisor=OFF"; fi
+  log "$auth_line"
   log "permission=bypassPermissions (auto mode is Anthropic-only)"
   log "betas=experimental ON (advisor_20260301 via LiteLLM orchestration)"
   if [ "$LAUNCH" = "ultracode" ]; then

@@ -81,6 +81,18 @@ function Read-LiteLLMMasterKey {
   return "local"
 }
 
+function Test-ClaudeAiLogin {
+  # True when Claude Code is signed in with a claude.ai account (/login). Call it
+  # after the Anthropic variables are cleared, so a key cannot mask the login.
+  try {
+    $raw = & claude auth status --json 2>$null | Out-String
+    $st = $raw | ConvertFrom-Json
+    return ($st.loggedIn -eq $true -and $st.authMethod -eq "claude.ai")
+  } catch {
+    return $false
+  }
+}
+
 function Read-MenuKey {
   if (-not $host.UI -or -not $host.UI.RawUI) {
     throw "This window has no console. Run it in PowerShell, not ISE."
@@ -915,9 +927,18 @@ Get-ChildItem Env: | Where-Object {
 }
 
 # Force InferHub-via-local-LiteLLM for this Claude child only.
-# Key = optional LiteLLM master key, else the dummy "local" (keyless proxy). NEVER CKFF.
-$env:ANTHROPIC_API_KEY = $master
 $env:ANTHROPIC_BASE_URL = $ProxyBase   # always http://127.0.0.1:4000
+# Key = optional LiteLLM master key, else the dummy "local" (keyless proxy). NEVER CKFF.
+# Any key (ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN or apiKeyHelper) outranks the
+# claude.ai login, and Artifacts refuse to run without that login. So with a
+# keyless proxy and a claude.ai login, set no key: model traffic still goes to
+# ANTHROPIC_BASE_URL and the login rides along as the bearer the proxy ignores.
+if ($master -eq "local" -and (Test-ClaudeAiLogin)) {
+  $authLine = "auth=claude.ai login (no API key, so Artifacts work)"
+} else {
+  $env:ANTHROPIC_API_KEY = $master
+  $authLine = $(if ($master -eq "local") { "auth=dummy API key (run /login with your claude.ai account to use Artifacts)" } else { "auth=LiteLLM master key (Artifacts need a keyless proxy)" })
+}
 $env:ANTHROPIC_MODEL = $seatAlias      # sonnet seat -> InferHub main
 # small-fast is the fast seat alias (cb/deepseek-v4.1-flash unless the seat file says otherwise).
 $env:ANTHROPIC_SMALL_FAST_MODEL = "small-fast"
@@ -943,6 +964,7 @@ Write-Host ("seat_alias=" + $seatAlias + "  behavesAs=claude-sonnet-5")
 Write-Host "tiers=sonnet:claude-sonnet-5 opus:claude-opus-5-5 fable:claude-fable-5 haiku:claude-haiku-4-5-20251001 (all proxy seat aliases)"
 Write-Host ("main=" + $main.Id + "  (" + $main.Name + ")")
 Write-Host ("advisor=" + $advisorLabel)
+Write-Host $authLine
 Write-Host "permission=bypassPermissions (auto mode is Anthropic-only)"
 Write-Host "betas=experimental ON (advisor_20260301 via LiteLLM orchestration)"
 if ($w.Launch -eq "ultracode") {
