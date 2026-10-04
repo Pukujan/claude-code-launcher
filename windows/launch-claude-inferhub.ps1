@@ -15,10 +15,23 @@ $LiteLLMOps = Join-Path $PSScriptRoot "litellm"         # start/stop scripts
 $ProxyPort = 4000
 $ProxyBase = "http://127.0.0.1:$ProxyPort"
 $DefaultModelId = "cb/deepseek-v4.1-flash"
-$CkffEnvFile = "C:\Users\pujan\OneDrive\Desktop\configs\.env"
-# InferHub env: first existing file wins (IRE .env, then repo .env, then user config).
+# Desktop env (CKFF keys): first existing file wins. The real Desktop known
+# folder comes first (it may or may not be redirected into OneDrive), then
+# %USERPROFILE%\Desktop, then %OneDrive%\Desktop. No user name is hardcoded.
+$DesktopDir = [Environment]::GetFolderPath('Desktop')
+if (-not $DesktopDir) { $DesktopDir = Join-Path $env:USERPROFILE "Desktop" }
+$CkffEnvCandidates = @(
+  (Join-Path $DesktopDir "configs\.env"),
+  (Join-Path $env:USERPROFILE "Desktop\configs\.env")
+)
+if ($env:OneDrive) { $CkffEnvCandidates += (Join-Path $env:OneDrive "Desktop\configs\.env") }
+$CkffEnvFile = $CkffEnvCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+if (-not $CkffEnvFile) { $CkffEnvFile = $CkffEnvCandidates[0] }
+# InferHub env: first existing file wins (IRE .env next to this repo, IRE .env
+# under the project root, repo .env, then user config).
 $InferHubEnvCandidates = @(
-  "D:\development\inference-recommendation-engine\.env",
+  (Join-Path (Split-Path -Parent $RepoRoot) "inference-recommendation-engine\.env"),
+  (Join-Path $Root "inference-recommendation-engine\.env"),
   (Join-Path $RepoRoot ".env"),
   (Join-Path $env:USERPROFILE ".config\inferhub\.env")
 )

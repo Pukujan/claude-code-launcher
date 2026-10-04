@@ -46,12 +46,14 @@ jobs:
           $findings | Format-Table ScriptName, Line, Severity, RuleName, Message -AutoSize | Out-String -Width 220 | Write-Host
           if ($bad -gt 0 -or $findings.Count -gt 0) { throw "parse errors: $bad, analyzer findings: $($findings.Count)" }
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
       - name: ruff the Python
         shell: bash
         run: |
           set -euo pipefail
-          python -m pip install --quiet ruff==0.16.10
-          ruff check --no-cache .
+          uvx ruff@0.16.10 check --no-cache .
 
   mac-dry-run:
     name: mac-dry-run
@@ -142,11 +144,14 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
       - name: Install the pinned test dependencies
         shell: bash
         run: |
           set -euo pipefail
-          python -m pip install --quiet PyYAML==6.0.3 pytest==9.1.1 \
+          uv pip install --system --quiet PyYAML==6.0.3 pytest==9.1.1 \
             --requirement shared/litellm/requirements-overrides.txt
 
       - name: Run the unit tests
