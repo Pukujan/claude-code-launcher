@@ -23,6 +23,12 @@ roles:
   advisor:
     names: [advisor, opus, claude-opus-5-5, claude-fable-5, claude-fable-5-1, ih-advisor, ih-opus, inferhub-opus]
     chain: [cbcn/glm-5.3-flash, cbcn/minimax-m3]
+  # Claude Code's fast seat (WebFetch/WebSearch summaries, titles, hooks). Web pages can trip
+  # one rail's content filter (Alibaba's DataInspectionFailed 400), so the fast seat always
+  # has somewhere else to go; qwen stays last because its filter is the strictest.
+  fast:
+    names: [small-fast, haiku, claude-haiku-5, ih-haiku, ih-small-fast, inferhub-haiku]
+    chain: [cb/deepseek-v4.1-flash, cbcn/deepseek-v4-flash, ali/qwen3.8-flash]
   small_fast:
     names: [ih/ali/qwen3.8-flash]
     chain: [cb/deepseek-v4.1-flash, cbcn/deepseek-v4-flash]
@@ -34,7 +40,9 @@ roles:
 # Each model gets 3 retries on rate-limit and 5xx errors before the request moves on.
 # Applied to every generated name and every chain target. CCL_RETRIES overrides the
 # retry count on a machine (merge_litellm_config.py). Timeouts, bad requests and auth
-# errors are not retried.
+# errors are not retried. A bad request still moves on to the next model in the chain
+# (LiteLLM falls back on any error once retries are done), which is what carries a
+# content-filter 400 over to another rail; it just isn't retried on the same model.
 retry_policy:
   RateLimitErrorRetries: 3
   InternalServerErrorRetries: 3

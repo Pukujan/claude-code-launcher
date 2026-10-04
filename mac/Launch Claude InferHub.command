@@ -48,7 +48,7 @@ CLAUDE_INSTALLER_URL="${CLAUDE_INSTALLER_URL:-https://claude.ai/install.sh}"
 
 DEFAULT_MODEL_ID="cb/deepseek-v4.1-flash"
 SEAT_ALIAS="sonnet"
-# small-fast is the fast seat alias from apply_inferhub_seat.py (ali/qwen3.8-flash
+# small-fast is the fast seat alias from apply_inferhub_seat.py (cb/deepseek-v4.1-flash
 # unless the seat file says otherwise), the same name Windows uses.
 SMALL_FAST_MODEL="small-fast"
 
