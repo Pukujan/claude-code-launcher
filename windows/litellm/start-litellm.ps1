@@ -19,6 +19,10 @@
 # Run with -SkipSync to skip Top20 regeneration (still merges + applies seat).
 # Writes the LiteLLM PID to shared/litellm/logs/litellm.pid; stop-litellm.ps1
 # stops only that process.
+# -CclHome <install folder> is the packaged mode used by windows\install.ps1
+# (issue #61, docs/specs/windows-package.md): venv, logs and env files come from
+# that folder, the desktop configs .env is never read, and CCL_INSTANCE_ID from
+# install.json is passed to the proxy so /ccl/identity can name this install.
 
 param(
     [switch]$Background,
@@ -29,7 +33,8 @@ param(
     [string]$DesktopEnvFile = '',
     [string]$InferHubEnvFile = '',
     [string]$LocalEnvFile = '',
-    [string]$Top20Csv = ''
+    [string]$Top20Csv = '',
+    [string]$CclHome = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -41,6 +46,20 @@ $LogDir = Join-Path $LiteLLMRoot 'logs'
 # A test proxy on another port gets its own PID and log files, so it never
 # overwrites the live proxy's litellm.pid (stop-litellm.ps1 reads that file).
 $LogTag = if ($Port -eq 4000) { 'litellm' } else { "litellm-$Port" }
+$CclInstall = $null
+if ($CclHome) {
+    $CclHome = [IO.Path]::GetFullPath($CclHome)
+    $installJson = Join-Path $CclHome 'install.json'
+    if (-not (Test-Path -LiteralPath $installJson)) { throw "No install.json in $CclHome" }
+    $CclInstall = Get-Content -LiteralPath $installJson -Raw | ConvertFrom-Json
+    $VenvPath = Join-Path $CclHome 'venv'
+    $LogDir = Join-Path $CclHome 'logs'
+    # One proxy per install, so the PID file name never depends on the port.
+    $LogTag = 'litellm'
+    $InferHubEnvFile = Join-Path $CclHome 'secrets\inferhub.env'
+    $LocalEnvFile = Join-Path $CclHome 'state\local.env'
+    $env:CCL_INSTANCE_ID = [string]$CclInstall.instance_id
+}
 $PidFile = Join-Path $LogDir "$LogTag.pid"
 $StdoutLog = Join-Path $LogDir "$LogTag.out.log"
 $StderrLog = Join-Path $LogDir "$LogTag.err.log"
@@ -49,7 +68,7 @@ $Requirements = Join-Path $LiteLLMRoot 'requirements.txt'
 $Overrides = Join-Path $LiteLLMRoot 'requirements-overrides.txt'
 if (-not $InferHubEnvFile) { $InferHubEnvFile = Join-Path $RepoRoot '.env' }
 if (-not $LocalEnvFile) { $LocalEnvFile = Join-Path $LiteLLMRoot '.env.local' }
-if (-not $DesktopEnvFile) {
+if (-not $DesktopEnvFile -and -not $CclHome) {
     # Default to the real Desktop known folder; no user name is hardcoded.
     $DesktopDir = [Environment]::GetFolderPath('Desktop')
     if (-not $DesktopDir) { $DesktopDir = Join-Path $env:USERPROFILE 'Desktop' }
@@ -114,7 +133,9 @@ if ($CkffEnabled) {
         [Environment]::SetEnvironmentVariable($item.Name, $null, 'Process')
     }
 }
-Import-DotEnvFile -Path $DesktopEnvFile -Label 'desktop-configs' -SkipCkff:$skip
+if ($DesktopEnvFile) {
+    Import-DotEnvFile -Path $DesktopEnvFile -Label 'desktop-configs' -SkipCkff:$skip
+}
 if ($InferHubEnvFile -ne $DesktopEnvFile) {
     Import-DotEnvFile -Path $InferHubEnvFile -Label 'inferhub' -SkipCkff:$skip
 }
@@ -201,7 +222,7 @@ if (-not (Test-Path -LiteralPath $VenvPath)) {
     Write-Host "Creating virtual environment at $VenvPath ..."
     # uv reports progress on stderr; under PS 5.1 + Stop that must not be fatal.
     $prevEap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-    if ($Uv) { & $Uv.Source venv $VenvPath } else { python -m venv $VenvPath }
+    if ($Uv) { & $Uv.Source venv --python 3.12 $VenvPath } else { python -m venv $VenvPath }
     $venvExit = $LASTEXITCODE
     $ErrorActionPreference = $prevEap
     if ($venvExit -ne 0) { throw "creating the venv failed: $venvExit" }
@@ -300,7 +321,11 @@ if ($Background) {
     # Win32_Process.Create does not run a shell, so wrap in cmd.exe /c for the log redirection to work.
     # The child reruns this script in the foreground; -SkipSync is safe because
     # inferhub_top20.yaml was just written above.
-    $fwd = " -SkipSync -DesktopEnvFile `"$DesktopEnvFile`" -InferHubEnvFile `"$InferHubEnvFile`" -LocalEnvFile `"$LocalEnvFile`""
+    $fwd = if ($CclHome) {
+        " -SkipSync -CclHome `"$CclHome`""
+    } else {
+        " -SkipSync -DesktopEnvFile `"$DesktopEnvFile`" -InferHubEnvFile `"$InferHubEnvFile`" -LocalEnvFile `"$LocalEnvFile`""
+    }
     $cmd = "cmd.exe /c powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$PSCommandPath`" -Port $Port$fwd 1> `"$StdoutLog`" 2> `"$StderrLog`""
     $proc = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd }
     if ($proc.ReturnValue -ne 0) {

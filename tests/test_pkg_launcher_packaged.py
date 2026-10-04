@@ -188,7 +188,10 @@ def test_unpackaged_config_keeps_alex_setup(tmp_path):
     home = tmp_path / "home"
     home.mkdir()
     env = {"PATH": os.environ["PATH"], "HOME": str(home), "USERPROFILE": str(home)}
-    script = (f"$env:CCL_LAUNCHER_LIBRARY_ONLY='1'; . '{WIN}'; "
+    # Alex's unpackaged paths (D:\, C:\) need drives on Linux pwsh, as in test_noninteractive.py.
+    drives = ('foreach ($d in "C", "D") { if (-not (Get-PSDrive $d -ErrorAction SilentlyContinue)) '
+              '{ $null = New-PSDrive -Name $d -PSProvider FileSystem -Root $env:HOME -Scope Global } }; ')
+    script = (drives + f"$env:CCL_LAUNCHER_LIBRARY_ONLY='1'; . '{WIN}'; "
               "Get-CclLaunchConfig | ConvertTo-Json -Depth 5 -Compress")
     out = subprocess.run(["pwsh", "-NoProfile", "-Command", script], env=env, capture_output=True, text=True, timeout=120)
     assert out.returncode == 0, out.stderr
