@@ -594,9 +594,11 @@ pick_ladder() {
 apply_ladder() {
   [ "${CLAUDE_IH_LADDER:-ask}" = "off" ] && return 0
   [ -f "$LADDER_STATE" ] || return 0
-  "$VENV_PY" "$LADDER_CLI" apply --state "$LADDER_STATE" --base-url "$PROXY_BASE" >> "$LOG_FILE" 2>&1 \
-    && log "Fallback ladders applied to the running proxy." \
-    || log "warning: could not apply the fallback ladders (see log); the stock chains stay"
+  if "$VENV_PY" "$LADDER_CLI" apply --state "$LADDER_STATE" --base-url "$PROXY_BASE" >> "$LOG_FILE" 2>&1; then
+    log "Fallback ladders applied to the running proxy."
+  else
+    log "warning: could not apply the fallback ladders (see log); the stock chains stay"
+  fi
 }
 
 # ---- seat + Claude settings ---------------------------------------------------
