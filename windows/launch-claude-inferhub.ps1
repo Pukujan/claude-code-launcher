@@ -733,6 +733,7 @@ $clearExact = @(
   "ANTHROPIC_DEFAULT_SONNET_MODEL",
   "ANTHROPIC_DEFAULT_OPUS_MODEL",
   "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+  "ANTHROPIC_DEFAULT_FABLE_MODEL",
   "CLAUDE_CODE_OAUTH_TOKEN",
   "CLAUDE_CODE_API_KEY_HELPER_TTL_MS",
   "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS",
@@ -764,6 +765,14 @@ $env:ANTHROPIC_BASE_URL = $ProxyBase   # always http://127.0.0.1:4000
 $env:ANTHROPIC_MODEL = $seatAlias      # sonnet seat -> InferHub main
 # small-fast is the fast seat alias (cb/deepseek-v4.1-flash unless the seat file says otherwise).
 $env:ANTHROPIC_SMALL_FAST_MODEL = "small-fast"
+# Pin every model tier to a name the proxy serves. Without these, a subagent or
+# skill with "model: haiku" asks for Claude Code's built-in haiku id
+# (claude-haiku-4-5-20251001), which the proxy does not have, and gets a 400.
+# The pins also keep sonnet/opus working when a Claude Code update renames them.
+$env:ANTHROPIC_DEFAULT_SONNET_MODEL = "claude-sonnet-5"   # main seat
+$env:ANTHROPIC_DEFAULT_OPUS_MODEL = "claude-opus-5-5"     # advisor seat (main when advisor is OFF)
+$env:ANTHROPIC_DEFAULT_FABLE_MODEL = "claude-fable-5"     # advisor seat
+$env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "claude-haiku-5"     # fast seat
 # Do NOT set ANTHROPIC_AUTH_TOKEN (would win over API_KEY and risk CKFF).
 # Keep experimental betas ON - do not set CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS
 
@@ -774,6 +783,7 @@ Write-Host ("cwd=" + (Get-Location))
 Write-Host ("proxy=" + $env:ANTHROPIC_BASE_URL + "  (unified CKFF+InferHub LiteLLM)")
 Write-Host ("small_fast=" + $env:ANTHROPIC_SMALL_FAST_MODEL + "  (fast seat alias, InferHub cheap side model for search/hooks)")
 Write-Host ("seat_alias=" + $seatAlias + "  behavesAs=claude-sonnet-5")
+Write-Host "tiers=sonnet:claude-sonnet-5 opus:claude-opus-5-5 fable:claude-fable-5 haiku:claude-haiku-5 (all proxy seat aliases)"
 Write-Host ("main=" + $main.Id + "  (" + $main.Name + ")")
 Write-Host ("advisor=" + $advisorLabel)
 Write-Host "permission=bypassPermissions (auto mode is Anthropic-only)"

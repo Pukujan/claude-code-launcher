@@ -781,7 +781,7 @@ clear_claude_env() {
   local n
   for n in ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_BASE_URL ANTHROPIC_MODEL \
            ANTHROPIC_SMALL_FAST_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL \
-           ANTHROPIC_DEFAULT_HAIKU_MODEL CLAUDE_CODE_OAUTH_TOKEN CLAUDE_CODE_API_KEY_HELPER_TTL_MS \
+           ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_FABLE_MODEL CLAUDE_CODE_OAUTH_TOKEN CLAUDE_CODE_API_KEY_HELPER_TTL_MS \
            CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS CKFF_KIMI_KEY CKFF_API_KEY CKFF_DEFAULT_KEY \
            ckff_access_token ckff_api_url ckff_alternate_api_url ckff_nonstream_api_url \
            ckff_cortex_kimi_token_ ckff_cortex_kimi_token_model ckff_cortex_embedder_rerank; do
@@ -836,6 +836,13 @@ main() {
   export ANTHROPIC_BASE_URL="$PROXY_BASE"
   export ANTHROPIC_MODEL="$SEAT_ALIAS"
   export ANTHROPIC_SMALL_FAST_MODEL="$SMALL_FAST_MODEL"
+  # Pin every model tier to a name the proxy serves. Without these, a subagent or
+  # skill with "model: haiku" asks for Claude Code's built-in haiku id
+  # (claude-haiku-4-5-20251001), which the proxy does not have, and gets a 400.
+  export ANTHROPIC_DEFAULT_SONNET_MODEL="claude-sonnet-5"   # main seat
+  export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-opus-5-5"     # advisor seat (main when advisor is OFF)
+  export ANTHROPIC_DEFAULT_FABLE_MODEL="claude-fable-5"     # advisor seat
+  export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-haiku-5"     # fast seat
   master=""
 
   cd "$PROJECT_DIR" || die "cannot cd to $PROJECT_DIR"
@@ -844,6 +851,7 @@ main() {
   log "proxy=$ANTHROPIC_BASE_URL  (unified CKFF+InferHub LiteLLM)"
   log "small_fast=$ANTHROPIC_SMALL_FAST_MODEL  (InferHub cheap side model for search/hooks)"
   log "seat_alias=$SEAT_ALIAS  behavesAs=claude-sonnet-5"
+  log "tiers=sonnet:claude-sonnet-5 opus:claude-opus-5-5 fable:claude-fable-5 haiku:claude-haiku-5 (all proxy seat aliases)"
   log "main=$MAIN_ID  ($MAIN_NAME)"
   if [ -n "$ADVISOR_ID" ]; then log "advisor=$ADVISOR_NAME ($ADVISOR_ID)"; else log "advisor=OFF"; fi
   log "permission=bypassPermissions (auto mode is Anthropic-only)"
