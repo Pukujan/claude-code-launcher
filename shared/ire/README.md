@@ -16,7 +16,10 @@ the repo.
 | Top 20 list | `operational/telemetry/gravebuster/pipeline/ihub/lists/research_model_top20_recommendations.csv` |
 | Price policy | the "below **$0.10 USDC per 1 million tokens** ... effectively free" line in `docs/INFERHUB-API-SETUP.md` |
 | Fallback picks (optional) | `operational/recommendations/claude-code-fallbacks.v1.json` |
-| Frontier list (optional) | `operational/telemetry/gravebuster/pipeline/ihub/lists/research_model_frontier_recommendations.json`, or `research_model_frontier_routes.csv` in the same folder if the JSON is missing |
+| Frontier list (optional) | `operational/telemetry/gravebuster/pipeline/ihub/lists/research_model_frontier_recommendations.json`; if that's missing, `research_model_frontier_routes.csv` in the same folder, with eligibility from `research_model_frontier_recommendations.csv`; if the routes CSV is missing too, that recommendations CSV alone |
+
+The frontier files arrived with IRE PR #68 (`9a8fba0`). They're optional and can never
+change the Top 20: if they're missing, unreadable or slow, `frontier` is just `[]`.
 
 IRE doesn't publish fallback picks yet. I searched `main` at `9a8fba0` on 2026-10-03 and
 found none. Until that file exists, the ladders come from `defaults.json`. When it does
@@ -52,6 +55,8 @@ never written to the cache or the output.
 python3 shared/ire/ire_fetch.py                  # JSON on stdout
 python3 shared/ire/ire_fetch.py --out ire.json   # JSON to a file
 python3 shared/ire/ire_fetch.py --offline        # skip GitHub: cache, then defaults
+  --table-out F        also write rank|name|id|eligible|cost lines (the Mac picker)
+  --top20-csv F        also write the Top 20 as CSV for sync_inferhub_top20.py
   --timeout 5          seconds for the whole fetch
   --cache-dir DIR      use another cache folder
 ```
@@ -75,14 +80,16 @@ than the default).
 ### In the launchers
 
 - **Mac** (`mac/Launch Claude InferHub.command`, `fetch_ire`): runs after the venv is
-  ready, writes `$STATE_DIR/ire.json` and exports `CCL_IRE_JSON`.
+  ready, writes `$STATE_DIR/ire.json` (`CCL_IRE_JSON`, frontier included),
+  `$STATE_DIR/ire-table.txt` (which replaces the picker's
+  built-in table) and `shared/litellm/config/top20.csv` (for the `ih/` deployments).
 - **Windows** (`windows/launch-claude-inferhub.ps1`, `Get-IreRecommendations`): runs
   before the pickers, writes `%LOCALAPPDATA%\claude-code-launcher\ire.json` and sets
   `$env:CCL_IRE_JSON`.
 
 Both print the status line with an `IRE:` prefix. Neither will stop the launch if the
-helper fails. The pickers still use their built-in tables for now. The ladder picker
-(issue #5) is the part that reads `CCL_IRE_JSON`.
+helper fails. The Mac picker uses the fetched Top 20; the Windows picker still uses its
+built-in table. The ladder picker (issue #5) is the part that reads `CCL_IRE_JSON`.
 
 ## Output schema
 
@@ -127,8 +134,10 @@ when the cache predates the key. It's cached along with everything else. A row l
 "price_in": 0.016, "price_out": 0.08, "preferred_endpoint": "/v1/responses",
 "system_prompt_handling": "developer_message", "context_window": 272000}`. Here
 `cost_per_mtok` is the cheapest input ask, which is the basis IRE uses for its price policy.
-In the routes CSV fallback, `eligible` means the route is healthy, because that file has
-no eligibility column.
+In the routes CSV fallback, `eligible` comes from the recommendations CSV
+(`recommendation_eligible`) when it can be read, and otherwise means the route is healthy,
+because the routes file has no eligibility column. From the recommendations CSV alone you
+get one row per family, its best route only.
 
 The ladder ids are bare InferHub ids, without the `ih/` prefix that LiteLLM deployments
 use. Provenance (fetch time and IRE SHA) isn't in the output. It's in the stderr line and
@@ -141,4 +150,7 @@ the cache file, which looks like
 network or needs a token. It covers online (env token, `gh auth token`, a price cap taken
 from the doc, IRE picks, malformed picks), offline with a cache, offline with no cache, a
 slow GitHub, bad auth (401 with and without a cache, and a token that can't see the
-repo), the output contract and the CLI.
+repo), the output contract and the CLI. The frontier tests cover the JSON, the routes CSV
+(with and without the recommendations CSV for eligibility), the recommendations CSV alone,
+cx routes keeping `developer_message` and `/v1/responses`, missing or malformed files, a
+slow frontier read that must not cost the live Top 20, and old caches without the key.

@@ -8,7 +8,8 @@ private repo Pukujan/inference-recommendation-engine on main:
   - the price policy line in docs/INFERHUB-API-SETUP.md
     ("below $0.10 USDC per 1 million tokens" counts as effectively free)
   - fallback picks, if IRE ever publishes them (optional JSON, see PICKS_PATH)
-  - the frontier list (optional; FRONTIER_JSON_PATH, else FRONTIER_ROUTES_PATH),
+  - the frontier list (optional; FRONTIER_JSON_PATH, else FRONTIER_ROUTES_PATH with
+    eligibility from FRONTIER_MODELS_CSV_PATH, else that CSV alone),
     one row per route, under the extra key "frontier" ([] when IRE has none)
 
 and prints one JSON document. The schema is documented in README.md next to
@@ -54,6 +55,10 @@ PICKS_PATH = "operational/recommendations/claude-code-fallbacks.v1.json"
 LISTS = "operational/telemetry/gravebuster/pipeline/ihub/lists/"
 FRONTIER_JSON_PATH = LISTS + "research_model_frontier_recommendations.json"
 FRONTIER_ROUTES_PATH = LISTS + "research_model_frontier_routes.csv"
+# Per-model rows (eligibility, best route). Used when the JSON is missing: it gives
+# the routes CSV real eligibility, and stands in for it (best routes only) if that
+# is missing too. All three frontier files are optional (IRE PR #68, 9a8fba0).
+FRONTIER_MODELS_CSV_PATH = LISTS + "research_model_frontier_recommendations.csv"
 
 DEFAULT_TIMEOUT = 5.0
 CACHE_NAME = "ire-cache.json"
@@ -239,17 +244,48 @@ def parse_frontier_json(text: str) -> list[dict]:
     return _sort_frontier(rows)
 
 
-def parse_frontier_routes_csv(text: str) -> list[dict]:
+def frontier_eligibility(models_csv: str | None) -> dict:
+    """model_family -> recommendation_eligible, from the frontier recommendations CSV."""
+    if not models_csv:
+        return {}
+    return {(r.get("model_family") or "").strip():
+            (r.get("recommendation_eligible") or "").strip().lower() == "true"
+            for r in csv.DictReader(io.StringIO(models_csv))}
+
+
+def parse_frontier_routes_csv(text: str, eligibility: dict | None = None) -> list[dict]:
     """research_model_frontier_routes.csv (fallback when the JSON is missing).
-    Eligibility isn't in this file, so a route counts as eligible when it is healthy."""
+    Eligibility comes from the recommendations CSV when that is there; otherwise a
+    route counts as eligible when it is healthy."""
+    eligibility = eligibility or {}
     rows = []
     for r in csv.DictReader(io.StringIO(text)):
         if (r.get("enabled") or "true").strip().lower() != "true":
             continue
         health = (r.get("health_status") or "").strip()
-        rows.append(_frontier_row(r, health == "healthy",
+        family = (r.get("model_family") or "").strip()
+        eligible = eligibility[family] if family in eligibility else health == "healthy"
+        rows.append(_frontier_row(r, eligible,
                                   {"min_ask_in": r.get("min_ask_in"), "min_ask_out": r.get("min_ask_out")},
                                   health))
+    return _sort_frontier(rows)
+
+
+def parse_frontier_models_csv(text: str) -> list[dict]:
+    """research_model_frontier_recommendations.csv alone: one row per model, its best
+    route only (last resort when both the JSON and the routes CSV are missing)."""
+    rows = []
+    for r in csv.DictReader(io.StringIO(text)):
+        route = {
+            "frontier_rank": r.get("frontier_rank"), "model_family": r.get("model_family"),
+            "vendor": r.get("vendor"), "route": r.get("best_route"), "is_best_route": "true",
+            "preferred_endpoint": r.get("best_route_preferred_endpoint"),
+            "system_prompt_handling": r.get("best_route_system_prompt_handling"),
+        }
+        rows.append(_frontier_row(route, (r.get("recommendation_eligible") or "").strip().lower() == "true",
+                                  {"min_ask_in": r.get("best_route_min_ask_in"),
+                                   "min_ask_out": r.get("best_route_min_ask_out")},
+                                  (r.get("best_route_health") or "").strip()))
     return _sort_frontier(rows)
 
 
@@ -343,19 +379,36 @@ def fetch_live(gh: GitHub, repo: str = IRE_REPO, ref: str = IRE_REF) -> tuple[di
 
 
 def fetch_frontier(gh: GitHub, repo: str, sha: str) -> list:
-    """Optional. [] when IRE has no frontier list or it can't be parsed."""
-    for path, parse in ((FRONTIER_JSON_PATH, parse_frontier_json),
-                        (FRONTIER_ROUTES_PATH, parse_frontier_routes_csv)):
-        text = gh.file(repo, path, sha)
-        if text is None:
-            continue
+    """Optional. [] when IRE has no frontier list or it can't be parsed. Never raises:
+    a slow or failed frontier read must not cost the live Top 20 it rides along with."""
+    def get(path):
         try:
-            rows = parse(text)
-        except (ValueError, KeyError, TypeError, AttributeError) as e:
+            return gh.file(repo, path, sha)
+        except FetchError as e:
+            log(f"skipping {path.rsplit('/', 1)[-1]}: {e}")
+            return None
+
+    def attempt(path, parse, *args):
+        try:
+            return parse(*args)
+        except (ValueError, KeyError, TypeError, AttributeError, csv.Error) as e:
             log(f"ignoring malformed {path}: {type(e).__name__}")
-            continue
+            return []
+
+    text = get(FRONTIER_JSON_PATH)
+    if text is not None:
+        rows = attempt(FRONTIER_JSON_PATH, parse_frontier_json, text)
         if rows:
             return rows
+    models_csv = get(FRONTIER_MODELS_CSV_PATH)
+    routes_csv = get(FRONTIER_ROUTES_PATH)
+    if routes_csv is not None:
+        elig = attempt(FRONTIER_MODELS_CSV_PATH, frontier_eligibility, models_csv) or {}
+        rows = attempt(FRONTIER_ROUTES_PATH, parse_frontier_routes_csv, routes_csv, elig)
+        if rows:
+            return rows
+    if models_csv is not None:
+        return attempt(FRONTIER_MODELS_CSV_PATH, parse_frontier_models_csv, models_csv)
     return []
 
 
@@ -419,12 +472,38 @@ def get_recommendations(offline: bool = False, timeout: float = DEFAULT_TIMEOUT,
     return validate(load_defaults())
 
 
+def top20_csv(bundle: dict) -> str:
+    """The bundle's Top 20 in the CSV shape sync_inferhub_top20.py reads."""
+    buf = io.StringIO()
+    w = csv.writer(buf, lineterminator="\n")
+    w.writerow(["recommendation_rank", "model_family", "vendor", "recommendation_eligible",
+                "supply_weighted_median_cost_usdc_per_1m", "model_ids"])
+    for r in bundle["top20"]:
+        w.writerow([r["rank"], r["name"], r.get("vendor", ""), "true" if r["eligible"] else "false",
+                    "" if r.get("cost_per_mtok") is None else r["cost_per_mtok"], ";".join(r["ids"])])
+    return buf.getvalue()
+
+
+def shell_table(bundle: dict) -> str:
+    """rank|name|id|eligible|cost lines for the Mac picker (first InferHub id per row)."""
+    lines = []
+    for r in bundle["top20"]:
+        name = r["name"].replace("|", "/").replace("\n", " ") or r["ids"][0]
+        cost = "" if r.get("cost_per_mtok") is None else f"{r['cost_per_mtok']:.3f}"
+        lines.append(f"{r['rank']}|{name}|{r['ids'][0]}|{'true' if r['eligible'] else 'false'}|{cost}")
+    return "\n".join(lines) + "\n"
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Print the launcher's IRE recommendations as JSON.")
     ap.add_argument("--offline", action="store_true", help="skip GitHub; use the cache, then defaults")
     ap.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT, help="seconds for the whole fetch (default 5)")
     ap.add_argument("--cache-dir", type=Path, default=None, help="override the cache folder")
     ap.add_argument("--out", type=Path, default=None, help="write the JSON here instead of stdout")
+    ap.add_argument("--table-out", type=Path, default=None,
+                    help="also write rank|name|id|eligible|cost lines (the Mac picker table)")
+    ap.add_argument("--top20-csv", type=Path, default=None,
+                    help="also write the Top 20 as a CSV for sync_inferhub_top20.py")
     a = ap.parse_args(argv)
     bundle = get_recommendations(offline=a.offline, timeout=a.timeout, directory=a.cache_dir)
     text = json.dumps(bundle, indent=2) + "\n"
@@ -433,6 +512,10 @@ def main(argv=None) -> int:
         a.out.write_text(text, encoding="utf-8")
     else:
         sys.stdout.write(text)
+    for path, render in ((a.table_out, shell_table), (a.top20_csv, top20_csv)):
+        if path:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(render(bundle), encoding="utf-8")
     return 0
 
 

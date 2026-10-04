@@ -20,7 +20,19 @@ InferHub.
    open claude-code-launcher/mac
    ```
 
-2. Double-click **Launch Claude InferHub.command**.
+2. Either double-click **Launch Claude InferHub.command**, or install the
+   `claude-acs` command from Terminal:
+
+   ```bash
+   ~/work/claude-code-launcher/mac/setup.sh
+   ```
+
+   `setup.sh` does the same first-run work as the double-click (below), then
+   puts `claude-acs` in `~/.local/bin` and adds that folder to your PATH in
+   `~/.zshrc`. Open a new Terminal window afterwards. `setup.sh --check` shows
+   what's installed without changing anything, and `setup.sh --uninstall`
+   removes `claude-acs` and stops the proxy this checkout started. It keeps your
+   key and the venv.
 
 The first run takes a few minutes. It installs whatever is missing, all inside
 your home folder and without asking for an admin password:
@@ -47,16 +59,39 @@ launcher passes it to Claude Code instead.
 
 ## Every time after that
 
-Double-click it again. Nothing gets reinstalled. If the proxy is already
+Double-click it again, or type `claude-acs` (`claude-acs ~/work/myproj` skips
+the folder question). Nothing gets reinstalled. If the proxy is already
 running, the script skips straight to the questions:
 
-1. **Folder**: `~/work` is listed first, then each folder inside it. Type its
-   number, or `b` to pick any folder in Finder. Press Return to confirm.
-2. **Main model**: the same Top 20 list as Windows. Press Return for the
-   default, DeepSeek V4.1 Flash.
+1. **Folder**: `~/work` is listed first, then each folder inside it, then
+   folders you used before. Type a number, or:
+   - `b` to browse in the terminal: arrow keys move, Right or Return opens a
+     folder, Left goes up, `s` picks the folder you're in, `n` makes a new one
+     there, Esc goes back
+   - `q` for quick picks (home, Desktop, Documents, common code folders)
+   - `t` to type a path (`~` works)
+   - `n` to make a new folder
+   - `x` to quit
+
+   Then press Return to confirm.
+2. **Main model**: the IRE Top 20. Press Return for the default, DeepSeek V4.1
+   Flash.
 3. **Advisor model**: press Return for OFF (the default), or type a number.
 
 Claude Code then opens in that folder. To update the launcher, `git pull`.
+
+### Where the model list comes from
+
+Each launch asks `shared/ire/ire_fetch.py` for the current IRE Top 20. IRE is a
+private repository, so this needs a GitHub login: `gh auth login` once, or a
+`GH_TOKEN` in your environment. Without one, or offline, it uses the last list
+it fetched, and before the first fetch the built-in list (the same one Windows
+has). The launcher prints one `IRE:` line saying which it used, and never
+stops because of it.
+
+The same fetch also reads IRE's frontier list (stronger models with live route
+prices) when IRE publishes it. Type `f` at the main or advisor prompt to pick
+from it instead of the Top 20.
 
 ## If the Mac complains
 
@@ -78,20 +113,36 @@ Claude Code then opens in that folder. To update the launcher, `git pull`.
 | `CLAUDE_IH_WORK_ROOT` | `~/work` | Root of the folder picker |
 | `LITELLM_HEALTH_TIMEOUT` | `300` | Seconds to wait for the proxy |
 | `INFERHUB_TOP20_CSV` | `shared/litellm/config/top20-builtin.csv` | A real IRE Top 20 CSV, if you have one |
-| `CLAUDE_IH_PROJECT`, `CLAUDE_IH_MAIN`, `CLAUDE_IH_ADVISOR` | (ask) | Skip a picker |
+| `CLAUDE_IH_PROJECT`, `CLAUDE_IH_MAIN`, `CLAUDE_IH_ADVISOR` | (ask) | Skip a picker. The old names `ACS_FOLDER`, `ACS_MAIN_ID`, `ACS_ADVISOR_ID` still work. |
+| `CCL_IRE_OFFLINE` | unset | `1` skips GitHub and uses the cached or built-in list |
+
+## Stopping the proxy
+
+`mac/stop-litellm.sh` stops the proxy this checkout started, using the PID in
+`shared/litellm/logs/litellm.pid`. It checks that the PID really is this
+checkout's LiteLLM first, and never stops anything by port.
 
 ## Tests
 
-`mac/tests/dry_run.sh [port] [bash]` copies `mac/` and `shared/` into a temp
-folder, runs the launcher with a fake `claude` and a real LiteLLM on a test port
-(4100 by default; it refuses 4000), and checks the arguments, folder and
-environment the fake received. It also checks that the proxy listens on
-127.0.0.1 and that the picked seat was hot-reloaded into it without a key. CI
-runs it on every pull request.
+- `mac/tests/unit_tests.sh [bash]` runs offline checks on the model table, the
+  key reading, the folder navigation, the folder picker with piped answers, the
+  environment clearing and the stop script.
+- `mac/tests/dry_run.sh [port] [bash]` copies `mac/` and `shared/` into a temp
+  folder with a throwaway home, runs `setup.sh`, then `claude-acs` with a fake
+  `claude` and a real LiteLLM on a test port (4100 by default; it refuses 4000).
+  It checks the arguments, folder and environment the fake received, that the
+  proxy listens on 127.0.0.1 only and serves the seat and fast aliases with no
+  key, that the picked seat was hot-reloaded, and that `stop-litellm.sh` stops
+  it.
+
+CI runs both on every pull request, once with Ubuntu's bash 5 (`mac-dry-run`)
+and once with bash 3.2.57 built from source (`bash 3.2 compatibility`).
 
 ## Honest status
 
 This has been checked on Linux under bash 5 and bash 3.2.57, the version macOS
 ships. It ran end to end with a fake `claude` and a real local LiteLLM on a test
-port. It has **not been run on a real Mac yet**. Expect the first Mac run to
-turn up small things, most likely in the Finder picker or the Node fallback.
+port, and the arrow-key browser was driven through a pseudo-terminal under both
+bash versions. It has **not been run on a real Mac yet**. Expect the first Mac
+run to turn up small things, most likely in the terminal browser, the `~/.zshrc`
+PATH line or the Node fallback.

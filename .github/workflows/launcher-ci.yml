@@ -1,8 +1,10 @@
 name: launcher-ci
 
-# Lint, the Mac launcher dry run (on Linux) and the Python unit tests.
-# All three job names are required checks on main, next to `gates`.
-# Nothing here touches port 4000: the dry run uses 4100 and refuses 4000.
+# Lint, the Mac launcher dry run (on Linux), the Mac launcher under the bash
+# 3.2 that macOS ships, and the Python unit tests. All four job names are
+# required checks on main, next to `gates`. No path filters, so every PR
+# reports all of them.
+# Nothing here touches port 4000: the dry runs use 4100/4101 and refuse 4000.
 
 on:
   pull_request:
@@ -21,12 +23,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: shellcheck the Mac launcher and its test
+      - name: shellcheck the Mac scripts
         shell: bash
         run: |
           set -euo pipefail
           shellcheck --version | head -2
-          shellcheck -s bash "mac/Launch Claude InferHub.command" mac/tests/dry_run.sh
+          shellcheck -s bash -x "mac/Launch Claude InferHub.command" mac/setup.sh \
+            mac/stop-litellm.sh mac/lib/nav.sh mac/tests/*.sh
 
       - name: Parse and PSScriptAnalyzer the Windows scripts
         shell: pwsh
@@ -64,7 +67,70 @@ jobs:
         run: |
           set -euo pipefail
           bash -n "mac/Launch Claude InferHub.command"
+          bash mac/tests/unit_tests.sh
           bash mac/tests/dry_run.sh 4100
+
+  bash32:
+    # macOS ships bash 3.2 and the Mac launcher must run on it. Ubuntu has
+    # bash 5, so build 3.2.57 from source and run the Mac tests with it. The
+    # build stays in the runner's temp folder: PR #7's version of this job
+    # failed because `make install` could not write to /usr/local.
+    name: bash 3.2 compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Cache the bash 3.2 build
+        id: cache-bash32
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/bash32
+          key: bash-3.2.57-${{ runner.os }}-v1
+
+      - name: Build bash 3.2.57
+        if: steps.cache-bash32.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          src="$RUNNER_TEMP/bash-src"
+          mkdir -p "$src" "$RUNNER_TEMP/bash32"
+          curl -fsSL https://ftp.gnu.org/gnu/bash/bash-3.2.57.tar.gz -o "$src/bash.tar.gz"
+          echo "3fa9daf85ebf35068f090ce51283ddeeb3c75eb5bc70b1a4a7cb05868bfe06a4  $src/bash.tar.gz" | sha256sum -c -
+          tar -xzf "$src/bash.tar.gz" -C "$src"
+          cd "$src/bash-3.2.57"
+          # Old C: modern gcc needs these to build it.
+          ./configure --without-bash-malloc \
+            CFLAGS="-O1 -std=gnu89 -Wno-implicit-int -Wno-implicit-function-declaration -Wno-incompatible-pointer-types -Wno-int-conversion" \
+            > "$RUNNER_TEMP/bash32-configure.log" 2>&1 || { tail -40 "$RUNNER_TEMP/bash32-configure.log"; exit 1; }
+          make -j2 > "$RUNNER_TEMP/bash32-make.log" 2>&1 || { tail -40 "$RUNNER_TEMP/bash32-make.log"; exit 1; }
+          cp bash "$RUNNER_TEMP/bash32/bash"
+
+      - name: Check the build is really 3.2
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/bash32/bash" --version | head -1
+          "$RUNNER_TEMP/bash32/bash" -c '[ "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}" = "3.2" ]'
+
+      - name: bash 3.2 -n on every Mac script
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in "mac/Launch Claude InferHub.command" mac/setup.sh mac/stop-litellm.sh mac/lib/nav.sh mac/tests/*.sh; do
+            "$RUNNER_TEMP/bash32/bash" -n "$f"
+            echo "parses: $f"
+          done
+
+      - name: Unit tests under bash 3.2
+        shell: bash
+        run: bash mac/tests/unit_tests.sh "$RUNNER_TEMP/bash32/bash"
+
+      - name: Dry run (setup.sh, claude-acs, launcher) under bash 3.2
+        shell: bash
+        run: bash mac/tests/dry_run.sh 4101 "$RUNNER_TEMP/bash32/bash"
 
   python-tests:
     name: python-tests

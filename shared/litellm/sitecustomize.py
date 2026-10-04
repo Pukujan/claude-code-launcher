@@ -304,7 +304,9 @@ _sa.Starlette.__call__ = _starlette_call_with_mobile_ui
 print("[sitecustomize] app-level dashboard HTML patch installed", flush=True)
 # ---------------------------------------------------------------------------
 # InferHub / runtime hot-reload (issue #29)
-# POST /workbench/reload_runtime  Authorization: Bearer <LITELLM_MASTER_KEY>
+# POST /workbench/reload_runtime
+#   With a master key: Authorization: Bearer <LITELLM_MASTER_KEY> is required.
+#   Keyless (no master key): only loopback callers (127.0.0.1 / ::1) are accepted.
 # Body: {"scope":"seat"|"all"|"ladder"}  (default seat)
 # - seat: upsert Claude seat aliases from config/inferhub_aliases.yaml
 # - all:  replace router model_list from config/runtime.yaml
@@ -318,6 +320,7 @@ import os as _os
 from pathlib import Path as _Path
 
 _RELOAD_PATH = "/workbench/reload_runtime"
+_WB_SEAT_ALIASES = ("sonnet", "opus", "haiku", "main", "advisor", "claude-sonnet-5", "claude-opus-5-5", "claude-fable-5", "claude-fable-5-1")
 _REPO_ROOT = _Path(__file__).resolve().parent
 
 
@@ -332,17 +335,47 @@ async def _wb_json_response(send, status: int, payload: dict):
     await send({"type": "http.response.body", "body": body, "more_body": False})
 
 
-_WB_LOOPBACK = {"127.0.0.1", "::1", "::ffff:127.0.0.1"}
+_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "::ffff:127.0.0.1", "localhost"}
 
 
-def _wb_authorized(master, token, scope) -> bool:
-    """With a master key, the bearer token must match it. Keyless (the default
-    for this repo's launchers, which bind 127.0.0.1 only), accept loopback
-    clients and nobody else."""
+def _wb_is_loopback(host) -> bool:
+    if not host or not isinstance(host, str):
+        return False
+    host = host.strip().strip("[]").lower()
+    if host in _LOOPBACK_HOSTS:
+        return True
+    try:
+        import ipaddress
+
+        addr = ipaddress.ip_address(host)
+        mapped = getattr(addr, "ipv4_mapped", None)
+        return bool(addr.is_loopback or (mapped is not None and mapped.is_loopback))
+    except ValueError:
+        return False
+
+
+def _wb_client_host(scope):
+    client = scope.get("client")
+    if isinstance(client, (list, tuple)) and client:
+        return client[0]
+    return None
+
+
+def _wb_authorize(master, token, client_host):
+    """Return None when the caller may reload, else (status, error message).
+
+    - Master key configured: the bearer token must match it (any client).
+    - No master key (keyless local proxy): only loopback clients are allowed.
+    """
     if master:
-        return bool(token) and token == master
-    client = scope.get("client") or ()
-    return bool(client) and str(client[0]) in _WB_LOOPBACK
+        import hmac
+
+        if token and hmac.compare_digest(str(token).encode("utf-8"), str(master).encode("utf-8")):
+            return None
+        return (401, "unauthorized")
+    if _wb_is_loopback(client_host):
+        return None
+    return (403, "forbidden: keyless proxy only accepts reload from 127.0.0.1/::1")
 
 
 def _wb_read_bearer(scope) -> str | None:
@@ -423,7 +456,7 @@ def _wb_upsert_models(llm_router, entries: list) -> dict:
         )
         llm_router.upsert_deployment(deployment=deployment)
         updated.append(name)
-        if name in ("sonnet", "opus", "main", "advisor", "claude-sonnet-5", "claude-opus-5-5", "claude-fable-5", "claude-fable-5-1"):
+        if name in _WB_SEAT_ALIASES:
             aliases[name] = params.get("model")
     return {"updated": len(updated), "names": updated, "aliases": aliases}
 
@@ -442,7 +475,7 @@ def _wb_reload_all(llm_router, path: _Path) -> dict:
         if isinstance(params, dict):
             entry["litellm_params"] = _wb_resolve_secrets(params)
             name = entry.get("model_name")
-            if name in ("sonnet", "opus", "main", "advisor", "claude-sonnet-5", "claude-opus-5-5", "claude-fable-5", "claude-fable-5-1"):
+            if name in _WB_SEAT_ALIASES:
                 aliases[name] = entry["litellm_params"].get("model")
         prepared.append(entry)
     llm_router.set_model_list(prepared)
@@ -493,8 +526,9 @@ async def _wb_handle_reload(scope, receive, send):
         return await _wb_json_response(send, 500, {"error": f"proxy_server import failed: {e}"})
 
     master = getattr(ps, "master_key", None)
-    if not _wb_authorized(master, token, scope):
-        return await _wb_json_response(send, 401, {"error": "unauthorized"})
+    denied = _wb_authorize(master, token, _wb_client_host(scope))
+    if denied is not None:
+        return await _wb_json_response(send, denied[0], {"error": denied[1]})
 
     llm_router = getattr(ps, "llm_router", None)
     if llm_router is None:

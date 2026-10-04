@@ -21,18 +21,16 @@ under `shared\litellm\.litellm-venv`; Python and Claude Code must already be
 installed.
 
 **Mac.** Clone this repository, then double-click
-`mac/Launch Claude InferHub.command`. The first run installs what is missing
-and asks once for your InferHub key. See [mac/README.md](mac/README.md).
+`mac/Launch Claude InferHub.command`, or run `mac/setup.sh` once and use the
+`claude-acs` command after that. The first run installs what is missing and asks
+once for your InferHub key. Folders can be picked from a list, browsed with the
+arrow keys in the terminal, or typed. See [mac/README.md](mac/README.md).
 **The Mac launcher has only been tested on Linux so far.**
 
-Both launchers pick the same 20 models, default to DeepSeek V4.1 Flash with the
-advisor OFF, and start Claude Code with
-`claude --model sonnet --permission-mode bypassPermissions`.
-
-**Two Mac launchers for now.** `mac/` is the port from agent-custom-setup and
-runs the proxy from `shared/litellm/`. `macos/` arrived separately in PR #7 and
-installs its own proxy under `~/litellm`. Both put the proxy on 127.0.0.1:4000
-keyless. Which one stays is still open.
+Both launchers default to DeepSeek V4.1 Flash with the advisor OFF, and start
+Claude Code with `claude --model sonnet --permission-mode bypassPermissions`.
+The model list is the IRE Top 20, fetched at start-up by `shared/ire/` (see
+below).
 
 ## Keys
 
@@ -60,20 +58,37 @@ InferHub seats you picked:
 | --- | --- |
 | `sonnet`, `main`, `claude-sonnet-5` | the main seat |
 | `opus`, `advisor`, `claude-opus-5-5`, `claude-fable-5` | the advisor seat, or main when the advisor is OFF |
+| `haiku`, `small-fast`, `claude-haiku-5` | the fast seat, `ali/qwen3.8-flash` unless the seat file says otherwise. Both launchers point Claude Code's small, fast requests here. |
 | `ih/<model id>` | that InferHub model directly |
 
 If a seat fails, the proxy falls back along the chains in
 `shared/litellm/config/inferhub_fallbacks.yaml`. Changing seats later
 hot-reloads the running proxy; it does not restart it.
 
+## Where the model list comes from
+
+`shared/ire/ire_fetch.py` reads the IRE Top 20 from the private
+`inference-recommendation-engine` repository each time a launcher starts. It
+signs in with `GH_TOKEN`, `GITHUB_TOKEN` or `gh auth token`. If that fails, it
+uses the last list it fetched, and if there is none yet, a built-in list. It
+never stops a launch. The Mac launcher shows the fetched list in its picker;
+Windows still shows its built-in table and passes the fetched one on as
+`CCL_IRE_JSON`.
+
+It also reads IRE's newer frontier list (stronger models with live route
+prices, IRE PR #68) when it's there, and keeps it in the same answer. Both
+pickers can seat from it: `f` at the Mac prompts, Tab on Windows. A `cx/` seat
+goes through the proxy's Responses mode (`/v1/responses`), which is what those
+routes ask for.
+
 ## What is where
 
 | Folder | What it holds |
 | --- | --- |
 | `windows/` | The PowerShell launcher, and `litellm/` with the start and stop scripts |
-| `mac/` | The Mac launcher ported from agent-custom-setup, its guide and its dry-run test |
-| `macos/` | A separate Mac shim installer (`setup.sh`, `claude-acs`) with a live IRE model table, from PR #7 |
+| `mac/` | The Mac launcher, `setup.sh` (installs it and the `claude-acs` command), `stop-litellm.sh`, the folder navigation in `lib/`, and its tests |
 | `shared/litellm/` | Proxy config, seat and merge scripts, fallback chains, pinned requirements |
+| `shared/ire/` | The IRE fetch, its cache rules and its built-in defaults |
 | `docs/` | [PARITY.md](docs/PARITY.md) compares the two launchers; [HOOKS.md](docs/HOOKS.md) lists where planned features plug in |
 | `history/` | Older launcher versions, kept as a record |
 | `SOURCES.md` | Where every copied file came from, with commit and hash |
@@ -87,13 +102,13 @@ hot-reloads the running proxy; it does not restart it.
   on 4000, the launchers reuse it. It reads its own config files, so seat
   changes made from this repository do not reach it. Stop that one by hand once
   and let the launcher start its own.
-- The routing scripts are copied from `litellm-ckff-ops` unchanged. Changing
-  them needs its own issue.
+- The routing scripts are copied from `litellm-ckff-ops` unchanged (now at
+  `de69e68`). Changing them needs its own issue.
 
 ## Status
 
 | Check | State |
 | --- | --- |
 | Windows launcher | Taken from the PC on 2026-10-03, with small path and key edits listed in `SOURCES.md`. Linted in CI; the edits have not been run on Windows yet. |
-| Mac launcher | Dry run passes on Linux under bash 5 and bash 3.2.57. Not yet run on a Mac. |
-| CI | `gates` (stack validators), `lint`, `mac-dry-run` and `python-tests` are required on every pull request. |
+| Mac launcher | Unit tests and the dry run (installer, `claude-acs`, launcher) pass on Linux under bash 5 and bash 3.2.57. Not yet run on a Mac. |
+| CI | `gates` (stack validators), `lint`, `mac-dry-run`, `bash 3.2 compatibility` and `python-tests` are required on every pull request. |

@@ -8,3 +8,4 @@ config/inferhub_seat.json
 config/top20.csv
 config/ladder_state.json
 config/ladder-plan.json
+config/.inferhub_top20.source

@@ -1,5 +1,6 @@
 """Seat aliases and fallback chains, run through the copied scripts unchanged."""
 import json
+import os
 import subprocess
 import sys
 
@@ -43,13 +44,35 @@ def test_advisor_off_falls_back_to_main(tmp_path):
     assert a["opus"] == a["advisor"] == "openai/cb/deepseek-v4.1-flash"
 
 
-def test_seat_file_with_bom_is_rejected_so_launchers_must_write_without_one(tmp_path):
-    # Guards the PS 5.1 fix: Set-Content -Encoding UTF8 writes a BOM, json.loads refuses it.
+def test_seat_file_with_bom_is_read(tmp_path):
+    # Windows PowerShell 5.1 writes the seat file with a BOM; the script reads it as utf-8-sig.
     seat = tmp_path / "seat.json"
     seat.write_bytes(b"\xef\xbb\xbf" + json.dumps({"main_inferhub_id": "cb/deepseek-v4.1-flash"}).encode())
     r = run("apply_inferhub_seat.py", "--seat", str(seat), "--out", str(tmp_path / "a.yaml"),
             "--no-merge", "--no-reload")
-    assert r.returncode != 0
+    assert r.returncode == 0, r.stderr
+    assert aliases(tmp_path / "a.yaml")["sonnet"] == "openai/cb/deepseek-v4.1-flash"
+
+
+def test_fast_seat_aliases_default_to_qwen_flash(tmp_path):
+    seat, out = tmp_path / "seat.json", tmp_path / "aliases.yaml"
+    r = run("apply_inferhub_seat.py", "--seat", str(seat), "--out", str(out),
+            "--main", "cbcn/glm-5.3-flash", "--advisor", "", "--no-merge", "--no-reload")
+    assert r.returncode == 0, r.stderr
+    a = aliases(out)
+    for name in ("haiku", "claude-haiku-5", "small-fast", "ih-haiku", "ih-small-fast", "inferhub-haiku"):
+        assert a[name] == "openai/ali/qwen3.8-flash"
+    # CKFF serves claude-haiku-4-5, so the seat must not shadow it.
+    assert "claude-haiku-4-5" not in a
+    assert json.loads(seat.read_text())["fast_inferhub_id"] == "ali/qwen3.8-flash"
+
+
+def test_fast_seat_empty_uses_main(tmp_path):
+    out = tmp_path / "aliases.yaml"
+    r = run("apply_inferhub_seat.py", "--seat", str(tmp_path / "s.json"), "--out", str(out),
+            "--main", "cbcn/glm-5.3-flash", "--advisor", "", "--fast", "", "--no-merge", "--no-reload")
+    assert r.returncode == 0, r.stderr
+    assert aliases(out)["small-fast"] == "openai/cbcn/glm-5.3-flash"
 
 
 def test_fallback_chains_skip_seat_and_other_seats_vendor(tmp_path):
@@ -78,14 +101,17 @@ def test_full_merge_from_builtin_top20(tmp_path):
                "--main", "cb/deepseek-v4.1-flash", "--advisor", "",
                "--no-merge", "--no-reload").returncode == 0
     out = tmp_path / "runtime.yaml"
-    r = run("merge_litellm_config.py", "--inferhub-top20", str(top), "--inferhub-aliases", str(al),
-            "--out", str(out), "--no-reload")
+    env = {k: v for k, v in os.environ.items() if k != "LITELLM_MASTER_KEY"}
+    r = subprocess.run([sys.executable, str(SCRIPTS / "merge_litellm_config.py"), "--inferhub-top20", str(top),
+                        "--inferhub-aliases", str(al), "--out", str(out), "--no-reload"],
+                       capture_output=True, text=True, check=False, env=env)
     assert r.returncode == 0, r.stderr
     doc = yaml.safe_load(out.read_text(encoding="utf-8"))
     names = {m["model_name"] for m in doc["model_list"]}
     assert "ih/cb/deepseek-v4.1-flash" in names and "sonnet" in names
-    # Keyless unless the env sets one: the key is only an env reference.
-    assert doc["general_settings"]["master_key"] == "os.environ/LITELLM_MASTER_KEY"
+    # Keyless: with no LITELLM_MASTER_KEY, runtime.yaml has no master_key at all.
+    assert "master_key" not in (doc.get("general_settings") or {})
+    assert {"haiku", "small-fast"} <= names
     assert any("sonnet" in d for d in doc["router_settings"]["fallbacks"])
     # failure policy: 3 retries per model (seats and chain targets), benched 180 s after the last one
     pol = doc["router_settings"]["model_group_retry_policy"]
@@ -116,11 +142,18 @@ def test_merge_honors_ccl_retries_and_cooldown(tmp_path, monkeypatch):
     assert info["allowed_fails_policy"]["ServiceUnavailableErrorAllowedFails"] == 2
 
 
+def test_master_key_is_only_an_env_reference_when_set():
+    assert merge.apply_master_key_setting({}, {"LITELLM_MASTER_KEY": "sk-x"}) == {
+        "master_key": "os.environ/LITELLM_MASTER_KEY"}
+    assert merge.apply_master_key_setting({"master_key": "x"}, {}) == {}
+
+
 # ---- cx/ seats use Responses mode; everything else is byte-identical (#13) ----
 
 GOLDEN = SCRIPTS.parents[2] / "tests" / "fixtures" / "seat"
-# Written by apply_inferhub_seat.py on main before the cx change (only the
-# "# Generated:" timestamp line is dropped).
+# Written by the unmodified upstream apply_inferhub_seat.py at litellm-ckff-ops
+# de69e68 (no cx change, includes the haiku/small-fast aliases); only the
+# "# Generated:" timestamp line is dropped.
 GOLDEN_CASES = [
     ("cb/deepseek-v4.1-flash", "ali/qwen3.8-flash", "cb-deepseek-v4.1-flash_ali-qwen3.8-flash.yaml"),
     ("ag/gemini-3.8-flash-high", "", "ag-gemini-3.8-flash-high_.yaml"),

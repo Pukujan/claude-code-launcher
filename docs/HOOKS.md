@@ -7,27 +7,23 @@ launchers mark where each one plugs in with a `HOOK(...)` comment, so
 
 ## IRE fetch: `HOOK(ire)` and `HOOK(ire-models)`
 
-Today the Top 20 comes from `shared/litellm/config/top20-builtin.csv` and from
-the `$Models` / `MODELS` tables in the two launchers. Those three must match;
-`tests/test_top20_tables.py` checks it.
+Done in PR #10 and issue #11. `shared/ire/ire_fetch.py` runs at start-up in
+both launchers (`HOOK(ire)`); its README has the output schema.
 
-The contract for the fetch:
-
-- Write the fetched recommendations to `shared/litellm/config/top20.csv`, with
-  the same columns as `top20-builtin.csv` (`recommendation_rank`,
-  `model_family`, `recommendation_eligible`,
-  `supply_weighted_median_cost_usdc_per_1m`, `model_ids`). That path is
-  gitignored.
-- Both start paths already prefer that file over the built-in one when they
-  write `inferhub_top20.yaml` (`HOOK(ire)` in `windows/litellm/start-litellm.ps1`
-  and in `ensure_top20` in the Mac launcher). Delete `inferhub_top20.yaml` or
-  run `start-litellm.ps1` without `-SkipSync` to regenerate it.
-- The picker tables are marked `HOOK(ire-models)`. The fetch PR can load the
-  picker rows from the same CSV there. If it does, update
-  `tests/test_top20_tables.py` to compare against the CSV instead of the
-  hardcoded tables.
-- `INFERHUB_MANAGEMENT_URL` is listed in `.env.example` for it; nothing reads it
-  yet.
+- The Mac launcher passes `--top20-csv shared/litellm/config/top20.csv`, so
+  the fetched Top 20 lands where `ensure_top20` looks first, and
+  `inferhub_top20.yaml` is rebuilt when that file changes. It also passes
+  `--table-out`, and `load_ire_table` (`HOOK(ire-models)`) replaces the
+  built-in `MODELS` with it.
+- Windows still uses its built-in `$Models` table and only exports
+  `CCL_IRE_JSON`. Switching it over is the remaining piece of this hook.
+- The built-in tables stay as the last resort. `tests/test_top20_tables.py`
+  and `tests/test_ire_fetch.py` keep them equal to each other and to
+  `shared/ire/defaults.json`.
+- The optional frontier list rides in the bundle under the extra `frontier`
+  key (`[]` when IRE has none). The pickers and the ladder picker read it from
+  `CCL_IRE_JSON`.
+- `INFERHUB_MANAGEMENT_URL` is listed in `.env.example`; nothing reads it yet.
 
 ## Fallback ladder picker (issue #5)
 

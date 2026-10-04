@@ -350,3 +350,67 @@ def test_cli_writes_json(env, tmp_path):
     out = tmp_path / "ire.json"
     assert F.main(["--offline", "--cache-dir", str(env), "--out", str(out)]) == 0
     check_contract(json.loads(out.read_text()))
+
+
+# ------------------------------------------------------------------ frontier: the other optional files
+
+def test_frontier_routes_csv_takes_eligibility_from_the_recommendations_csv(monkeypatch, env):
+    # 9a8fba0 rows: GPT 6 Astra (rank 1) and Claude Fable 5.1 (rank 2) are both recommended.
+    monkeypatch.setenv("GH_TOKEN", TOKEN)
+    online(monkeypatch, FakeGitHub({
+        F.FRONTIER_MODELS_CSV_PATH: (FIX / "frontier_recommendations.csv").read_bytes(),
+        F.FRONTIER_ROUTES_PATH: (FIX / "frontier_routes.csv").read_bytes(),
+    }))
+    b = F.get_recommendations(directory=env)
+    check_contract(b)
+    by_name = {r["name"]: r["eligible"] for r in b["frontier"]}
+    assert by_name.get("Claude Fable 5.1") is True
+    sol = next(r for r in b["frontier"] if r["route"] == "cx/gpt-6.1-sol")
+    assert sol["system_prompt_handling"] == "developer_message"
+    assert sol["preferred_endpoint"] == "/v1/responses"
+
+
+def test_frontier_recommendations_csv_alone_gives_best_routes(monkeypatch, env):
+    monkeypatch.setenv("GH_TOKEN", TOKEN)
+    online(monkeypatch, FakeGitHub({
+        F.FRONTIER_MODELS_CSV_PATH: (FIX / "frontier_recommendations.csv").read_bytes()}))
+    b = F.get_recommendations(directory=env)
+    check_contract(b)
+    assert [r["route"] for r in b["frontier"]] == ["cb/gpt-6-astra", "cc/claude-fable-5-1"]
+    assert all(r["best_route"] and r["eligible"] for r in b["frontier"])
+
+
+def test_slow_frontier_file_keeps_the_live_top20(monkeypatch, env):
+    # A frontier read that runs out of time must not turn a live answer into cache/defaults.
+    monkeypatch.setenv("GH_TOKEN", TOKEN)
+    fake = FakeGitHub()
+
+    def slow_frontier(req, timeout=None):
+        if "frontier" in req.full_url:
+            raise urllib.error.URLError(OSError("timed out"))
+        return fake(req, timeout)
+
+    monkeypatch.setattr(F.urllib.request, "urlopen", slow_frontier)
+    b = F.get_recommendations(directory=env)
+    assert b["source"] == "live" and b["frontier"] == []
+
+
+def test_cli_writes_the_picker_table_and_top20_csv(env, tmp_path):
+    out = tmp_path / "o"
+    r = subprocess.run([sys.executable, str(REPO / "shared" / "ire" / "ire_fetch.py"), "--offline",
+                        "--cache-dir", str(env), "--out", str(out / "ire.json"),
+                        "--table-out", str(out / "table.txt"), "--top20-csv", str(out / "top20.csv")],
+                       capture_output=True, text=True, check=False)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == ""
+    lines = (out / "table.txt").read_text().splitlines()
+    assert len(lines) == 20 and lines[0] == "1|DeepSeek V4.1 Flash|cb/deepseek-v4.1-flash|true|0.022"
+    rows = list(csv.DictReader(io.StringIO((out / "top20.csv").read_text())))
+    assert rows[0]["model_ids"] == "cb/deepseek-v4.1-flash" and len(rows) == 20
+
+
+def test_builtin_table_matches_the_mac_launcher_fallback():
+    # The Mac launcher's built-in MODELS is what it shows when ire_fetch.py can't run at all.
+    text = (REPO / "mac" / "Launch Claude InferHub.command").read_text(encoding="utf-8")
+    block = text.split("MODELS='", 1)[1].split("'", 1)[0]
+    assert block.strip().splitlines() == F.shell_table(F.load_defaults()).strip().splitlines()
