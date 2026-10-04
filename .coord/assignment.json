@@ -31,10 +31,10 @@
     "who_is_boss_now": "executor-claude-code-launcher",
     "as_of_history": [
       {
-        "agent_id": "executor-claude-code-launcher",
-        "from": "2026-10-04T22:37:58Z",
-        "task": "CCL-0061",
-        "reason": "first live continuer; seat was vacant"
+        "as_of": "2026-10-04T22:37:58Z",
+        "boss_agent_id": "executor-claude-code-launcher",
+        "ended_at": null,
+        "notes": "CCL-0061 (issue #61); first live continuer, the seat was vacant."
       }
     ]
   },

@@ -50,4 +50,4 @@ through the local proxy with all four slots and web search working, even if he a
 
 - 2026-10-04 6:20 PM ET: spec written and linked on #61; claim taken in `.coord`.
 - 2026-10-04 6:35 PM ET: red tests committed (`6f7c87b`): pytest 31 failed + 2 collection errors, Pester 166 failed.
-- 2026-10-04 7:05 PM ET: implementation in; locally pytest 276 passed / 7 skipped, Pester 166 passed / 8 skipped (E2E is Windows only), ruff and PSScriptAnalyzer clean. Waiting on CI, including the Windows job.
+- 2026-10-04 6:58 PM ET: implementation in; locally pytest 276 passed / 7 skipped, Pester 166 passed / 8 skipped (E2E is Windows only), ruff and PSScriptAnalyzer clean. Waiting on CI, including the Windows job.

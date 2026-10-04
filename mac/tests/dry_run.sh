@@ -9,8 +9,9 @@
 # stdin) and writes claude-acs without starting the proxy. Then claude-acs runs
 # the launcher with the picker answers piped in: folder 3 (second subfolder),
 # confirm, main 2 (GLM 5.3 Flash), advisor 10 (MiniMax M3). No
-# LITELLM_MASTER_KEY is set, so the proxy runs keyless. There is no GitHub
-# login in the throwaway HOME, so shared/ire answers from its built-in table.
+# LITELLM_MASTER_KEY is set, so the proxy runs keyless. CCL_IRE_OFFLINE=1 keeps
+# shared/ire on its built-in table: since issue #61 it would otherwise try an
+# anonymous GitHub fetch, and the picker numbers below depend on that table.
 # Then it checks the argv, cwd and environment the mock received, that the
 # proxy listens on 127.0.0.1 only, serves the seat and fast aliases, and that
 # mac/stop-litellm.sh stops it by its own PID (never by port).
@@ -56,7 +57,7 @@ stop_proxy() {
 trap stop_proxy EXIT
 run_env() {
   env -i HOME="$T/home" PATH="$T/home/.local/bin:$T/bin:$PATH" TERM=xterm \
-    LITELLM_PORT="$PORT" MOCK_CLAUDE_OUT="$T/claude-call.txt" \
+    LITELLM_PORT="$PORT" MOCK_CLAUDE_OUT="$T/claude-call.txt" CCL_IRE_OFFLINE=1 \
     ANTHROPIC_AUTH_TOKEN=should-be-cleared CKFF_DEFAULT_KEY=should-be-cleared ckff_api_url=http://cleared \
     CLAUDE_CODE_OAUTH_TOKEN=should-be-cleared ANTHROPIC_DEFAULT_OPUS_MODEL=should-be-cleared \
     "$@"
