@@ -54,17 +54,31 @@ def test_seat_file_with_bom_is_read(tmp_path):
     assert aliases(tmp_path / "a.yaml")["sonnet"] == "openai/cb/deepseek-v4.1-flash"
 
 
-def test_fast_seat_aliases_default_to_qwen_flash(tmp_path):
+def test_fast_seat_aliases_default_to_deepseek_flash(tmp_path):
     seat, out = tmp_path / "seat.json", tmp_path / "aliases.yaml"
     r = run("apply_inferhub_seat.py", "--seat", str(seat), "--out", str(out),
             "--main", "cbcn/glm-5.3-flash", "--advisor", "", "--no-merge", "--no-reload")
     assert r.returncode == 0, r.stderr
     a = aliases(out)
     for name in ("haiku", "claude-haiku-5", "small-fast", "ih-haiku", "ih-small-fast", "inferhub-haiku"):
-        assert a[name] == "openai/ali/qwen3.8-flash"
+        assert a[name] == "openai/cb/deepseek-v4.1-flash"
     # CKFF serves claude-haiku-4-5, so the seat must not shadow it.
     assert "claude-haiku-4-5" not in a
-    assert json.loads(seat.read_text())["fast_inferhub_id"] == "ali/qwen3.8-flash"
+    assert json.loads(seat.read_text())["fast_inferhub_id"] == "cb/deepseek-v4.1-flash"
+
+
+def test_old_default_fast_seat_in_seat_file_moves_to_new_default(tmp_path):
+    # Seat files written before the change all carry the old default; nobody picked it.
+    seat, out = tmp_path / "seat.json", tmp_path / "aliases.yaml"
+    seat.write_text(json.dumps({"main_inferhub_id": "cbcn/glm-5.3-flash", "fast_inferhub_id": "ali/qwen3.8-flash"}))
+    assert run("apply_inferhub_seat.py", "--seat", str(seat), "--out", str(out),
+               "--no-merge", "--no-reload").returncode == 0
+    assert aliases(out)["small-fast"] == "openai/cb/deepseek-v4.1-flash"
+    # a fast seat that was actually picked is kept
+    seat.write_text(json.dumps({"main_inferhub_id": "cbcn/glm-5.3-flash", "fast_inferhub_id": "cbcn/minimax-m3"}))
+    assert run("apply_inferhub_seat.py", "--seat", str(seat), "--out", str(out),
+               "--no-merge", "--no-reload").returncode == 0
+    assert aliases(out)["small-fast"] == "openai/cbcn/minimax-m3"
 
 
 def test_fast_seat_empty_uses_main(tmp_path):
@@ -92,6 +106,24 @@ def test_fallback_chains_skip_seat_and_other_seats_vendor(tmp_path):
     assert fb["opus"] == ["ih/cbcn/minimax-m3"]
 
 
+def test_fast_seat_aliases_get_a_fallback_chain():
+    # small-fast had no fallbacks, so one content-filter 400 (Alibaba DataInspectionFailed)
+    # killed every WebFetch summary. The chain skips the seat itself and ends on qwen.
+    fast = ("small-fast", "haiku", "claude-haiku-5", "ih-haiku", "ih-small-fast", "inferhub-haiku")
+    rungs = ("cb/deepseek-v4.1-flash", "ali/qwen3.8-flash", "cbcn/deepseek-v4-flash")
+    ih = [{"model_name": n, "litellm_params": {"model": "openai/cb/deepseek-v4.1-flash"}} for n in fast]
+    ih += [{"model_name": f"ih/{m}", "litellm_params": {"model": f"openai/{m}"}} for m in rungs]
+    fb = {k: v for d in merge.build_inferhub_fallbacks(LITELLM / "config" / "inferhub_fallbacks.yaml", ih)
+          for k, v in d.items()}
+    for n in fast:
+        assert fb[n] == ["ih/cbcn/deepseek-v4-flash", "ih/ali/qwen3.8-flash"]
+    # a qwen fast seat falls back to the deepseek rails
+    ih[0] = {"model_name": "small-fast", "litellm_params": {"model": "openai/ali/qwen3.8-flash"}}
+    fb = {k: v for d in merge.build_inferhub_fallbacks(LITELLM / "config" / "inferhub_fallbacks.yaml", ih)
+          for k, v in d.items()}
+    assert fb["small-fast"] == ["ih/cb/deepseek-v4.1-flash", "ih/cbcn/deepseek-v4-flash"]
+
+
 def test_full_merge_from_builtin_top20(tmp_path):
     top = tmp_path / "top20.yaml"
     r = run("sync_inferhub_top20.py", "--out", str(top))
@@ -113,6 +145,7 @@ def test_full_merge_from_builtin_top20(tmp_path):
     assert "master_key" not in (doc.get("general_settings") or {})
     assert {"haiku", "small-fast"} <= names
     assert any("sonnet" in d for d in doc["router_settings"]["fallbacks"])
+    assert any("small-fast" in d for d in doc["router_settings"]["fallbacks"])
     # failure policy: 3 retries per model (seats and chain targets), benched 180 s after the last one
     pol = doc["router_settings"]["model_group_retry_policy"]
     assert pol["sonnet"]["ServiceUnavailableErrorRetries"] == 3
@@ -164,7 +197,8 @@ GOLDEN_CASES = [
 def _seat_yaml(tmp_path, main, advisor):
     out = tmp_path / "aliases.yaml"
     r = run("apply_inferhub_seat.py", "--seat", str(tmp_path / "s.json"), "--out", str(out),
-            "--main", main, "--advisor", advisor, "--no-merge", "--no-reload")
+            "--main", main, "--advisor", advisor, "--fast", "ali/qwen3.8-flash",  # goldens predate the deepseek fast default
+            "--no-merge", "--no-reload")
     assert r.returncode == 0, r.stderr
     text = out.read_text(encoding="utf-8")
     return "".join(ln for ln in text.splitlines(keepends=True) if not ln.startswith("# Generated: "))

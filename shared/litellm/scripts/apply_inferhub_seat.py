@@ -14,8 +14,9 @@ Aliases (InferHub seats; include Claude Code API ids so local Claude works):
   (if advisor OFF, advisor aliases also point at main so /advisor opus still resolves)
   haiku / claude-haiku-5 / small-fast / ih-haiku / ih-small-fast / inferhub-haiku
     -> fast seat (Claude Code background/small-fast calls). Default fast seat is
-    ali/qwen3.8-flash; set "fast_inferhub_id" in the seat file or pass --fast
-    (empty string = use the main seat). claude-haiku-4-5 is NOT aliased here
+    cb/deepseek-v4.1-flash; set "fast_inferhub_id" in the seat file or pass --fast
+    (empty string = use the main seat). The fast aliases get their own fallback
+    chain in config/inferhub_fallbacks.yaml (role "fast"). claude-haiku-4-5 is NOT aliased here
     because CKFF already serves that name.
 
 Opt-in seats (never the default): cx/gpt-6.1-sol may be picked as main or
@@ -46,7 +47,10 @@ DEFAULT_API_BASE = "https://api.inferhub.dev/v1"
 
 MAIN_ALIASES = ["main", "sonnet", "claude-sonnet-5", "ih-main", "ih-sonnet", "inferhub-sonnet"]
 FAST_ALIASES = ["haiku", "claude-haiku-5", "small-fast", "ih-haiku", "ih-small-fast", "inferhub-haiku"]
-DEFAULT_FAST_ID = "ali/qwen3.8-flash"
+DEFAULT_FAST_ID = "cb/deepseek-v4.1-flash"
+# The old default. Every seat file written before the change carries it even though no
+# launcher ever offered a fast-seat pick, so it is read as "not picked".
+OLD_DEFAULT_FAST_ID = "ali/qwen3.8-flash"
 # Seats that are allowed but never chosen by default. Any other id is passed
 # through as-is (Top 20 ids are the normal choice).
 OPT_IN_SEAT_IDS = {
@@ -136,7 +140,7 @@ def main() -> int:
 
     if args.fast is not None:
         fast_id = args.fast.strip() or None
-    elif "fast_inferhub_id" in seat:
+    elif "fast_inferhub_id" in seat and seat.get("fast_inferhub_id") != OLD_DEFAULT_FAST_ID:
         fast_id = seat.get("fast_inferhub_id") or None
     else:
         fast_id = DEFAULT_FAST_ID

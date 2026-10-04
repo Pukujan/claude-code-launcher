@@ -46,7 +46,7 @@ and what didn't.
   same `ire.json` (`CCL_IRE_JSON`) under its `frontier` key; `f` at the model
   prompts picks from it through `shared/ladder/ladder_cli.py primary`.
 - `ANTHROPIC_SMALL_FAST_MODEL` is `small-fast`, the fast seat alias
-  (`ali/qwen3.8-flash` by default), as on Windows.
+  (`cb/deepseek-v4.1-flash` by default), as on Windows.
 - With no master key, the proxy process gets
   `LITELLM_DANGEROUSLY_PERMIT_WEAK_OR_UNSET_MASTER_KEY=true`. LiteLLM 1.104
   needs it to start keyless. The pinned 1.103.0 doesn't, but the flag costs

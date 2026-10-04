@@ -762,7 +762,7 @@ Get-ChildItem Env: | Where-Object {
 $env:ANTHROPIC_API_KEY = $master
 $env:ANTHROPIC_BASE_URL = $ProxyBase   # always http://127.0.0.1:4000
 $env:ANTHROPIC_MODEL = $seatAlias      # sonnet seat -> InferHub main
-# small-fast is the fast seat alias (ali/qwen3.8-flash unless the seat file says otherwise).
+# small-fast is the fast seat alias (cb/deepseek-v4.1-flash unless the seat file says otherwise).
 $env:ANTHROPIC_SMALL_FAST_MODEL = "small-fast"
 # Do NOT set ANTHROPIC_AUTH_TOKEN (would win over API_KEY and risk CKFF).
 # Keep experimental betas ON - do not set CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS
