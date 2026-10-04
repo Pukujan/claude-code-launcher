@@ -51,6 +51,15 @@ that is already listening; binds `--host 127.0.0.1`; records the LiteLLM PID in
 `LITELLM_DANGEROUSLY_PERMIT_WEAK_OR_UNSET_MASTER_KEY=true` in its own process
 when no `LITELLM_MASTER_KEY` is set, as litellm-ckff-ops `de69e68` does.
 
+Since issue #24 the desktop env default comes from the Desktop known folder
+instead of a hardcoded user path, a missing desktop env prints a note instead
+of stopping the script, and the venv is made and filled with uv (`uv venv`,
+then `uv pip install --override`), falling back to `python -m venv` and pip
+only when uv is not installed. The launcher picks the first desktop env that
+exists of the Desktop known folder, `%USERPROFILE%\Desktop` and
+`%OneDrive%\Desktop`, and looks for the IRE `.env` next to this checkout
+before `D:\development`.
+
 `stop-litellm.ps1` was rewritten. The old one stopped every python or litellm
 process whose path looked related and then killed whatever owned port 4000. The
 new one stops only the PID in `litellm.pid`, and only if that process is this

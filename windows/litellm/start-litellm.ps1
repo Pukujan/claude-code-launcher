@@ -17,7 +17,7 @@ param(
     [switch]$SkipSync,
     [switch]$ForceInstall,
     [int]$Port = 4000,
-    [string]$CkffEnvFile = 'C:\Users\pujan\OneDrive\Desktop\configs\.env',
+    [string]$CkffEnvFile = '',
     [string]$InferHubEnvFile = '',
     [string]$Top20Csv = ''
 )
@@ -35,6 +35,12 @@ $PythonScripts = Join-Path $LiteLLMRoot 'scripts'
 $Requirements = Join-Path $LiteLLMRoot 'requirements.txt'
 $Overrides = Join-Path $LiteLLMRoot 'requirements-overrides.txt'
 if (-not $InferHubEnvFile) { $InferHubEnvFile = Join-Path $RepoRoot '.env' }
+if (-not $CkffEnvFile) {
+    # Default to the real Desktop known folder; no user name is hardcoded.
+    $DesktopDir = [Environment]::GetFolderPath('Desktop')
+    if (-not $DesktopDir) { $DesktopDir = Join-Path $env:USERPROFILE 'Desktop' }
+    $CkffEnvFile = Join-Path $DesktopDir 'configs\.env'
+}
 
 function Import-DotEnvFile {
     param([string]$Path, [string]$Label)
@@ -58,9 +64,8 @@ function Import-DotEnvFile {
 }
 
 # --- Load secrets (names only ever logged) ---
-if (-not (Test-Path -LiteralPath $CkffEnvFile)) {
-    throw "CKFF/desktop env file not found: $CkffEnvFile"
-}
+# A missing desktop env is not fatal: Import-DotEnvFile prints a note and the
+# InferHub env (or the shell environment) can still supply the keys.
 Import-DotEnvFile -Path $CkffEnvFile -Label 'desktop-configs'
 if ($InferHubEnvFile -ne $CkffEnvFile) {
     Import-DotEnvFile -Path $InferHubEnvFile -Label 'inferhub'
@@ -110,13 +115,20 @@ $ihUrl = $ihUrl.TrimEnd('/')
 if ($ihUrl -notmatch '/v1$') { $ihUrl = $ihUrl + '/v1' }
 
 # --- Ensure virtual environment exists ---
-if (-not (Test-Path -LiteralPath $VenvPath)) {
-    Write-Host "Creating virtual environment at $VenvPath ..."
-    python -m venv $VenvPath
-}
-
+# uv makes the venv and installs into it. Plain python -m venv + pip is only
+# the fallback for a machine without uv. Same venv path either way.
+$Uv = Get-Command uv -ErrorAction SilentlyContinue | Select-Object -First 1
 $Python = Join-Path $VenvPath 'Scripts\python.exe'
 $Pip = Join-Path $VenvPath 'Scripts\pip.exe'
+if (-not (Test-Path -LiteralPath $VenvPath)) {
+    Write-Host "Creating virtual environment at $VenvPath ..."
+    # uv reports progress on stderr; under PS 5.1 + Stop that must not be fatal.
+    $prevEap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    if ($Uv) { & $Uv.Source venv $VenvPath } else { python -m venv $VenvPath }
+    $venvExit = $LASTEXITCODE
+    $ErrorActionPreference = $prevEap
+    if ($venvExit -ne 0) { throw "creating the venv failed: $venvExit" }
+}
 
 $LiteLLM = Join-Path $VenvPath 'Scripts\litellm.exe'
 # Use the bundled model cost map: avoids a network fetch (and a stderr WARNING) at import/startup.
@@ -132,14 +144,25 @@ if (-not $needInstall) {
 }
 if ($needInstall) {
     Write-Host 'Installing pinned LiteLLM + PyYAML into venv...'
-    & $Pip install -r $Requirements
-    if ($LASTEXITCODE -ne 0) { throw "pip install litellm failed: $LASTEXITCODE" }
-    # LiteLLM 1.103.0 declares starlette>=1.0.1; the working venv runs the
-    # older pins below, so install them on top (pip warns about the conflict).
-    & $Pip install -r $Overrides
-    if ($LASTEXITCODE -ne 0) { throw "pip install overrides failed: $LASTEXITCODE" }
+    $prevEap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    if ($Uv) {
+        # LiteLLM 1.103.0 declares starlette>=1.0.1; the working venv runs the
+        # older pins in the overrides file, which uv applies with --override.
+        & $Uv.Source pip install --python $Python -r $Requirements --override $Overrides
+        $installExit = $LASTEXITCODE
+    } else {
+        Write-Host 'uv not found; falling back to pip'
+        # A venv made by uv has no pip, so bootstrap it first.
+        if (-not (Test-Path -LiteralPath $Pip)) { & $Python -m ensurepip --upgrade }
+        & $Python -m pip install -r $Requirements
+        $installExit = $LASTEXITCODE
+        # Same override pins on top (pip warns about the conflict).
+        if ($installExit -eq 0) { & $Python -m pip install -r $Overrides; $installExit = $LASTEXITCODE }
+    }
+    $ErrorActionPreference = $prevEap
+    if ($installExit -ne 0) { throw "installing LiteLLM into the venv failed: $installExit" }
 } else {
-    Write-Host 'LiteLLM already importable; skipping pip (use -ForceInstall to refresh)'
+    Write-Host 'LiteLLM already importable; skipping install (use -ForceInstall to refresh)'
 }
 
 # --- Build InferHub fragments + merge runtime config ---

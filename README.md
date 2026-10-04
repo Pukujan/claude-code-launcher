@@ -17,8 +17,9 @@ enough.
 **Windows.** Clone this repository, then double-click
 `windows\launch-claude-inferhub.cmd`. Pick the main model, the advisor (or OFF)
 and a project folder with the arrow keys. The first run makes the Python venv
-under `shared\litellm\.litellm-venv`; Python and Claude Code must already be
-installed.
+under `shared\litellm\.litellm-venv` with uv (or with `python -m venv` and
+pip if uv is not installed); Claude Code and either uv or Python must already
+be installed.
 
 **Mac.** Clone this repository, then double-click
 `mac/Launch Claude InferHub.command`, or run `mac/setup.sh` once and use the
@@ -36,10 +37,12 @@ below).
 
 Copy `.env.example` to `.env` in the repository root and fill in
 `INFERHUB_API_KEY`. That is the only key you need on a Mac. On the PC the
-launcher also reads `C:\Users\pujan\OneDrive\Desktop\configs\.env` for the CKFF
-keys, and takes the InferHub key from the first of these that exists: the IRE
-`.env` in `D:\development\inference-recommendation-engine`, this repository's
-`.env`, `~\.config\inferhub\.env`.
+launcher also reads `configs\.env` on your Desktop for the CKFF keys (the first
+that exists of the Desktop known folder, `%USERPROFILE%\Desktop` and
+`%OneDrive%\Desktop`), and takes the InferHub key from the first of these that
+exists: the IRE `.env` in `inference-recommendation-engine` next to this
+repository or under `D:\development`, this repository's `.env`,
+`~\.config\inferhub\.env`.
 
 **There is no proxy key.** The proxy runs without a `LITELLM_MASTER_KEY` and
 listens on 127.0.0.1 only, so nothing outside the machine can reach it. Claude
