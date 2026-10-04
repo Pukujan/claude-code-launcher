@@ -434,13 +434,54 @@ function Get-IreRecommendations {
   if (Test-Path -LiteralPath $out) { $env:CCL_IRE_JSON = $out }
 }
 
+# ---- fallback ladders (issue #5) ----
+# After each seat is picked, show its default fallback ladder and let Alex
+# accept it (Enter) or pick up to 3 rungs. Applied to the running proxy after
+# the last Apply-InferHubSeat through /workbench/reload_runtime (scope ladder),
+# with no restart. CLAUDE_IH_LADDER=default takes the defaults without asking;
+# =off skips the step (the stock inferhub_fallbacks.yaml chains stay).
+$LadderCli = Join-Path $RepoRoot "shared\ladder\ladder_cli.py"
+$LadderState = Join-Path $LiteLLMRoot "config\ladder_state.json"
+
+function Get-LadderPython {
+  $venvPy = Join-Path $LiteLLMRoot ".litellm-venv\Scripts\python.exe"
+  if (Test-Path -LiteralPath $venvPy) { return $venvPy }
+  foreach ($name in @("python", "py")) {
+    $cmd = Get-Command $name -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+  }
+  return $null
+}
+
+function Select-Ladder {
+  param([string]$Role, [string]$PrimaryId)
+  $mode = $(if ($env:CLAUDE_IH_LADDER) { $env:CLAUDE_IH_LADDER } else { "ask" })
+  if ($mode -eq "off") { return }
+  $py = Get-LadderPython
+  if (-not $py) { Write-Host "warning: no Python found for the ladder picker; the stock chains stay"; return }
+  $ladderArgs = @($LadderCli, "choose", "--state", $LadderState, "--role", $Role, "--primary", $PrimaryId)
+  if ($mode -eq "default" -or [Console]::IsInputRedirected) { $ladderArgs += "--non-interactive" }
+  Clear-Host
+  & $py @ladderArgs
+  if ($LASTEXITCODE -ne 0) { Write-Host "warning: ladder picker failed for $Role; the stock chains stay" }
+}
+
+function Apply-Ladder {
+  if ($env:CLAUDE_IH_LADDER -eq "off") { return }
+  if (-not (Test-Path -LiteralPath $LadderState)) { return }
+  $py = Get-LadderPython
+  if (-not $py) { return }
+  & $py $LadderCli apply --state $LadderState --base-url $ProxyBase
+  if ($LASTEXITCODE -ne 0) { Write-Host "warning: could not apply the fallback ladders; the stock chains stay" }
+}
+
 # ---- interactive flow ----
 Get-IreRecommendations
+Remove-Item -LiteralPath $LadderState -ErrorAction SilentlyContinue
 $main = Select-MainModel
+Select-Ladder -Role main -PrimaryId $main.Id
 $advisor = Select-AdvisorModel
-# HOOK(fallback-ladder): a ladder picker goes here, after the seats are chosen
-# and before Apply-InferHubSeat. Today the ladders come from
-# shared\litellm\config\inferhub_fallbacks.yaml unchanged.
+Select-Ladder -Role advisor -PrimaryId $advisor.Id
 $folder = Select-ProjectFolder
 
 $advisorId = $advisor.Id
@@ -451,6 +492,8 @@ Ensure-LiteLLMProxy
 
 # Re-apply seat after proxy/venv exists, then ask for config reload by restarting if needed.
 Apply-InferHubSeat -MainId $main.Id -AdvisorId $advisorId
+# The seat's merge step reloads the stock chains, so the picked ladders go on top.
+Apply-Ladder
 # Soft note: LiteLLM may need restart to pick runtime.yaml changes if already running with old seat.
 Write-Host "Seat applied. If proxy was already running with an old seat, restart it:"
 Write-Host "  cd $LiteLLMOps; .\stop-litellm.ps1; .\start-litellm.ps1 -Background -InferHubEnvFile `"$InferHubEnvFile`""

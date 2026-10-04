@@ -572,6 +572,33 @@ EOF
   done
 }
 
+# ---- fallback ladders (issue #5) ----------------------------------------------
+# After each seat is picked, show its default fallback ladder and let Alex
+# accept it (Enter) or pick up to 3 rungs. Applied to the running proxy after
+# apply_seat through /workbench/reload_runtime (scope ladder), no restart.
+# CLAUDE_IH_LADDER=default takes the defaults without asking; =off skips the
+# ladder step (the stock inferhub_fallbacks.yaml chains stay). With no
+# terminal on stdin (scripts, CI) the defaults are taken.
+LADDER_CLI="$REPO_ROOT/shared/ladder/ladder_cli.py"
+LADDER_STATE="$LITELLM_DIR/config/ladder_state.json"
+
+pick_ladder() {
+  local role="$1" primary="$2" mode="${CLAUDE_IH_LADDER:-ask}"
+  [ "$mode" = "off" ] && return 0
+  local extra=()
+  if [ "$mode" = "default" ] || [ ! -t 0 ]; then extra=(--non-interactive); fi
+  "$VENV_PY" "$LADDER_CLI" choose --state "$LADDER_STATE" --role "$role" --primary "$primary" ${extra[@]+"${extra[@]}"} \
+    || log "warning: ladder picker failed for $role; the stock chains stay"
+}
+
+apply_ladder() {
+  [ "${CLAUDE_IH_LADDER:-ask}" = "off" ] && return 0
+  [ -f "$LADDER_STATE" ] || return 0
+  "$VENV_PY" "$LADDER_CLI" apply --state "$LADDER_STATE" --base-url "$PROXY_BASE" >> "$LOG_FILE" 2>&1 \
+    && log "Fallback ladders applied to the running proxy." \
+    || log "warning: could not apply the fallback ladders (see log); the stock chains stay"
+}
+
 # ---- seat + Claude settings ---------------------------------------------------
 apply_seat() {
   log "Seating main=$MAIN_ID advisor=${ADVISOR_ID:-OFF} through LiteLLM ..."
@@ -652,13 +679,16 @@ main() {
   ensure_proxy
 
   pick_folder
+  rm -f "$LADDER_STATE"
   pick_main
+  pick_ladder main "$MAIN_ID"
   pick_advisor
-  # HOOK(fallback-ladder): a ladder picker goes here, after the seats are
-  # chosen and before apply_seat. Today the ladders come from
-  # shared/litellm/config/inferhub_fallbacks.yaml unchanged.
+  pick_ladder advisor "$ADVISOR_ID"
 
   apply_seat
+  # After apply_seat: its merge step reloads the stock chains, so the picked
+  # ladders go on top of that.
+  apply_ladder
   sync_model_picker
 
   local master

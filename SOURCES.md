@@ -72,7 +72,7 @@ ACS module was not copied; `SOURCES.md` replaces it.
 | `shared/litellm/scripts/merge_litellm_config.py` | `Pukujan/litellm-ckff-ops` | `scripts/merge_litellm_config.py` | `f04adc8` | `54d7dd8221a5f6b7ed09029d53506625d77ac0aecdb04dbbd65f5ef7db181d28` | no |
 | `shared/litellm/scripts/reload_runtime.py` | `Pukujan/litellm-ckff-ops` | `scripts/reload_runtime.py` | `f04adc8` | `6d177c687e7509196162c0bc9eaf1c01fea42f0af70eaa876e96f563d7ebbfaa` | yes |
 | `shared/litellm/scripts/sync_inferhub_top20.py` | `Pukujan/litellm-ckff-ops` | `scripts/sync_inferhub_top20.py` | `f04adc8` | `0f5a52d8706ef588d722d2bfd3d0bdcb7eb394b94833a372859be51b1aa66b64` | default CSV only |
-| `shared/litellm/sitecustomize.py` | `Pukujan/litellm-ckff-ops` | `sitecustomize.py` | `f04adc8` | `d2cc86258b0fb223cd0d0ad9ec7d4c532d7b6da323e184f3f2dcad24e91ae85e` | reload auth only |
+| `shared/litellm/sitecustomize.py` | `Pukujan/litellm-ckff-ops` | `sitecustomize.py` | `f04adc8` | `d2cc86258b0fb223cd0d0ad9ec7d4c532d7b6da323e184f3f2dcad24e91ae85e` | reload auth, ladder scope |
 
 `reload_runtime.py` and `sync_inferhub_top20.py` were not on the original list,
 but `apply_inferhub_seat.py` and `merge_litellm_config.py` call the first, and
@@ -92,7 +92,9 @@ byte-for-byte the `f04adc8` files. The changes are elsewhere:
   `config/top20-builtin.csv`.
 - `sitecustomize.py`: `/workbench/reload_runtime` used to require the master
   key. With a key set, it still does. With no key, it accepts requests from
-  127.0.0.1 or ::1 only, whatever token they send.
+  127.0.0.1 or ::1 only, whatever token they send. It also takes a `ladder`
+  scope, which hands the launcher's fallback-ladder plan to
+  `shared/ladder/proxy_apply.py` (issue #5).
 
 Written here, not copied: `shared/litellm/requirements.txt` and
 `requirements-overrides.txt` (pins from the working Windows venv, the same ones
