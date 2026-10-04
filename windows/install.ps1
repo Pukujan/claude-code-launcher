@@ -355,7 +355,13 @@ function Update-CclSessionPath {
     $m = [Environment]::GetEnvironmentVariable('Path', 'Machine')
     $u = [Environment]::GetEnvironmentVariable('Path', 'User')
     $extra = @((Join-Path $env:USERPROFILE '.local\bin'), (Join-Path $env:LOCALAPPDATA 'pnpm'))
-    $env:Path = (@($m, $u) + $extra | Where-Object { $_ }) -join ';'
+    # Keep what this session already had (a tool the caller put on PATH) and add what
+    # the installers just wrote to the registry, without duplicates.
+    $seen = @{}
+    $parts = foreach ($p in (@($env:Path, $m, $u) -join ';').Split(';') + $extra) {
+        if ($p -and -not $seen.ContainsKey($p.TrimEnd('\').ToLowerInvariant())) { $seen[$p.TrimEnd('\').ToLowerInvariant()] = $true; $p }
+    }
+    $env:Path = @($parts) -join ';'
 }
 
 # ---------------------------------------------------------------- prerequisites
