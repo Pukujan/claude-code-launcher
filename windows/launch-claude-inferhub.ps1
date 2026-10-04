@@ -445,7 +445,7 @@ function Invoke-LaunchStep {
   param($Last = @{})
   $ids = @("claude", "ultracode")
   $index = $(if ($Last["launch"] -eq "ultracode") { 1 } else { 0 })
-  $r = Select-FromList -Title "Step 8: launch with" -Lines @("Claude Code", "UltraCode (UltraCode-Shim in front of the proxy)") -Index $index `
+  $r = Select-FromList -Title "Step 8: launch with" -Lines @("Claude Code", "UltraCode (the ultracode command, through the proxy)") -Index $index `
     -Help @("Up/Down move. Enter launches. Left = back to the folder. Esc quits.")
   $script:NavTrace.Add(("  step launch  {0,-7} -> {1}" -f $r.Action, $(if ($r.Action -eq "back") { "(back)" } else { $ids[$r.Index] }))) | Out-Null
   if ($r.Action -eq "back") { return $null }
@@ -564,9 +564,9 @@ function Sync-ModelPicker {
 }
 
 # ---- UltraCode (optional "launch with" target) ----
-# OnlyTerp/UltraCode-Shim (MIT, standard-library Python) runs in front of the
-# proxy. Fetched on demand at a pinned commit into a per-user cache, never
-# vendored here.
+# OnlyTerp/UltraCode-Shim (MIT, standard-library Python) provides the
+# `ultracode` command. Fetched on demand at a pinned commit into a per-user
+# cache (never vendored here) and installed from there with its install.ps1.
 $UltraCodeCommit = "1870e58e2622c8946c9c7cd45483aa47d7bd5867"
 
 function Get-UltraCodeShim {
@@ -587,43 +587,53 @@ function Get-UltraCodeShim {
   return $dir
 }
 
-function Open-UltraCodeShim {
-  # Writes the shim's config.json (claude-main and claude-worker, both passed
-  # through to the keyless proxy as the seat alias), starts proxy.py on a free
-  # port from 4100 (never 4000) and returns @{ Process; Base }.
-  param([string]$Model)
+function Install-UltraCodeCommand {
+  # Makes `ultracode` a real command that points at the pinned checkout. The
+  # shim's own install.ps1 does it: it runs the offline self-test and writes
+  # %LOCALAPPDATA%\Microsoft\WindowsApps\ultracode.cmd (already on PATH). It
+  # does not touch the Claude Code install or ~/.claude. Returns the command path.
+  param([string]$Dir)
+  $target = Join-Path $Dir "bin\ultracode.cmd"
+  foreach ($try in 1..2) {
+    $cmd = Get-Command ultracode -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($cmd -and ("" + (Get-Content -LiteralPath $cmd.Source -Raw -ErrorAction SilentlyContinue)).Contains($target)) { return $cmd.Source }
+    if ($try -eq 2) { break }
+    Write-Host "Installing the ultracode command (UltraCode-Shim install.ps1) ..."
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Dir "install.ps1") | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "UltraCode-Shim install.ps1 failed (exit $LASTEXITCODE)" }
+  }
+  throw "the ultracode command on PATH does not point at $target"
+}
+
+function Invoke-UltraCode {
+  # Runs the real `ultracode` command (UltraCode-Shim's Start-UltraCode.ps1) in
+  # the current folder with --model <seat alias>. Its config.json lists
+  # claude-main and claude-worker (both the seat alias on the keyless proxy) for
+  # /model, and anthropic_upstream is the proxy too, so the seat alias, the tier
+  # pins, the advisor and count_tokens all pass through to the proxy and nothing
+  # goes to api.anthropic.com. The shim's own proxy listens on 4141 + the
+  # LiteLLM port (8141 for 4000), never on 4000.
+  param([string]$Model, [string[]]$ClaudeArgs = @())
   $dir = Get-UltraCodeShim
-  $port = 4100
-  $busy = @([Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners() | ForEach-Object { $_.Port })
-  while ($busy -contains $port) { $port++ }
+  $port = 4141 + $ProxyPort
   $route = [ordered]@{ upstream = $ProxyBase; model = $Model }
   $conf = [ordered]@{
+    proxy = [ordered]@{ listen_port = $port; anthropic_upstream = $ProxyBase }
     models = @([ordered]@{ id = "claude-main"; display_name = "Main seat ($Model)" }, [ordered]@{ id = "claude-worker"; display_name = "Worker ($Model)" })
     routes = [ordered]@{ "claude-main" = $route; "claude-worker" = $route }
   }
-  $cfg = Join-Path $dir "config.json"
-  [IO.File]::WriteAllText($cfg, ($conf | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
-  $env:UC_UPSTREAM = $ProxyBase   # count_tokens and anything unrouted go to the proxy, not api.anthropic.com
-  $env:UC_SELECTOR = "0"
-  $env:UC_CONFIG = $cfg
-  $env:UC_LISTEN_PORT = "$port"
-  $uv = (Get-Command uv -ErrorAction Stop).Source
-  $p = Start-Process -FilePath $uv -ArgumentList @("run", "--no-project", "python", ('"' + (Join-Path $dir "proxy.py") + '"')) `
-    -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $dir "shim.out.log") -RedirectStandardError (Join-Path $dir "shim.err.log")
-  $shimBase = "http://127.0.0.1:$port"
-  for ($t = 0; $t -lt 60; $t++) {
-    if ($p.HasExited) { throw "UltraCode-Shim exited early; see $dir\shim.err.log" }
-    try { if ((Invoke-WebRequest -UseBasicParsing -Uri "$shimBase/healthz" -TimeoutSec 2).StatusCode -eq 200) { return @{ Process = $p; Base = $shimBase } } } catch {}
-    Start-Sleep -Milliseconds 500
-  }
-  Close-UltraCodeShim @{ Process = $p }
-  throw "UltraCode-Shim did not come up on $shimBase; see $dir\shim.err.log"
-}
-
-function Close-UltraCodeShim {
-  # Stops the shim by its own PID (and the python child uv started).
-  param($Shim)
-  if ($Shim -and $Shim.Process -and -not $Shim.Process.HasExited) { & taskkill.exe /PID $Shim.Process.Id /T /F 2>&1 | Out-Null }
+  [IO.File]::WriteAllText((Join-Path $dir "config.json"), ($conf | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
+  # Start with no orchestrator/worker pick. A pick left over from an earlier
+  # ultracode session would reroute the seat and advisor traffic to that model.
+  $state = Join-Path $env:LOCALAPPDATA "UltraCode-Shim"
+  New-Item -ItemType Directory -Force -Path $state | Out-Null
+  [IO.File]::WriteAllText((Join-Path $state "selection.json"), '{"orch": null, "worker": null, "worker_explicit": false}', [Text.UTF8Encoding]::new($false))
+  $env:UC_UPSTREAM = $ProxyBase   # Start-UltraCode.ps1 reads anthropic_upstream; bin/ultracode reads this
+  $env:UC_SELECTOR = "0"          # our wizard already picked the seats
+  $uc = Install-UltraCodeCommand -Dir $dir
+  Write-Host ("ultracode=" + $uc + "  (shim http://127.0.0.1:" + $port + " -> " + $ProxyBase + ")")
+  Write-Host "Starting UltraCode..."
+  & $uc --model $Model @ClaudeArgs
 }
 
 function Test-ProxyHealth {
@@ -872,11 +882,7 @@ Write-Host ("advisor=" + $advisorLabel)
 Write-Host "permission=bypassPermissions (auto mode is Anthropic-only)"
 Write-Host "betas=experimental ON (advisor_20260301 via LiteLLM orchestration)"
 if ($w.Launch -eq "ultracode") {
-  $shim = Open-UltraCodeShim -Model $seatAlias
-  $env:ANTHROPIC_BASE_URL = $shim.Base
-  Write-Host ("ultracode=" + $shim.Base + " (UltraCode-Shim PID " + $shim.Process.Id + ") -> " + $ProxyBase)
-  Write-Host "Starting Claude Code through UltraCode-Shim..."
-  try { & claude --model claude-main --permission-mode bypassPermissions } finally { Close-UltraCodeShim $shim }
+  Invoke-UltraCode -Model $seatAlias -ClaudeArgs @("--permission-mode", "bypassPermissions")
 } else {
   Write-Host "Starting Claude Code..."
   & claude --model $seatAlias --permission-mode bypassPermissions
