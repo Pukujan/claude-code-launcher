@@ -26,8 +26,9 @@ roles:
   # Claude Code's fast seat (WebFetch/WebSearch summaries, titles, hooks). Web pages can trip
   # one rail's content filter (Alibaba's DataInspectionFailed 400), so the fast seat always
   # has somewhere else to go; qwen stays last because its filter is the strictest.
+  # claude-haiku-4-5 is only an InferHub alias while CKFF is off (the default).
   fast:
-    names: [small-fast, haiku, claude-haiku-5, claude-haiku-4-5-20251001, ih-haiku, ih-small-fast, inferhub-haiku]
+    names: [small-fast, haiku, claude-haiku-5, claude-haiku-4-5-20251001, claude-haiku-4-5, ih-haiku, ih-small-fast, inferhub-haiku]
     chain: [cb/deepseek-v4.1-flash, cbcn/deepseek-v4-flash, ali/qwen3.8-flash]
   small_fast:
     names: [ih/ali/qwen3.8-flash]

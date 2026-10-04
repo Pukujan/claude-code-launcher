@@ -231,3 +231,8 @@ def test_top20_eligible_flag(tmp_path):
     p = tmp_path / "t.txt"
     p.write_text("1|A|cb/a|true|1\n2|B|cb/b|false|1\n3|C|cb/c|yes|1\n", encoding="utf-8")
     assert [r["eligible"] for r in uc.read_top20(p)] == [True, False, True]
+
+
+def test_astra_routes_count_as_ckff():
+    assert uc.is_ckff("claude-gpt-6-astra") and uc.is_ckff("ckff_astra")
+    assert not uc.is_ckff("claude-ih-main")

@@ -72,6 +72,44 @@ POLICY_RE = re.compile(
 )
 
 
+# CKFF is off (Alex, 2026-10-04): never offer a CKFF route, Astra (ckff_astra,
+# GPT 6 Astra, the CKFF failover hop) included. IRE's lists can still carry
+# them, so every bundle drops them before it is used (see validate()).
+CKFF_RE = re.compile(r"ckff|astra", re.IGNORECASE)
+
+
+def is_ckff(*texts) -> bool:
+    """True when any of the given ids or names is a CKFF/Astra route."""
+    return any(isinstance(x, str) and CKFF_RE.search(x) for x in texts)
+
+
+def without_ckff(bundle: dict, default_ladders: dict | None = None) -> dict:
+    """The bundle with CKFF/Astra routes removed from the Top 20, the frontier list
+    and the ladders. A ladder left empty takes the built-in one for that seat."""
+    out = dict(bundle)
+    top = []
+    for r in out.get("top20") or []:
+        if not isinstance(r, dict) or is_ckff(r.get("name")):
+            continue
+        ids = [i for i in r.get("ids") or [] if not is_ckff(i)]
+        if ids:
+            top.append(dict(r, ids=ids))
+    out["top20"] = top
+    out["frontier"] = [r for r in out.get("frontier") or []
+                       if isinstance(r, dict) and not is_ckff(r.get("route"), r.get("name"))
+                       and not r.get("is_astra_owner_route")]
+    lad = dict(out.get("ladders") or {})
+    for seat, chain in list(lad.items()):
+        if not isinstance(chain, list):
+            continue
+        kept = [x for x in chain if not is_ckff(x)]
+        if not kept and default_ladders and default_ladders.get(seat):
+            kept = list(default_ladders[seat])
+        lad[seat] = kept
+    out["ladders"] = lad
+    return out
+
+
 class FetchError(Exception):
     """GitHub could not be reached, refused the request, or sent something unusable."""
 
@@ -328,6 +366,8 @@ def load_defaults() -> dict:
 
 
 def validate(bundle: dict) -> dict:
+    if isinstance(bundle, dict):  # every bundle (live, cache, defaults) passes here
+        bundle = without_ckff(bundle, json.loads(DEFAULTS_PATH.read_text(encoding="utf-8")).get("ladders"))
     if set(bundle) != set(KEYS) | set(EXTRA_KEYS):
         raise ValueError(f"bundle keys must be exactly {KEYS + EXTRA_KEYS}")
     if not isinstance(bundle["frontier"], list) or not all(

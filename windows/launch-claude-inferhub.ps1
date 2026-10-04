@@ -1,7 +1,7 @@
 ﻿$ErrorActionPreference = "Stop"
 
-# InferHub Claude Code launcher via the UNIFIED local LiteLLM proxy
-# (CKFF + InferHub groups), run from this repository's shared\litellm folder.
+# InferHub Claude Code launcher via the local LiteLLM proxy (InferHub only;
+# CKFF is off since 2026-10-04), run from this repository's shared\litellm folder.
 # Picks main + advisor from IRE Top 20, seats aliases (sonnet/opus), points
 # Claude at 127.0.0.1:4000. The proxy is keyless and bound to 127.0.0.1 only.
 # Never sets CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1.
@@ -15,18 +15,19 @@ $LiteLLMOps = Join-Path $PSScriptRoot "litellm"         # start/stop scripts
 $ProxyPort = 4000
 $ProxyBase = "http://127.0.0.1:$ProxyPort"
 $DefaultModelId = "cb/deepseek-v4.1-flash"
-# Desktop env (CKFF keys): first existing file wins. The real Desktop known
+# Desktop env (other keys, e.g. web search; its ckff* names are never loaded
+# while CKFF is off): first existing file wins. The real Desktop known
 # folder comes first (it may or may not be redirected into OneDrive), then
 # %USERPROFILE%\Desktop, then %OneDrive%\Desktop. No user name is hardcoded.
 $DesktopDir = [Environment]::GetFolderPath('Desktop')
 if (-not $DesktopDir) { $DesktopDir = Join-Path $env:USERPROFILE "Desktop" }
-$CkffEnvCandidates = @(
+$DesktopEnvCandidates = @(
   (Join-Path $DesktopDir "configs\.env"),
   (Join-Path $env:USERPROFILE "Desktop\configs\.env")
 )
-if ($env:OneDrive) { $CkffEnvCandidates += (Join-Path $env:OneDrive "Desktop\configs\.env") }
-$CkffEnvFile = $CkffEnvCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-if (-not $CkffEnvFile) { $CkffEnvFile = $CkffEnvCandidates[0] }
+if ($env:OneDrive) { $DesktopEnvCandidates += (Join-Path $env:OneDrive "Desktop\configs\.env") }
+$DesktopEnvFile = $DesktopEnvCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+if (-not $DesktopEnvFile) { $DesktopEnvFile = $DesktopEnvCandidates[0] }
 # InferHub env: first existing file wins (IRE .env next to this repo, IRE .env
 # under the project root, repo .env, then user config).
 $InferHubEnvCandidates = @(
@@ -74,7 +75,7 @@ function Read-EnvValue {
 function Read-LiteLLMMasterKey {
   # The proxy is keyless by default. If a LITELLM_MASTER_KEY is set, pass it
   # through; otherwise Claude Code still needs some key value, so use "local".
-  foreach ($f in @($CkffEnvFile, $InferHubEnvFile)) {
+  foreach ($f in @($DesktopEnvFile, $InferHubEnvFile)) {
     $key = Read-EnvValue -Path $f -Name "LITELLM_MASTER_KEY"
     if ($key) { return $key }
   }
@@ -276,14 +277,26 @@ function Get-LastPicksPath {
   return (Join-Path $PSScriptRoot "last-picks.json")
 }
 
+function Test-CkffModel {
+  # CKFF is off (2026-10-04): any CKFF route, Astra included (ckff_astra, gpt-6-astra).
+  param([string]$Id)
+  return ($Id -match 'ckff|astra')
+}
+
 function Read-LastPicks {
   # The cache file (model picks by slot, "" = OFF/none, plus start_dir). Empty when missing or unreadable.
+  # A saved CKFF model is dropped, so that step falls back to its default.
   $out = @{}
   $p = Get-LastPicksPath
   if (-not (Test-Path -LiteralPath $p)) { return $out }
+  $modelSlots = @("main", "main1", "main2", "adv", "adv1", "adv2", "uc_orch", "uc_worker")
   try {
     $j = Get-Content -LiteralPath $p -Raw -Encoding UTF8 | ConvertFrom-Json
-    foreach ($prop in $j.PSObject.Properties) { if ($null -ne $prop.Value) { $out[$prop.Name] = [string]$prop.Value } }
+    foreach ($prop in $j.PSObject.Properties) {
+      if ($null -eq $prop.Value) { continue }
+      if ($modelSlots -contains $prop.Name -and (Test-CkffModel ([string]$prop.Value))) { continue }
+      $out[$prop.Name] = [string]$prop.Value
+    }
   } catch {}
   return $out
 }
@@ -734,7 +747,7 @@ function Ensure-LiteLLMProxy {
     throw "Missing $starter - this launcher must run from a claude-code-launcher checkout"
   }
   Write-Host "Starting unified LiteLLM proxy (background)..."
-  $arg = "-NoProfile -ExecutionPolicy Bypass -File `"$starter`" -Background -SkipSync -Port $ProxyPort -CkffEnvFile `"$CkffEnvFile`" -InferHubEnvFile `"$InferHubEnvFile`""
+  $arg = "-NoProfile -ExecutionPolicy Bypass -File `"$starter`" -Background -SkipSync -Port $ProxyPort -DesktopEnvFile `"$DesktopEnvFile`" -InferHubEnvFile `"$InferHubEnvFile`""
   $starterProc = Start-Process -FilePath "powershell.exe" -ArgumentList $arg -WindowStyle Hidden -PassThru
   $null = $starterProc.Handle   # cache handle so ExitCode is readable after exit (PS 5.1)
   $deadline = (Get-Date).AddSeconds(300)
@@ -769,7 +782,7 @@ function Apply-InferHubSeat {
     return
   }
   # reload_runtime.py reads an optional LITELLM_MASTER_KEY from these files.
-  $env:CLAUDE_IH_ENV_FILES = (@($CkffEnvFile, $InferHubEnvFile) -join ";")
+  $env:CLAUDE_IH_ENV_FILES = (@($DesktopEnvFile, $InferHubEnvFile) -join ";")
   $apply = Join-Path $LiteLLMRoot "scripts\apply_inferhub_seat.py"
   $merge = Join-Path $LiteLLMRoot "scripts\merge_litellm_config.py"
   $advArg = @()
@@ -1074,7 +1087,7 @@ Set-Location -LiteralPath $folder
 
 Clear-Host
 Write-Host ("cwd=" + (Get-Location))
-Write-Host ("proxy=" + $env:ANTHROPIC_BASE_URL + "  (unified CKFF+InferHub LiteLLM)")
+Write-Host ("proxy=" + $env:ANTHROPIC_BASE_URL + "  (local LiteLLM, InferHub only; CKFF off)")
 Write-Host ("small_fast=" + $env:ANTHROPIC_SMALL_FAST_MODEL + "  (fast seat alias, InferHub cheap side model for search/hooks)")
 Write-Host ("seat_alias=" + $seatAlias + "  behavesAs=claude-sonnet-5")
 Write-Host "tiers=sonnet:claude-sonnet-5 opus:claude-opus-5-5 fable:claude-fable-5 haiku:claude-haiku-4-5-20251001 (all proxy seat aliases)"

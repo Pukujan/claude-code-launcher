@@ -320,7 +320,7 @@ import os as _os
 from pathlib import Path as _Path
 
 _RELOAD_PATH = "/workbench/reload_runtime"
-_WB_SEAT_ALIASES = ("sonnet", "opus", "haiku", "main", "advisor", "claude-sonnet-5", "claude-opus-5-5", "claude-fable-5", "claude-fable-5-1")
+_WB_SEAT_ALIASES = ("sonnet", "opus", "haiku", "claude-haiku-4-5", "main", "advisor", "claude-sonnet-5", "claude-opus-5-5", "claude-fable-5", "claude-fable-5-1")
 _REPO_ROOT = _Path(__file__).resolve().parent
 
 

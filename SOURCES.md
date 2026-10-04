@@ -34,7 +34,8 @@ purpose:
 - `Read-LiteLLMMasterKey` returns a set `LITELLM_MASTER_KEY` or the dummy
   `local`; it no longer throws.
 - The seat file fallback is written as UTF-8 without a BOM.
-- `Ensure-LiteLLMProxy` passes `-CkffEnvFile` and `-InferHubEnvFile` to the
+- `Ensure-LiteLLMProxy` passes `-DesktopEnvFile` (was `-CkffEnvFile`, CKFF
+  off since 2026-10-04) and `-InferHubEnvFile` to the
   start script, and `Apply-InferHubSeat` sets `CLAUDE_IH_ENV_FILES` for the
   reload script.
 - `HOOK(ire-models)` and `HOOK(fallback-ladder)` comments mark where later
@@ -128,6 +129,17 @@ under `~/litellm`. It is gone; these parts now live in `mac/`:
 | `shared/litellm/sitecustomize.py` | `Pukujan/litellm-ckff-ops` | `sitecustomize.py` | `de69e68` | `bf627afc9bc610ecea7d633a62fb34c9145e3076efaf969be22a1ea47651d8d3` | ladder scope |
 | `shared/litellm/scripts/reload_runtime.py` | `Pukujan/litellm-ckff-ops` | `scripts/reload_runtime.py` | `f04adc8` | `6d177c687e7509196162c0bc9eaf1c01fea42f0af70eaa876e96f563d7ebbfaa` | yes; checked against `de69e68` (`d858f9a9…`), kept |
 | `shared/litellm/scripts/sync_inferhub_top20.py` | `Pukujan/litellm-ckff-ops` | `scripts/sync_inferhub_top20.py` | `f04adc8` | `0f5a52d8706ef588d722d2bfd3d0bdcb7eb394b94833a372859be51b1aa66b64` | default CSV only; checked against `de69e68` (`0254c188…`), kept |
+
+**CKFF off (litellm-ckff-ops PR #44, `768c9df`).** `scripts/provider_switch.py`
+and `config/providers.yaml` are copied unchanged from `768c9df`, except that
+`is_ckff_deployment()` also counts lower-case `ckff*` key names (`ckff_astra`).
+`merge_litellm_config.py` (no CKFF deployments, `prune_router_refs()`),
+`apply_inferhub_seat.py` (`claude-haiku-4-5` to the fast seat while CKFF is
+off), `inferhub_fallbacks.yaml` (`claude-haiku-4-5` in the fast role) and
+`sitecustomize.py` (`claude-haiku-4-5` in the seat aliases) take the same
+change on top of the local edits; our fast seat pins are kept.
+`start-litellm.ps1` takes the same switch, but with CKFF off it still reads
+the desktop env without its `ckff*` names (the web search keys live there).
 
 `reload_runtime.py` and `sync_inferhub_top20.py` were not on the original list,
 but `apply_inferhub_seat.py` and `merge_litellm_config.py` call the first, and

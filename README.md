@@ -82,13 +82,26 @@ the `CLAUDE_CODE_*` control variables an SDK host sets, skips the launcher for
 started in default mode) into `--permission-mode auto`; set
 `CCL_KEEP_DEFAULT_PERMISSION_MODE=1` to keep default. Other modes pass through.
 
+## CKFF is off
+
+Since 2026-10-04 CKFF is turned off everywhere (Alex: never use CKFF routes,
+Astra / `ckff_astra` included). The proxy serves InferHub only:
+`runtime.yaml` gets no CKFF models or fallbacks, `start-litellm.ps1` loads no
+`ckff*` keys, and `claude-haiku-4-5` goes to the fast seat like `haiku`. The
+pickers, defaults and ladders drop every CKFF/Astra route from the IRE lists,
+and a saved last pick that is a CKFF model falls back to the default. The
+switch is `ckff_enabled` in `shared/litellm/config/providers.yaml`
+(`LITELLM_ENABLE_CKFF=1` overrides it); the CKFF config stays in the repo but
+is not used.
+
 ## Keys
 
 Copy `.env.example` to `.env` in the repository root and fill in
 `INFERHUB_API_KEY`. That is the only key you need on a Mac. On the PC the
-launcher also reads `configs\.env` on your Desktop for the CKFF keys (the first
+launcher also reads `configs\.env` on your Desktop (the first
 that exists of the Desktop known folder, `%USERPROFILE%\Desktop` and
-`%OneDrive%\Desktop`), and takes the InferHub key from the first of these that
+`%OneDrive%\Desktop`) for other keys such as the web search ones, never its
+`ckff*` names, and takes the InferHub key from the first of these that
 exists: the IRE `.env` in `inference-recommendation-engine` next to this
 repository or under `D:\development`, this repository's `.env`,
 `~\.config\inferhub\.env`.

@@ -146,7 +146,7 @@ follow-up and is not part of this module.
 | Bind address | `--port` only (LiteLLM defaults to all interfaces) | `--host 127.0.0.1 --port 4000` | Local-only proxy |
 | Secrets | Desktop `configs\.env` plus `D:\claude\inferhub\.env` | `<workbench>/.env`, then `~/.config/inferhub/.env` (600) | Mac layout. The key is asked for once, with hidden input. |
 | `LITELLM_MASTER_KEY` | must already be in the Desktop `.env` | made locally (`sk-local-` + 24 random bytes) if missing | Only used between claude and 127.0.0.1 |
-| CKFF keys | required by `start-litellm.ps1` | optional; passed through if present | The Mac is InferHub-only. The CKFF model groups still load and only fail if someone calls them. |
+| CKFF keys | not loaded (CKFF off since 2026-10-04) | not passed | CKFF is off on both: no CKFF models in `runtime.yaml`, no CKFF keys. |
 | Top 20 deployments | `sync_inferhub_top20.py` reads `D:\claude\inferhub\research_model_top20_recommendations.csv` | the same script, given `INFERHUB_TOP20_CSV` or `~/.config/inferhub/research_model_top20_recommendations.csv` if present, otherwise a CSV built from the launcher's own Top 20 table | There is no IRE CSV on the Mac. The `ih/` names and ids match. Only `input_cost_per_token` is rounded to the table's 3 decimals, and that does not change routing because each `ih/` group has a single deployment. |
 | Picker UI | arrow keys | numbered list, Return = default, `b` = Finder `choose folder` | Reliable under bash 3.2 |
 | After claude exits | prints the exit code and waits for a key | `exec claude` (the Terminal window just shows the process ended) | Brief asked for `exec` |
