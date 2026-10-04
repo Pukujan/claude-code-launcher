@@ -211,3 +211,51 @@ def test_wrapper_stops_when_the_proxy_is_down(box):
     out = run_wrapper(box, ["-p", "hi"], env)
     assert out.returncode == 3
     assert "argv" not in out.stdout
+
+
+def rewrite(args, env=None):
+    """Calls rewritePermissionMode from the wrapper module directly."""
+    code = ("const m = await import(process.argv[1]);"
+            "process.stdout.write(JSON.stringify(m.rewritePermissionMode(JSON.parse(process.argv[2]),"
+            " JSON.parse(process.argv[3]))));")
+    out = subprocess.run(["node", "--input-type=module", "-e", code, WRAPPER.as_uri(), json.dumps(args),
+                          json.dumps(env or {})], capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, out.stderr
+    return json.loads(out.stdout)
+
+
+@needs_node
+@pytest.mark.parametrize("given, expected", [
+    (["--permission-mode", "default", "--allow-dangerously-skip-permissions"],
+     ["--permission-mode", "auto", "--allow-dangerously-skip-permissions"]),
+    (["--resume", "abc", "--permission-mode=default"], ["--resume", "abc", "--permission-mode=auto"]),
+    (["--permission-mode", "plan"], ["--permission-mode", "plan"]),
+    (["--permission-mode", "auto"], ["--permission-mode", "auto"]),
+    (["--permission-mode", "bypassPermissions"], ["--permission-mode", "bypassPermissions"]),
+    (["--permission-mode=acceptEdits"], ["--permission-mode=acceptEdits"]),
+    (["-p", "default"], ["-p", "default"]),                  # only the mode value is rewritten
+    (["--permission-mode"], ["--permission-mode"]),
+    ([], []),
+])
+def test_wrapper_turns_default_permission_mode_into_auto(given, expected):
+    assert rewrite(given) == expected
+
+
+@needs_node
+def test_wrapper_keeps_default_permission_mode_when_asked():
+    args = ["--permission-mode", "default", "--permission-mode=default"]
+    assert rewrite(args, {"CCL_KEEP_DEFAULT_PERMISSION_MODE": "1"}) == args
+
+
+@needs_node
+def test_wrapper_starts_claude_in_auto_mode_when_paseo_asks_for_default(box, health_port):
+    env = base_env(box, health_port, FAKE_LOGIN="1", CCL_CLAUDE_BIN=str(box["bin"] / "claude"),
+                   CCL_ENV_COMMAND=json.dumps(["bash", str(MAC), "--non-interactive", "--print-env", "json"]))
+    out = run_wrapper(box, ["--permission-mode", "default", "--allow-dangerously-skip-permissions"], env)
+    assert out.returncode == 0, out.stderr
+    got = json.loads(out.stdout.strip().splitlines()[-1])
+    assert got["argv"] == ["--permission-mode", "auto", "--allow-dangerously-skip-permissions"]
+
+    out = run_wrapper(box, ["--permission-mode", "default"], {**env, "CCL_KEEP_DEFAULT_PERMISSION_MODE": "1"})
+    assert out.returncode == 0, out.stderr
+    assert json.loads(out.stdout.strip().splitlines()[-1])["argv"] == ["--permission-mode", "default"]

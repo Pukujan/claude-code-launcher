@@ -77,7 +77,10 @@ Passing arguments that contain double quotes (JSON) through Windows PowerShell
 JSON, applies it and starts claude with the arguments exactly as given. It keeps
 the `CLAUDE_CODE_*` control variables an SDK host sets, skips the launcher for
 `--version` and `auth` probes, and passes claude's exit code back. Set
-`CCL_CLAUDE_BIN` to choose the claude executable.
+`CCL_CLAUDE_BIN` to choose the claude executable. It also turns
+`--permission-mode default` (which Paseo sends when it resumes a session that
+started in default mode) into `--permission-mode auto`; set
+`CCL_KEEP_DEFAULT_PERMISSION_MODE=1` to keep default. Other modes pass through.
 
 ## Keys
 
