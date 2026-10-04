@@ -9,8 +9,8 @@ calls DuckDuckGo's Instant Answer API, which only knows encyclopedia topics and
 returns nothing for normal queries, so this sends duckduckgo searches through
 a chain of backends instead. Other search providers are left alone.
 
-The chain (CCL_WEB_SEARCH_CHAIN, default "ddgs") is tried in order until one
-returns results with a URL:
+The chain (CCL_WEB_SEARCH_CHAIN; default: tinyfish when TINYFISH_API_KEY is set,
+then ddgs, then you_com) is tried in order until one returns results with a URL:
   ddgs      keyless scraping through the ddgs package. Several engines, tried
             one by one (CCL_DDGS_BACKENDS), then once more after a back-off.
   <other>   any LiteLLM search provider, e.g. searxng (SEARXNG_API_BASE),
@@ -65,9 +65,18 @@ def clean_query(q):
 PROVIDER_ALIASES = {"exa": "exa_ai", "youcom": "you_com", "you": "you_com"}
 
 
+def default_chain(env):
+    """No CCL_WEB_SEARCH_CHAIN (issue #61): TinyFish only when its key is set, then
+    keyless ddgs, then You.com's keyless free tier."""
+    chain = ["tinyfish"] if (env.get("TINYFISH_API_KEY") or "").strip() else []
+    return chain + ["ddgs", "you_com"]
+
+
 def chain_from_env(env=None):
     env = os.environ if env is None else env
-    raw = env.get("CCL_WEB_SEARCH_CHAIN") or "ddgs"
+    raw = (env.get("CCL_WEB_SEARCH_CHAIN") or "").strip()
+    if not raw:
+        return default_chain(env)
     chain = [p.strip().lower() for p in raw.split(",") if p.strip()]
     chain = [PROVIDER_ALIASES.get(p, p) for p in chain]
     return [p for p in chain if p != "duckduckgo"] or ["ddgs"]  # duckduckgo would loop back here

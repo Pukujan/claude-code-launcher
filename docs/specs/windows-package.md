@@ -113,22 +113,25 @@ Nothing else in `install.json`. It never holds the key.
 ### Logon task
 
 `claude-code-launcher-proxy`, a per-user logon task that runs
-`conhost.exe --headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File app\windows\litellm\start-litellm.ps1 -Home <InstallDir> -Port <port>`.
+`conhost.exe --headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File app\windows\litellm\start-litellm.ps1 -CclHome <InstallDir> -Port <port>`.
 No window shows. It's re-registered whenever the port changes.
 
 ## Behavior
 
 ### Install (also re-install)
 
-1. Check for uv, git, Node, pnpm and `claude`. Install what's missing unless `-SkipPrereqs`:
+1. Resolve and check the key (precedence above) before changing anything, so a missing or bad
+   key leaves no partial install.
+2. Check for uv, git, Node, pnpm and `claude`. Install what's missing unless `-SkipPrereqs`:
    uv from its official installer, git and Node LTS through winget, pnpm through
    corepack (falling back to its official installer), Claude Code through its official
    installer (`https://claude.ai/install.ps1`). Installers are downloaded to a temp file and
    run with `powershell -File`, never piped into `iex`. Prerequisites are never uninstalled.
-2. Fetch the launcher files for `-Ref` into `app\`. Order: `-Source`, then the public tarball
-   (`codeload.github.com`), then `gh api .../tarball/<ref>` when gh is logged in, then
-   `git clone --depth 1 --branch <ref>`. Exit 5 if all of them fail.
-3. Resolve and store the key (precedence above).
+3. Fetch the launcher files for `-Ref` into `app\`. Order: `-Source`, then the public tarball
+   (`codeload.github.com`), then `gh repo clone` when gh is logged in, then
+   `git clone --depth 1 --branch <ref>`. Exit 5 if all of them fail. Copying skips `.git`,
+   `.env` files (except `.env.example`), `last-picks.json`, venvs, logs, tests and caches.
+   Then store the key.
 4. Build the venv unless `-SkipVenv`. Exit 6 if that fails.
 5. Pick the port (below) and write `install.json`, keeping the existing `instance_id`.
 6. Write `bin\claude-inferhub.cmd`, add `bin\` to the user PATH once (unless `-NoPath`).
@@ -138,7 +141,8 @@ No window shows. It's re-registered whenever the port changes.
 8. Register the logon task (unless `-NoTask`) and start the proxy (unless `-NoStart`), then
    wait until the proxy on the chosen port answers as ours.
 
-Running install twice leaves the same state as running it once.
+Running install twice leaves the same state as running it once. (State means every file under
+`InstallDir` except `logs\`, plus the Claude Code config folder.)
 
 ### Port choice and "is it ours"
 
@@ -187,7 +191,7 @@ The folder picker falls back to home when `D:\development` doesn't exist.
 - `sync(settings: dict, options: list) -> dict` returns a copy with `model = "sonnet"`,
   `advisorModel = "fable"` and `modelPicker = {"options": options}`. Every other key is kept
   as is. `sync(sync(s, o), o) == sync(s, o)`.
-- `unsync(settings: dict) -> dict` removes `modelPicker` when every option's description says
+- `unsync(settings: dict) -> dict` removes `modelPicker` when every option's description or label says
   "via local LiteLLM" or "InferHub", removes `advisorModel` when it's `"fable"` and `model` when
   it's `"sonnet"`. Everything else is kept.
 - CLI: `python settings_sync.py sync|unsync --settings PATH [--options-file FILE]`. `sync`

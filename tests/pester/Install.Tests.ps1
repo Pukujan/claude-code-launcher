@@ -44,11 +44,15 @@ BeforeAll {
             if (-not (Test-Path -LiteralPath $base)) { continue }
             foreach ($f in Get-ChildItem -LiteralPath $base -Recurse -File -Force | Sort-Object FullName) {
                 $rel = $f.FullName.Substring($Sandbox.Root.Length).Replace('\', '/')
-                if ($rel -match '/__pycache__/') { continue }
+                if ($rel -match '/__pycache__/' -or $rel -like '/install/logs/*') { continue }   # logs are history, not state
                 if ($f.Name -eq 'install.json' -and -not $KeepInstance) {
                     $j = Get-Content -LiteralPath $f.FullName -Raw | ConvertFrom-Json
                     $j.instance_id = '<id>'
                     $out[$rel] = ($j | ConvertTo-Json -Compress)
+                } elseif ($f.Length -lt 1MB) {
+                    # The sandbox root differs between sandboxes (the shim embeds it); normalise it.
+                    $text = [IO.File]::ReadAllText($f.FullName).Replace($Sandbox.Root, '<root>')
+                    $out[$rel] = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($text)))
                 } else {
                     $out[$rel] = (Get-FileHash -LiteralPath $f.FullName -Algorithm SHA256).Hash
                 }
@@ -91,12 +95,12 @@ Describe 'Key shape and precedence' -Tag 'Spec' {
         @{ Flag = '';  Ccl = '';  Env = '';  Stored = 'S'; Expected = 'S' }
         @{ Flag = '';  Ccl = '';  Env = '';  Stored = '';  Expected = 'P' }
     ) {
-        $stored = Join-Path $TestDrive ("s-" + [guid]::NewGuid().ToString('N') + '.env')
-        if ($Stored) { Write-CclSecret -Path $stored -Key $Stored }
+        $storedFile = Join-Path $TestDrive ("s-" + [guid]::NewGuid().ToString('N') + '.env')   # ($stored would shadow $Stored)
+        if ($Stored) { Write-CclSecret -Path $storedFile -Key $Stored }
         $envs = @{}
         if ($Ccl) { $envs.CCL_INFERHUB_KEY = $Ccl }
         if ($Env) { $envs.INFERHUB_API_KEY = $Env }
-        Resolve-CclInferHubKey -Flag $Flag -Environment $envs -StoredPath $stored -Prompt { 'P' } | Should -Be $Expected
+        Resolve-CclInferHubKey -Flag $Flag -Environment $envs -StoredPath $storedFile -Prompt { 'P' } | Should -Be $Expected
     }
     It 'throws CCL_NO_KEY when non-interactive and nothing is found' {
         { Resolve-CclInferHubKey -Flag '' -Environment @{} -StoredPath 'nope' -Prompt { 'P' } -NonInteractive } | Should -Throw '*CCL_NO_KEY*'
@@ -144,12 +148,12 @@ Describe 'Install state, shim and task' -Tag 'Spec' {
         $t | Should -Match '--uninstall'
         $t | Should -Match '-Uninstall'
     }
-    It 'task runs start-litellm hidden with -Home and -Port' {
+    It 'task runs start-litellm hidden with -CclHome and -Port' {
         $a = Get-CclTaskArguments -InstallDir 'X:\inst' -Port 4002
         $a | Should -Match '--headless'
         $a | Should -Match '-WindowStyle Hidden'
         $a | Should -Match 'start-litellm\.ps1'
-        $a | Should -Match '-Home "X:\\inst"'
+        $a | Should -Match '-CclHome "X:\\inst"'
         $a | Should -Match '-Port 4002'
     }
     It 'plans only the missing prerequisites, in order' -ForEach @(
@@ -304,7 +308,7 @@ Describe 'Invariants' -Tag 'Property' {
         if ($saved -and $states[$saved] -ne 'foreign') { $got | Should -Be $saved }
         else {
             $got | Should -BeGreaterOrEqual $start
-            foreach ($q in $start..($got - 1)) { if ($q -lt $got) { $states[$q] | Should -Be 'foreign' } }
+            if ($got -gt $start) { foreach ($q in $start..($got - 1)) { $states[$q] | Should -Be 'foreign' } }   # (a..b counts down when b < a)
         }
         Select-CclPort -Start $start -Saved $saved -Probe $probe -Count 41 | Should -Be $got   # deterministic
     }

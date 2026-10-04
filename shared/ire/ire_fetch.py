@@ -165,7 +165,7 @@ def find_token(timeout: float = DEFAULT_TIMEOUT) -> tuple[str | None, str]:
 class GitHub:
     """Minimal GitHub contents API client with a shared deadline."""
 
-    def __init__(self, token: str, timeout: float = DEFAULT_TIMEOUT, api_base: str | None = None):
+    def __init__(self, token: str | None, timeout: float = DEFAULT_TIMEOUT, api_base: str | None = None):
         self._token = token
         self.api_base = (api_base or os.environ.get("CCL_IRE_API_BASE") or API_BASE).rstrip("/")
         self.deadline = time.monotonic() + timeout
@@ -175,12 +175,14 @@ class GitHub:
         left = self.deadline - time.monotonic()
         if left <= 0:
             raise FetchError("timed out")
-        req = urllib.request.Request(url, headers={
+        headers = {
             "Accept": accept,
-            "Authorization": f"Bearer {self._token}",
             "User-Agent": "claude-code-launcher-ire",
             "X-GitHub-Api-Version": "2022-11-28",
-        })
+        }
+        if self._token:
+            headers["Authorization"] = f"Bearer {self._token}"
+        req = urllib.request.Request(url, headers=headers)
         try:
             with urllib.request.urlopen(req, timeout=left) as r:
                 return r.read()
@@ -492,18 +494,18 @@ def get_recommendations(offline: bool = False, timeout: float = DEFAULT_TIMEOUT,
     else:
         token, where = find_token(timeout)
         if token is None:
-            why = where
-        else:
+            # No token (issue #61): the IRE repo is public, so read it anonymously.
+            where = f"no token, anonymous ({where})"
+        try:
+            bundle, sha = fetch_live(GitHub(token, timeout))
+            log(f"source=live  IRE {IRE_REPO}@{sha[:10]} via {where}")
             try:
-                bundle, sha = fetch_live(GitHub(token, timeout))
-                log(f"source=live  IRE {IRE_REPO}@{sha[:10]} via {where}")
-                try:
-                    write_cache(directory, bundle, sha, now_utc())
-                except OSError as e:
-                    log(f"could not write the cache ({type(e).__name__}); continuing")
-                return bundle
-            except (FetchError, ValueError) as e:
-                why = f"{e} (auth from {where})"
+                write_cache(directory, bundle, sha, now_utc())
+            except OSError as e:
+                log(f"could not write the cache ({type(e).__name__}); continuing")
+            return bundle
+        except (FetchError, ValueError) as e:
+            why = f"{e} (auth from {where})"
     record = read_cache(directory)
     if record:
         log(f"source=cache  IRE @{str(record.get('source_sha'))[:10]} fetched {record.get('fetched_at')}"
