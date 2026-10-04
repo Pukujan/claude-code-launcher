@@ -8,6 +8,8 @@ private repo Pukujan/inference-recommendation-engine on main:
   - the price policy line in docs/INFERHUB-API-SETUP.md
     ("below $0.10 USDC per 1 million tokens" counts as effectively free)
   - fallback picks, if IRE ever publishes them (optional JSON, see PICKS_PATH)
+  - the frontier list (optional; FRONTIER_JSON_PATH, else FRONTIER_ROUTES_PATH),
+    one row per route, under the extra key "frontier" ([] when IRE has none)
 
 and prints one JSON document. The schema is documented in README.md next to
 this file and is consumed by the ladder picker (issue #5), so do not add or
@@ -48,9 +50,16 @@ POLICY_PATH = "docs/INFERHUB-API-SETUP.md"
 # If this path appears, its ladders replace the built-in ones.
 PICKS_PATH = "operational/recommendations/claude-code-fallbacks.v1.json"
 
+# The frontier list: models above the Top 20's price band, one row per route.
+LISTS = "operational/telemetry/gravebuster/pipeline/ihub/lists/"
+FRONTIER_JSON_PATH = LISTS + "research_model_frontier_recommendations.json"
+FRONTIER_ROUTES_PATH = LISTS + "research_model_frontier_routes.csv"
+
 DEFAULT_TIMEOUT = 5.0
 CACHE_NAME = "ire-cache.json"
 KEYS = ("source", "top20", "price_policy", "ladders", "retries", "cooldown_s")
+# Optional extras: always present in the output, may be empty.
+EXTRA_KEYS = ("frontier",)
 
 POLICY_RE = re.compile(
     r"below\s*\**\s*\$\s*([0-9]+(?:\.[0-9]+)?)\s*(?:USDC|USD)?\s*per\s*1\s*(?:million|M)\s*tokens",
@@ -186,6 +195,64 @@ def parse_top20(text: str) -> list[dict]:
     return rows
 
 
+def _frontier_row(r: dict, eligible, price: dict, health) -> dict | None:
+    route = (r.get("route") or "").strip()
+    rank = str(r.get("frontier_rank") or "").strip()
+    if not route or not rank.isdigit():
+        return None
+    return {
+        "rank": int(rank),
+        "name": (r.get("model_family") or r.get("model_label") or route).strip(),
+        "vendor": (r.get("vendor") or "").strip(),
+        "route": route,
+        "best_route": str(r.get("is_best_route")).strip().lower() == "true",
+        "eligible": eligible,
+        "health": health or "",
+        # IRE's price policy basis is the cheapest input ask (USDC per 1M tokens)
+        "cost_per_mtok": _cost(price.get("min_ask_in")),
+        "price_in": _cost(price.get("min_ask_in")),
+        "price_out": _cost(price.get("min_ask_out")),
+        "preferred_endpoint": (r.get("preferred_endpoint") or None),
+        "system_prompt_handling": (r.get("system_prompt_handling") or None),
+        "context_window": int(r["context_window"]) if str(r.get("context_window") or "").isdigit() else None,
+    }
+
+
+def _sort_frontier(rows: list) -> list:
+    rows = [x for x in rows if x]
+    rows.sort(key=lambda x: (x["rank"], not x["best_route"], x["route"]))
+    return rows
+
+
+def parse_frontier_json(text: str) -> list[dict]:
+    """research_model_frontier_recommendations.json -> one row per enabled route."""
+    doc = json.loads(text)
+    elig = {}
+    for m in doc.get("models") or []:
+        elig[m.get("model_family")] = bool(m.get("recommendation_eligible"))
+    rows = []
+    for r in doc.get("routes") or []:
+        if r.get("enabled") is False:
+            continue
+        rows.append(_frontier_row(r, elig.get(r.get("model_family"), False),
+                                  r.get("price") or {}, (r.get("health") or {}).get("status")))
+    return _sort_frontier(rows)
+
+
+def parse_frontier_routes_csv(text: str) -> list[dict]:
+    """research_model_frontier_routes.csv (fallback when the JSON is missing).
+    Eligibility isn't in this file, so a route counts as eligible when it is healthy."""
+    rows = []
+    for r in csv.DictReader(io.StringIO(text)):
+        if (r.get("enabled") or "true").strip().lower() != "true":
+            continue
+        health = (r.get("health_status") or "").strip()
+        rows.append(_frontier_row(r, health == "healthy",
+                                  {"min_ask_in": r.get("min_ask_in"), "min_ask_out": r.get("min_ask_out")},
+                                  health))
+    return _sort_frontier(rows)
+
+
 def parse_price_cap(markdown: str) -> float | None:
     m = POLICY_RE.search(markdown)
     return float(m.group(1)) if m else None
@@ -219,12 +286,17 @@ def parse_picks(text: str) -> dict:
 def load_defaults() -> dict:
     doc = json.loads(DEFAULTS_PATH.read_text(encoding="utf-8"))
     doc["source"] = "defaults"
-    return {k: doc[k] for k in KEYS}
+    out = {k: doc[k] for k in KEYS}
+    out["frontier"] = list(doc.get("frontier") or [])
+    return out
 
 
 def validate(bundle: dict) -> dict:
-    if set(bundle) != set(KEYS):
-        raise ValueError(f"bundle keys must be exactly {KEYS}")
+    if set(bundle) != set(KEYS) | set(EXTRA_KEYS):
+        raise ValueError(f"bundle keys must be exactly {KEYS + EXTRA_KEYS}")
+    if not isinstance(bundle["frontier"], list) or not all(
+            isinstance(r, dict) and r.get("route") for r in bundle["frontier"]):
+        raise ValueError("bad frontier list")
     if bundle["source"] not in ("live", "cache", "defaults"):
         raise ValueError("bad source")
     if not bundle["top20"] or not all(r.get("ids") for r in bundle["top20"]):
@@ -266,7 +338,25 @@ def fetch_live(gh: GitHub, repo: str = IRE_REPO, ref: str = IRE_REF) -> tuple[di
             log(f"using IRE fallback picks from {PICKS_PATH}")
         except (ValueError, AttributeError, json.JSONDecodeError) as e:
             log(f"ignoring malformed {PICKS_PATH}: {e}")
+    bundle["frontier"] = fetch_frontier(gh, repo, sha)
     return validate(bundle), sha
+
+
+def fetch_frontier(gh: GitHub, repo: str, sha: str) -> list:
+    """Optional. [] when IRE has no frontier list or it can't be parsed."""
+    for path, parse in ((FRONTIER_JSON_PATH, parse_frontier_json),
+                        (FRONTIER_ROUTES_PATH, parse_frontier_routes_csv)):
+        text = gh.file(repo, path, sha)
+        if text is None:
+            continue
+        try:
+            rows = parse(text)
+        except (ValueError, KeyError, TypeError, AttributeError) as e:
+            log(f"ignoring malformed {path}: {type(e).__name__}")
+            continue
+        if rows:
+            return rows
+    return []
 
 
 def write_cache(directory: Path, bundle: dict, sha: str, fetched_at: str) -> None:
@@ -288,6 +378,7 @@ def read_cache(directory: Path) -> dict | None:
     try:
         record = json.loads((directory / CACHE_NAME).read_text(encoding="utf-8"))
         bundle = dict(record["bundle"], source="cache")
+        bundle.setdefault("frontier", [])  # caches written before the frontier key
         record["bundle"] = validate(bundle)
         return record
     except (OSError, ValueError, KeyError, TypeError, AttributeError, json.JSONDecodeError):

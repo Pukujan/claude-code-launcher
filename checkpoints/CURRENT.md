@@ -21,7 +21,8 @@ Phase: launcher move.
 
 - Re-sync `windows/launch-claude-inferhub.ps1` from the PC after the pending fixes there.
 - `shared/ire/` on-demand IRE fetch (CCL-0004, [issue #4](https://github.com/Pukujan/claude-code-launcher/issues/4); handed to a new worker on branch `task/CCL-0004-ire-fetch`).
-- **CCL-0006**: fallback ladder picker for main and advisor, applied live ([issue #5](https://github.com/Pukujan/claude-code-launcher/issues/5), branch `task/CCL-0006-fallback-ladder`).
+- **CCL-0006**: fallback ladder picker for main and advisor, applied live ([issue #5](https://github.com/Pukujan/claude-code-launcher/issues/5), PR #12, merged).
+- **CCL-0013**: cx primaries in Responses mode, hand-picked ladders, picking from the Top 20 or the frontier list ([issue #13](https://github.com/Pukujan/claude-code-launcher/issues/13)).
 
 ## Blockers
 

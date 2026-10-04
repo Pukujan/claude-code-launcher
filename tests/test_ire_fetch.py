@@ -22,7 +22,9 @@ import ire_fetch as F  # noqa: E402
 FIX = Path(__file__).resolve().parent / "fixtures" / "ire"
 SHA = "0123456789abcdef0123456789abcdef01234567"
 TOKEN = "test-token-not-real"
-KEYS = {"source", "top20", "price_policy", "ladders", "retries", "cooldown_s"}
+KEYS = {"source", "top20", "price_policy", "ladders", "retries", "cooldown_s", "frontier"}
+FRONTIER_ROW = {"rank", "name", "vendor", "route", "best_route", "eligible", "health", "cost_per_mtok",
+                "price_in", "price_out", "preferred_endpoint", "system_prompt_handling", "context_window"}
 
 
 class FakeGitHub:
@@ -84,6 +86,9 @@ def check_contract(b):
     assert set(b["ladders"]) == {"main", "advisor"}
     assert all(isinstance(x, str) for chain in b["ladders"].values() for x in chain)
     assert isinstance(b["retries"], int) and isinstance(b["cooldown_s"], int)
+    assert isinstance(b["frontier"], list)
+    for row in b["frontier"]:
+        assert set(row) == FRONTIER_ROW
     json.dumps(b)
 
 
@@ -195,6 +200,65 @@ def test_corrupt_cache_falls_to_defaults(env):
     env.mkdir(parents=True)
     (env / F.CACHE_NAME).write_text("{not json", encoding="utf-8")
     assert F.get_recommendations(offline=True, directory=env)["source"] == "defaults"
+
+
+# ------------------------------------------------------------------ frontier list
+
+
+def frontier_files(json_ok=True, csv_ok=False):
+    f = {}
+    if json_ok:
+        f[F.FRONTIER_JSON_PATH] = (FIX / "frontier.json").read_bytes()
+    if csv_ok:
+        f[F.FRONTIER_ROUTES_PATH] = (FIX / "frontier_routes.csv").read_bytes()
+    return f
+
+
+def test_frontier_comes_from_the_json(monkeypatch, env):
+    monkeypatch.setenv("GH_TOKEN", TOKEN)
+    online(monkeypatch, FakeGitHub(frontier_files(csv_ok=True)))
+    b = F.get_recommendations(directory=env)
+    check_contract(b)
+    routes = [r["route"] for r in b["frontier"]]
+    assert "xx/disabled-route" not in routes  # disabled routes are left out
+    assert routes[0] == "cb/gpt-6-astra" and routes.index("cb/gpt-6-astra") < routes.index("cx/gpt-6-astra")
+    sol = next(r for r in b["frontier"] if r["route"] == "cx/gpt-6.1-sol")
+    assert (sol["price_in"], sol["price_out"], sol["cost_per_mtok"]) == (0.016, 0.08, 0.016)
+    assert sol["preferred_endpoint"] == "/v1/responses" and sol["eligible"] is True
+    fable = next(r for r in b["frontier"] if r["route"] == "cc/claude-fable-5-1")
+    assert fable["cost_per_mtok"] == 1.0
+    # cached with the rest, and still there offline
+    monkeypatch.setattr(F.urllib.request, "urlopen", no_network)
+    assert F.get_recommendations(directory=env)["frontier"] == b["frontier"]
+
+
+def test_frontier_falls_back_to_the_routes_csv(monkeypatch, env):
+    monkeypatch.setenv("GH_TOKEN", TOKEN)
+    files = frontier_files(json_ok=False, csv_ok=True)
+    online(monkeypatch, FakeGitHub(files))
+    b = F.get_recommendations(directory=env)
+    check_contract(b)
+    assert [r["route"] for r in b["frontier"]] == ["cc/claude-fable-5-1", "cx/gpt-6.1-sol"]
+
+
+def test_frontier_missing_or_malformed_is_empty(monkeypatch, env):
+    monkeypatch.setenv("GH_TOKEN", TOKEN)
+    online(monkeypatch, FakeGitHub({F.FRONTIER_JSON_PATH: b"{not json"}))
+    b = F.get_recommendations(directory=env)
+    check_contract(b)
+    assert b["source"] == "live" and b["frontier"] == []
+    online(monkeypatch, FakeGitHub())
+    assert F.get_recommendations(directory=env)["frontier"] == []
+
+
+def test_old_cache_without_frontier_still_loads(env):
+    env.mkdir(parents=True)
+    d = F.load_defaults()
+    d.pop("frontier")
+    F.write_cache(env, dict(d, source="live"), SHA, "2026-10-03T00:00:00Z")
+    b = F.get_recommendations(offline=True, directory=env)
+    check_contract(b)
+    assert b["source"] == "cache" and b["frontier"] == []
 
 
 # ------------------------------------------------------------------ offline, no cache

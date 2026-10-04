@@ -4,6 +4,9 @@
   catalog  [--bundle B]                       pickable routes as JSON (Top 20 + opted-in extras)
   choose   --state S --role main --primary ID [--bundle B]
   choose   --state S --role advisor --primary ID              ('' = advisor OFF)
+  primary  --role main|advisor [--allow-off] [--list frontier|top20] --out F
+                                              pick a seat primary from either IRE list;
+                                              writes "id<TAB>name" to F (exit 2 = cancelled)
   apply    --state S [--base-url http://127.0.0.1:4000]       push to the running proxy
   show     [--base-url ...]                                   read back what the proxy has
 
@@ -89,7 +92,7 @@ def cmd_choose(a):
         res = {"fallbacks": L.default_ladder(b, a.role, primary, () if a.allow_shared_vendors else blocked),
                "source": "default"}
     else:
-        res = L.prompt_ladder(b, a.role, primary, blocked, allow_shared=a.allow_shared_vendors)
+        res = L.prompt_ladder(b, a.role, primary, blocked, allow_shared=a.allow_shared_vendors, which=a.list)
     st[a.role] = {"primary": primary, **res}
     # The other seat's default rungs yield to this seat's primary vendor.
     if not a.allow_shared_vendors and st.get(other, {}).get("source") == "default":
@@ -104,6 +107,20 @@ def cmd_choose(a):
             log(f"Warning: your hand-picked {other} ladder shares '{L.prefix(primary)}/' with this seat: {shared}")
     save_json(a.state, st)
     log(f"{a.role} ladder: {primary} > " + (" > ".join(st[a.role]['fallbacks']) or "(no fallbacks)"))
+    return 0
+
+
+def cmd_primary(a):
+    b = get_inputs(a)
+    row = L.prompt_primary(b, a.role, allow_off=a.allow_off, which=a.list)
+    if row is None:
+        return 2
+    text = f"{row['id']}\t{row.get('name') or row['id']}\n"
+    if a.out:
+        a.out.parent.mkdir(parents=True, exist_ok=True)
+        a.out.write_text(text, encoding="utf-8")
+    else:
+        sys.stdout.write(text)
     return 0
 
 
@@ -180,8 +197,17 @@ def main(argv=None):
     c.add_argument("--state", type=Path, required=True)
     c.add_argument("--role", choices=("main", "advisor"), required=True)
     c.add_argument("--primary", required=True)
-    c.add_argument("--allow-shared-vendors", action="store_true")
+    c.add_argument("--allow-shared-vendors", action="store_true",
+                   help="let the DEFAULT ladder share vendors too (hand picks always may)")
+    c.add_argument("--list", choices=L.LISTS, default="top20", help="list shown first for hand picks")
     c.add_argument("--non-interactive", action="store_true", help="take the default ladder without asking")
+    c = sp.add_parser("primary")
+    c.add_argument("--bundle", type=Path, default=None)
+    c.add_argument("--no-ire", action="store_true")
+    c.add_argument("--role", choices=("main", "advisor"), required=True)
+    c.add_argument("--allow-off", action="store_true")
+    c.add_argument("--list", choices=L.LISTS, default="frontier")
+    c.add_argument("--out", type=Path, default=None)
     c = sp.add_parser("apply")
     c.add_argument("--state", type=Path, required=True)
     c.add_argument("--base-url", default="http://127.0.0.1:4000")
@@ -189,7 +215,8 @@ def main(argv=None):
     c = sp.add_parser("show")
     c.add_argument("--base-url", default="http://127.0.0.1:4000")
     a = ap.parse_args(argv)
-    return {"catalog": cmd_catalog, "choose": cmd_choose, "apply": cmd_apply, "show": cmd_show}[a.cmd](a)
+    return {"catalog": cmd_catalog, "choose": cmd_choose, "apply": cmd_apply, "show": cmd_show,
+            "primary": cmd_primary}[a.cmd](a)
 
 
 if __name__ == "__main__":

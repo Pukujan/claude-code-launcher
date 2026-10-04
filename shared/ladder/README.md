@@ -116,3 +116,28 @@ config whose seat primaries point at that server, and two PowerShell scripts.
 Run `start-test-proxy.ps1 -Port 4012`, then `run-fault-injection.ps1 -Port 4012`.
 Both refuse port 4000. The real requests use `max_tokens` 8, on rungs under
 $0.10 per 1M tokens.
+
+## Two lists: Top 20 and frontier
+
+Every picker can show either the IRE Top 20 or the IRE frontier list (the `frontier` key
+from `shared/ire`). That covers the seat primaries and the fallbacks, for both main and
+advisor. Each row shows the price per 1M tokens, and any row at or above the price policy
+($0.10 per 1M) is marked `OVER $0.10`. On Windows, Tab switches lists in the seat menus.
+On the Mac, typing `f` at the seat prompt opens the shared picker (`ladder_cli.py primary`),
+and there `t` and `f` switch lists. In the fallback prompt, `t` and `f` switch lists on
+both platforms, and you can also type route ids directly to mix the two lists.
+
+## Hand picks versus defaults
+
+The vendor-disjoint rule shapes the default ladder only. Fallbacks you pick by hand are
+kept as you typed them, even when they share a route prefix with the other seat. A gated
+or over-cap route is kept as well. Each of those gets a one-line warning. A pick is refused
+only when it's the primary itself, appears twice, makes more than 3 rungs, isn't in either
+list or the extras, or breaks an extras price-cap hook such as `CCL_CX_SOL_MAX_PRICE`.
+
+## cx/ routes as seat primaries
+
+`apply_inferhub_seat.py` seats a `cx/` primary as `openai/responses/cx/...`, the same way
+cx fallback rungs are seated, so the system prompt reaches the model as `instructions`.
+Every other route still gets `openai/<id>`. Test fixtures in `tests/fixtures/seat/` check
+that the non-cx output is byte-for-byte identical to the output before this change.
