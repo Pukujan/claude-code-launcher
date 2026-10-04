@@ -131,7 +131,7 @@ def read_top20(path) -> list[dict]:
         if len(parts) < 3 or not parts[2]:
             continue
         rows.append({"rank": parts[0], "name": parts[1], "id": parts[2],
-                     "eligible": (parts[3].lower() == "true") if len(parts) > 3 else True})
+                     "eligible": (parts[3].strip().lower() in ("true", "yes", "1")) if len(parts) > 3 else True})
     return rows
 
 
@@ -254,12 +254,17 @@ def health_matches(health: dict, config: dict) -> bool:
 
 
 def port_free(port: int) -> bool:
+    """Nothing is listening on 127.0.0.1:port.
+
+    A connect probe, not a bind: a bind fails for a minute after the previous
+    shim exits (TIME_WAIT), which would hop ports on every quick relaunch."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.5)
         try:
-            s.bind(("127.0.0.1", port))
-            return True
-        except OSError:
+            s.connect(("127.0.0.1", port))
             return False
+        except OSError:
+            return True
 
 
 def write_json(path, obj) -> None:

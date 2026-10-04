@@ -209,3 +209,25 @@ def test_launchers_use_the_helper_and_leave_the_global_ultracode_alone():
         assert "WindowsApps" not in text
         assert "Install-UltraCodeCommand" not in text and "install_ultracode" not in text
         assert "--no-project" in text
+
+
+def test_port_free_ignores_time_wait(tmp_path):
+    import socket
+    srv = socket.socket()
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen()
+    port = srv.getsockname()[1]
+    assert not uc.port_free(port)
+    c = socket.create_connection(("127.0.0.1", port))
+    a, _ = srv.accept()
+    a.close()  # server side closes first -> its end sits in TIME_WAIT
+    c.close()
+    srv.close()
+    assert uc.port_free(port)
+
+
+def test_top20_eligible_flag(tmp_path):
+    p = tmp_path / "t.txt"
+    p.write_text("1|A|cb/a|true|1\n2|B|cb/b|false|1\n3|C|cb/c|yes|1\n", encoding="utf-8")
+    assert [r["eligible"] for r in uc.read_top20(p)] == [True, False, True]
