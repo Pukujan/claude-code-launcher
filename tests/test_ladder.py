@@ -372,6 +372,23 @@ class Cli(unittest.TestCase):
             adv_v = {L.prefix(s["advisor"]["primary"])} | {L.prefix(r) for r in s["advisor"]["fallbacks"]}
             self.assertFalse(main_v & adv_v)
 
+    def test_choose_picks_flag_records_hand_picks(self):
+        import subprocess
+        import tempfile
+        with tempfile.TemporaryDirectory() as t:
+            st = Path(t) / "st.json"
+            cli = str(ROOT / "shared" / "ladder" / "ladder_cli.py")
+            base = [sys.executable, cli, "choose", "--no-ire", "--state", str(st), "--role", "main",
+                    "--primary", "cb/deepseek-v4.1-flash"]
+            r = subprocess.run(base + ["--picks", "cbcn/glm-5.3-flash,ali/qwen3.8-flash"],
+                               text=True, capture_output=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            s = json.loads(st.read_text())
+            self.assertEqual(s["main"]["fallbacks"], ["cbcn/glm-5.3-flash", "ali/qwen3.8-flash"])
+            self.assertEqual(s["main"]["source"], "picked")
+            r = subprocess.run(base + ["--picks", "cb/deepseek-v4.1-flash"], text=True, capture_output=True)
+            self.assertEqual(r.returncode, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

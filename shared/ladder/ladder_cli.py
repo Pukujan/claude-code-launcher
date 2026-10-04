@@ -88,7 +88,15 @@ def cmd_choose(a):
         log("Advisor OFF: advisor aliases follow the main seat and its ladder.")
         save_json(a.state, st)
         return 0
-    if a.non_interactive:
+    if a.picks is not None:
+        picks = [r.strip() for r in a.picks.split(",") if r.strip()]
+        probs = L.validate_picks(b, primary, picks)
+        if probs:
+            for pr in probs:
+                log(f"can't use that: {pr}")
+            return 2
+        res = {"fallbacks": picks, "source": "picked" if picks else "none"}
+    elif a.non_interactive:
         res = {"fallbacks": L.default_ladder(b, a.role, primary, () if a.allow_shared_vendors else blocked),
                "source": "default"}
     else:
@@ -202,6 +210,8 @@ def main(argv=None):
                    help="let the DEFAULT ladder share vendors too (hand picks always may)")
     c.add_argument("--list", choices=L.LISTS, default="top20", help="list shown first for hand picks")
     c.add_argument("--non-interactive", action="store_true", help="take the default ladder without asking")
+    c.add_argument("--picks", default=None,
+                   help="comma-separated hand-picked fallbacks (up to 3); skips the prompt")
     c = sp.add_parser("primary")
     c.add_argument("--bundle", type=Path, default=None)
     c.add_argument("--no-ire", action="store_true")

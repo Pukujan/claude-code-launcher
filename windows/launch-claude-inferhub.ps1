@@ -181,91 +181,51 @@ function Get-ProjectDirs([string]$Path) {
     Sort-Object Name)
 }
 
-# ---- seat model pickers: IRE Top 20 or IRE frontier list (Tab switches) ----
-function Get-PriceCap {
-  $cap = 0.10
-  if ($env:CCL_IRE_JSON -and (Test-Path -LiteralPath $env:CCL_IRE_JSON)) {
-    try {
-      $j = Get-Content -LiteralPath $env:CCL_IRE_JSON -Raw -Encoding UTF8 | ConvertFrom-Json
-      if ($j.price_policy.free_below_per_mtok) { $cap = [double]$j.price_policy.free_below_per_mtok }
-    } catch {}
-  }
-  return $cap
-}
-
-function Get-FrontierModels {
-  # HOOK(ire-frontier): rows from the "frontier" key that shared\ire\ire_fetch.py
-  # writes (one per route). Empty when IRE has no frontier list.
-  if (-not ($env:CCL_IRE_JSON -and (Test-Path -LiteralPath $env:CCL_IRE_JSON))) { return @() }
-  try {
-    $j = Get-Content -LiteralPath $env:CCL_IRE_JSON -Raw -Encoding UTF8 | ConvertFrom-Json
-  } catch { return @() }
-  return @(foreach ($r in @($j.frontier)) {
-    if (-not $r.route) { continue }
-    $cost = $(if ($null -ne $r.cost_per_mtok) { "{0:0.000}" -f [double]$r.cost_per_mtok } else { "?" })
-    @{ Rank = $r.rank; Name = [string]$r.name; Id = [string]$r.route; Eligible = [bool]$r.eligible; Cost = $cost
-       In = $r.price_in; Out = $r.price_out }
+function Select-MainModel {
+  $lines = @(foreach ($m in $Models) {
+    $tag = $(if ($m.Eligible) { "eligible" } else { "gated" })
+    $star = $(if ($m.Id -eq $DefaultModelId) { "*" } else { " " })
+    "{0}{1,2}  {2,-28} {3,-42} {4}  ~{5}/Mtok" -f $star, $m.Rank, $m.Name, $m.Id, $tag, $m.Cost
   })
-}
-
-function Format-ModelLine {
-  param($m, [double]$Cap, [string]$Star = " ")
-  $tag = $(if ($m.Eligible) { "eligible" } else { "gated" })
-  $c = 0.0
-  $over = -not [double]::TryParse([string]$m.Cost, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$c) -or $c -ge $Cap
-  $mark = $(if ($over) { "OVER `${0:0.00}" -f $Cap } else { "" })
-  $io = $(if ($null -ne $m.Out) { "  in/out " + $m.In + "/" + $m.Out } else { "" })
-  $cx = $(if ($m.Id -like "cx/*") { "  [cx: Responses mode]" } else { "" })
-  "{0}{1,2}  {2,-28} {3,-40} {4,-8} ~{5}/1M {6,-10}{7}{8}" -f $Star, $m.Rank, $m.Name, $m.Id, $tag, $m.Cost, $mark, $io, $cx
-}
-
-function Select-SeatModel {
-  param([string]$Role)
-  $cap = Get-PriceCap
-  $frontier = @(Get-FrontierModels)
-  $list = "top20"
+  $help = @(
+    "MAIN executor (maps to alias sonnet/main). Up/Down/PgUp/PgDn/Home/End. Enter. Esc quits.",
+    "gated = ranked but not currently recommendation-eligible."
+  )
   $index = 0
   while ($true) {
-    if ($list -eq "top20") { $choices = @($Models); $label = "IRE Top 20" }
-    else { $choices = @($frontier); $label = "IRE frontier list" }
-    if ($Role -eq "advisor") {
-      $choices = @(@{ Rank = 0; Name = "OFF (no advisor)"; Id = ""; Eligible = $true; Cost = "-" }) + $choices
-    }
-    $lines = @(foreach ($m in $choices) {
-      if ($m.Id -eq "") { "   OFF  (disable advisor tool / seat aliases fall back to main)" }
-      else {
-        $star = $(if ($Role -eq "main" -and $m.Id -eq $DefaultModelId) { "*" } else { " " })
-        Format-ModelLine -m $m -Cap $cap -Star $star
-      }
-    })
-    if ($list -eq "frontier" -and $frontier.Count -eq 0) { $lines += "   (IRE has no frontier list on this machine yet; Tab goes back)" }
-    if ($Role -eq "main") {
-      $title = "Choose MAIN model ($label). Default DeepSeek V4.1 Flash."
-      $help = @("MAIN executor (maps to alias sonnet/main). Tab switches Top 20 / frontier list. Enter. Esc quits.")
-    } else {
-      $title = "Choose ADVISOR model ($label) or OFF."
-      $help = @("ADVISOR model (maps to alias opus/advisor) or OFF. Tab switches Top 20 / frontier list. Enter. Esc quits.",
-                "Mid-session use /advisor opus or /advisor sonnet (aliases), not raw InferHub ids.")
-    }
-    $help += ("Price per 1M tokens. OVER `${0:0.00} = above the free price policy. gated = not recommendation-eligible." -f $cap)
-    Show-Picker -Title $title -Lines $lines -Index $index -Help $help
+    Show-Picker -Title "Choose MAIN model (IRE Top 20). Default DeepSeek V4.1 Flash." -Lines $lines -Index $index -Help $help
     $key = Read-MenuKey
     $page = (Get-ConsoleLayout -HelpCount $help.Count).MaxItems
-    if ($key.VirtualKeyCode -eq 9) {
-      $list = $(if ($list -eq "top20") { "frontier" } else { "top20" }); $index = 0; continue
-    }
-    if ($key.VirtualKeyCode -eq 13) {
-      if ($index -lt $choices.Count) { return $choices[$index] }
-      continue
-    }
+    if ($key.VirtualKeyCode -eq 13) { return $Models[$index] }
     if ($key.VirtualKeyCode -eq 27) { throw "Cancelled." }
     $index = Move-MenuIndex -Index $index -Count $lines.Count -KeyCode $key.VirtualKeyCode -PageSize $page
   }
 }
 
-function Select-MainModel { Select-SeatModel -Role main }
-
-function Select-AdvisorModel { Select-SeatModel -Role advisor }
+function Select-AdvisorModel {
+  $off = @{ Rank = 0; Name = "OFF (no advisor)"; Id = ""; Eligible = $true; Cost = "-" }
+  $choices = @($off) + $Models
+  $lines = @(foreach ($m in $choices) {
+    if ($m.Id -eq "") { "   OFF  (disable advisor tool / seat aliases fall back to main)" }
+    else {
+      $tag = $(if ($m.Eligible) { "eligible" } else { "gated" })
+      "{0,2}  {1,-28} {2,-42} {3}  ~{4}/Mtok" -f $m.Rank, $m.Name, $m.Id, $tag, $m.Cost
+    }
+  })
+  $help = @(
+    "ADVISOR model (maps to alias opus/advisor) or OFF. Enter selects. Esc quits.",
+    "Mid-session use /advisor opus or /advisor sonnet (aliases), not raw InferHub ids."
+  )
+  $index = 0
+  while ($true) {
+    Show-Picker -Title "Choose ADVISOR model (IRE Top 20) or OFF." -Lines $lines -Index $index -Help $help
+    $key = Read-MenuKey
+    $page = (Get-ConsoleLayout -HelpCount $help.Count).MaxItems
+    if ($key.VirtualKeyCode -eq 13) { return $choices[$index] }
+    if ($key.VirtualKeyCode -eq 27) { throw "Cancelled." }
+    $index = Move-MenuIndex -Index $index -Count $lines.Count -KeyCode $key.VirtualKeyCode -PageSize $page
+  }
+}
 
 function Confirm-Launch {
   param([string]$Folder)
@@ -306,27 +266,117 @@ function Get-ProjectEntries {
   return $entries
 }
 
-function Select-ProjectFolder {
+function Get-FolderRoots {
+  # Root list of the folder navigator: $Root (D:\development) then $SecondaryRoot (C:\work).
+  $roots = @()
+  if (Test-Path -LiteralPath $Root) {
+    $full = (Resolve-Path -LiteralPath $Root).Path.TrimEnd('\')
+    $roots += [pscustomobject]@{ Label = ($full + "  (default root)"); FullName = $full }
+  }
+  if ($SecondaryRoot -and (Test-Path -LiteralPath $SecondaryRoot)) {
+    $full = (Resolve-Path -LiteralPath $SecondaryRoot).Path.TrimEnd('\')
+    $roots += [pscustomobject]@{ Label = ("[C:\work] " + $full + "  (secondary root)"); FullName = $full }
+  }
+  return $roots
+}
+
+function Get-FolderView {
+  # Entries for one level: the root list when $Path is empty, else the
+  # (non-dot) subfolders of $Path.
+  param([string]$Path, $Roots)
+  if (-not $Path) { return @($Roots) }
+  return @(foreach ($d in @(Get-ProjectDirs $Path)) {
+    [pscustomobject]@{ Label = ($d.Name + "\"); FullName = $d.FullName }
+  })
+}
+
+function Step-FolderNav {
+  # One key of the folder navigator. $State = @{ Path; Index; Stack; Roots }.
+  # Path "" = root list. Stack holds the parent paths and their pointer rows.
+  # Returns @{ Done = $false } to keep going, @{ Done = $true; Path = <dir> }
+  # for a pick, or @{ Done = $true; Path = $null } for cancel.
+  param($State, [ConsoleKey]$Key, [int]$PageSize = 10)
+  $view = @(Get-FolderView -Path $State.Path -Roots $State.Roots)
+  switch ($Key) {
+    ([ConsoleKey]::RightArrow) {
+      if ($view.Count -gt 0) {
+        $State.Stack.Add(@($State.Path, $State.Index)) | Out-Null
+        $State.Path = $view[$State.Index].FullName
+        $State.Index = 0
+      }
+    }
+    ([ConsoleKey]::LeftArrow) {
+      if ($State.Path) {
+        $last = $State.Stack.Count - 1
+        if ($last -ge 0) {
+          $State.Path = $State.Stack[$last][0]; $State.Index = $State.Stack[$last][1]
+          $State.Stack.RemoveAt($last)
+        } else { $State.Path = ""; $State.Index = 0 }
+      }
+    }
+    ([ConsoleKey]::Enter) {
+      if ($view.Count -gt 0) { return @{ Done = $true; Path = $view[$State.Index].FullName } }
+      if ($State.Path) { return @{ Done = $true; Path = $State.Path } }
+    }
+    ([ConsoleKey]::Escape) {
+      if ($State.Path) { return @{ Done = $true; Path = $State.Path } }
+      return @{ Done = $true; Path = $null }
+    }
+    default {
+      # ConsoleKey values are virtual key codes: Up/Down/PgUp/PgDn/Home/End.
+      $State.Index = Move-MenuIndex -Index $State.Index -Count $view.Count -KeyCode ([int]$Key) -PageSize $PageSize
+    }
+  }
+  return @{ Done = $false }
+}
+
+function Invoke-FolderNav {
+  # Run the navigator over a key sequence (tests) or live keys ($Keys = $null).
+  param($Keys = $null, [switch]$Quiet)
+  $roots = @(Get-FolderRoots)
+  if ($roots.Count -eq 0) { throw "No project folders: neither $Root nor $SecondaryRoot exists" }
+  $state = @{ Path = ""; Index = 0; Stack = (New-Object System.Collections.ArrayList); Roots = $roots }
+  $help = @(
+    "Up/Down move. Right opens. Left goes back. Enter chooses the highlighted folder.",
+    "Esc chooses the folder you are in (quits at the top list). Confirm before launch."
+  )
+  $i = 0
+  while ($true) {
+    $view = @(Get-FolderView -Path $state.Path -Roots $roots)
+    $page = (Get-ConsoleLayout -HelpCount $help.Count).MaxItems
+    if (-not $Quiet) {
+      $title = $(if ($state.Path) { "Choose a project folder: " + $state.Path } else { "Choose a project folder (default root " + $Root + ")" })
+      Show-Picker -Title $title -Lines @($view | ForEach-Object { $_.Label }) -Index $state.Index -Help $help
+    }
+    if ($null -ne $Keys) {
+      if ($i -ge @($Keys).Count) { return $null }
+      $k = [ConsoleKey]@($Keys)[$i]; $i++
+    } else {
+      $k = [Console]::ReadKey($true).Key
+    }
+    $r = Step-FolderNav -State $state -Key $k -PageSize $page
+    if ($Quiet) { Write-Output ("  key={0,-10} path={1} index={2}" -f $k, $(if ($state.Path) { $state.Path } else { "<roots>" }), $state.Index) }
+    if ($r.Done) { return $r.Path }
+  }
+}
+
+function Select-ProjectFolderNumbered {
+  # Input is redirected (no console keys): plain numbered list.
   $entries = @(Get-ProjectEntries)
   if ($entries.Count -eq 0) { throw "No project folders: neither $Root nor $SecondaryRoot exists" }
-  $dirs = $entries
-  $lines = @($entries | ForEach-Object { $_.Label })
-  $help = @(
-    "Up, Down, Page Up, Page Down, Home, End. Enter chooses this folder. Esc quits.",
-    "Default root $Root first, then [C:\work] folders under $SecondaryRoot. Confirm before launch."
-  )
-  $index = 0
+  for ($i = 0; $i -lt $entries.Count; $i++) { Write-Host ("{0,3}. {1}" -f ($i + 1), $entries[$i].Label) }
+  $ans = Read-Host "Folder number"
+  $n = 0
+  if (-not [int]::TryParse($ans, [ref]$n) -or $n -lt 1 -or $n -gt $entries.Count) { throw "Cancelled." }
+  return $entries[$n - 1].FullName
+}
+
+function Select-ProjectFolder {
+  if ([Console]::IsInputRedirected) { return Select-ProjectFolderNumbered }
   while ($true) {
-    Show-Picker -Title ("Choose a project folder (default root " + $Root + ")") -Lines $lines -Index $index -Help $help
-    $key = Read-MenuKey
-    $page = (Get-ConsoleLayout -HelpCount $help.Count).MaxItems
-    if ($key.VirtualKeyCode -eq 27) { throw "Cancelled." }
-    if ($key.VirtualKeyCode -eq 13) {
-      $chosen = $dirs[$index].FullName
-      if (Confirm-Launch -Folder $chosen) { return $chosen }
-      continue
-    }
-    $index = Move-MenuIndex -Index $index -Count $lines.Count -KeyCode $key.VirtualKeyCode -PageSize $page
+    $chosen = Invoke-FolderNav
+    if (-not $chosen) { throw "Cancelled." }
+    if (Confirm-Launch -Folder $chosen) { return $chosen }
   }
 }
 
@@ -458,18 +508,14 @@ function Get-IreRecommendations {
     if ($cmd) { $py = $cmd.Source; $pyArgs = @("-3") }
     else {
       $cmd = Get-Command python -ErrorAction SilentlyContinue
-      if (-not $cmd) { Write-Host "IRE: no Python found; using the built-in model table"; return }
+      if (-not $cmd) { return }
       $py = $cmd.Source
     }
   }
   $ErrorActionPreference = "Continue"   # the helper reports on stderr; that is not a failure
   try {
-    & $py @pyArgs $helper --out $out 2>&1 | ForEach-Object {
-      $line = "$_"
-      if ($line) { Write-Host ("IRE: " + ($line -replace '^\[ire\] ', '')) }
-    }
+    $null = & $py @pyArgs $helper --out $out 2>&1   # silent: defaults are used quietly
   } catch {
-    Write-Host "IRE: helper did not run; using the built-in model table"
   }
   if (Test-Path -LiteralPath $out) { $env:CCL_IRE_JSON = $out }
 }
@@ -494,16 +540,52 @@ function Get-LadderPython {
 }
 
 function Select-Ladder {
+  # After each seat: Enter on the first row keeps the default fallback chain,
+  # or Enter on up to 3 models (in order) builds your own. Esc quits.
   param([string]$Role, [string]$PrimaryId)
   $mode = $(if ($env:CLAUDE_IH_LADDER) { $env:CLAUDE_IH_LADDER } else { "ask" })
   if ($mode -eq "off") { return }
   $py = Get-LadderPython
-  if (-not $py) { Write-Host "warning: no Python found for the ladder picker; the stock chains stay"; return }
-  $ladderArgs = @($LadderCli, "choose", "--state", $LadderState, "--role", $Role, "--primary", $PrimaryId)
-  if ($mode -eq "default" -or [Console]::IsInputRedirected) { $ladderArgs += "--non-interactive" }
-  Clear-Host
-  & $py @ladderArgs
-  if ($LASTEXITCODE -ne 0) { Write-Host "warning: ladder picker failed for $Role; the stock chains stay" }
+  if (-not $py) { return }
+  $ErrorActionPreference = "Continue"   # the helper logs on stderr; that is not a failure
+  $null = & $py $LadderCli choose --state $LadderState --role $Role --primary $PrimaryId --non-interactive 2>&1
+  if (-not $PrimaryId -or $mode -eq "default" -or [Console]::IsInputRedirected) { return }
+  $default = @()
+  try { $default = @((Get-Content -LiteralPath $LadderState -Raw -Encoding UTF8 | ConvertFrom-Json).$Role.fallbacks) } catch {}
+  $choices = @($Models | Where-Object { $_.Id -ne $PrimaryId })
+  $picks = New-Object System.Collections.ArrayList
+  $help = @(
+    "Enter on the first row keeps that chain. Enter on a model adds it as the next fallback (up to 3).",
+    "Up/Down/PgUp/PgDn/Home/End. Esc quits."
+  )
+  $index = 0
+  while ($true) {
+    if ($picks.Count -gt 0) { $top = "   Use my chain: " + $PrimaryId + " > " + ($picks -join " > ") }
+    elseif ($default.Count -gt 0) { $top = "   Default chain: " + $PrimaryId + " > " + ($default -join " > ") }
+    else { $top = "   Default chain: (no fallbacks)" }
+    $lines = @($top) + @(foreach ($m in $choices) {
+      $n = $picks.IndexOf($m.Id)
+      $mark = $(if ($n -ge 0) { "[" + ($n + 1) + "]" } else { "   " })
+      $tag = $(if ($m.Eligible) { "eligible" } else { "gated" })
+      "{0}{1,2}  {2,-28} {3,-42} {4}  ~{5}/Mtok" -f $mark, $m.Rank, $m.Name, $m.Id, $tag, $m.Cost
+    })
+    Show-Picker -Title ("Fallback chain for " + $Role.ToUpper() + " (" + $PrimaryId + ")") -Lines $lines -Index $index -Help $help
+    $key = Read-MenuKey
+    $page = (Get-ConsoleLayout -HelpCount $help.Count).MaxItems
+    if ($key.VirtualKeyCode -eq 27) { throw "Cancelled." }
+    if ($key.VirtualKeyCode -eq 13) {
+      if ($index -eq 0) { break }
+      $id = $choices[$index - 1].Id
+      if ($picks.IndexOf($id) -lt 0) { $picks.Add($id) | Out-Null }
+      if ($picks.Count -ge 3) { break }
+      continue
+    }
+    $index = Move-MenuIndex -Index $index -Count $lines.Count -KeyCode $key.VirtualKeyCode -PageSize $page
+  }
+  if ($picks.Count -gt 0) {
+    $null = & $py $LadderCli choose --state $LadderState --role $Role --primary $PrimaryId --picks ($picks -join ",") 2>&1
+    if ($LASTEXITCODE -ne 0) { Write-Host "warning: those fallbacks were not accepted; the default chain stays" }
+  }
 }
 
 function Apply-Ladder {
@@ -511,11 +593,13 @@ function Apply-Ladder {
   if (-not (Test-Path -LiteralPath $LadderState)) { return }
   $py = Get-LadderPython
   if (-not $py) { return }
-  & $py $LadderCli apply --state $LadderState --base-url $ProxyBase
+  $ErrorActionPreference = "Continue"
+  $null = & $py $LadderCli apply --state $LadderState --base-url $ProxyBase 2>&1
   if ($LASTEXITCODE -ne 0) { Write-Host "warning: could not apply the fallback ladders; the stock chains stay" }
 }
 
 # ---- interactive flow ----
+if ($env:CCL_LAUNCHER_LIBRARY_ONLY -eq "1") { return }   # tests dot-source the functions only
 Get-IreRecommendations
 Remove-Item -LiteralPath $LadderState -ErrorAction SilentlyContinue
 $main = Select-MainModel
