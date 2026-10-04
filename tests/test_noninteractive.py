@@ -122,8 +122,11 @@ def test_print_env_json_with_claude_ai_login(kind, box, health_port):
     s = doc["set"]
     assert s["ANTHROPIC_BASE_URL"] == f"http://127.0.0.1:{health_port}"
     assert s["ANTHROPIC_MODEL"] == "sonnet"
-    assert s["ANTHROPIC_SMALL_FAST_MODEL"] == "small-fast"
+    assert "ANTHROPIC_SMALL_FAST_MODEL" not in s   # deprecated; the haiku pin covers it
     assert s["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "claude-haiku-4-5-20251001"
+    assert s["ANTHROPIC_DEFAULT_OPUS_MODEL"] == "claude-opus-5-5"
+    assert s["ANTHROPIC_DEFAULT_FABLE_MODEL"] == "claude-fable-5"
+    assert s["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == "272000"
     assert s["CLAUDE_CODE_WORKFLOWS"] == "1"
     assert "ANTHROPIC_API_KEY" not in s          # the claude.ai login stays in charge
     assert not set(s) & LEAKS                     # nothing inherited leaks through

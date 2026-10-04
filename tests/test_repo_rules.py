@@ -81,24 +81,24 @@ def test_one_mac_launcher():
     assert "paths:" not in ci  # every PR must report every required check
 
 
-def test_launchers_pin_every_claude_tier_to_a_seat_alias():
-    # A tier Claude Code resolves on its own (e.g. haiku -> claude-haiku-4-5-20251001)
-    # is not served by the proxy and 400s, so both launchers pin all four tiers.
-    import importlib.util
+def test_launchers_pin_every_claude_slot_to_a_name_the_slot_serves():
+    # A slot Claude Code resolves on its own (e.g. haiku -> claude-haiku-4-5-20251001)
+    # must land on that slot's chain, so both launchers pin all four slots (issue #53),
+    # and neither sets the deprecated small-fast variable or opusplan.
+    import slots
 
-    spec = importlib.util.spec_from_file_location(
-        "seat", REPO / "shared" / "litellm" / "scripts" / "apply_inferhub_seat.py")
-    seat = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(seat)
-    served = {"SONNET": seat.MAIN_ALIASES, "OPUS": seat.ADVISOR_ALIASES,
-              "FABLE": seat.ADVISOR_ALIASES, "HAIKU": seat.FAST_ALIASES}
     win = (REPO / "windows" / "launch-claude-inferhub.ps1").read_text(encoding="utf-8")
     mac = (REPO / "mac" / "Launch Claude InferHub.command").read_text(encoding="utf-8")
-    for tier, names in served.items():
+    for slot, names in slots.SLOT_NAMES.items():
+        tier = slot.upper()
         w = re.search(rf'\$env:ANTHROPIC_DEFAULT_{tier}_MODEL = "([^"]+)"', win)
         m = re.search(rf'export ANTHROPIC_DEFAULT_{tier}_MODEL="([^"]+)"', mac)
-        assert w and w.group(1) in names, tier
+        assert w and w.group(1) in names and w.group(1) == slots.PINS[slot], tier
         assert m and m.group(1) == w.group(1), tier
+    for text in (win, mac):
+        assert "$env:ANTHROPIC_SMALL_FAST_MODEL =" not in text and "export ANTHROPIC_SMALL_FAST_MODEL" not in text
+        assert not re.search(r'"opusplan"|--model opusplan|=opusplan', text)
+        assert not re.search(r"defaultMode|permission-mode plan|EnterPlanMode", text)
 
 
 def test_launchers_leave_the_claude_ai_login_in_charge_when_keyless():

@@ -221,8 +221,8 @@ def test_frontier_comes_from_the_json(monkeypatch, env):
     check_contract(b)
     routes = [r["route"] for r in b["frontier"]]
     assert "xx/disabled-route" not in routes  # disabled routes are left out
-    # CKFF is off: the Astra routes (CKFF failover hop) are never offered (2026-10-04)
-    assert not [r for r in routes if "astra" in r]
+    # CKFF is off, but InferHub's Astra routes are not CKFF and stay (issue #53)
+    assert "cb/gpt-6-astra" in routes and not [r for r in routes if "ckff" in r]
     raw = [r["route"] for r in F.parse_frontier_json((FIX / "frontier.json").read_text(encoding="utf-8"))]
     assert raw[0] == "cb/gpt-6-astra" and raw.index("cb/gpt-6-astra") < raw.index("cx/gpt-6-astra")
     sol = next(r for r in b["frontier"] if r["route"] == "cx/gpt-6.1-sol")
@@ -379,7 +379,7 @@ def test_frontier_recommendations_csv_alone_gives_best_routes(monkeypatch, env):
         F.FRONTIER_MODELS_CSV_PATH: (FIX / "frontier_recommendations.csv").read_bytes()}))
     b = F.get_recommendations(directory=env)
     check_contract(b)
-    assert [r["route"] for r in b["frontier"]] == ["cc/claude-fable-5-1"]  # Astra dropped (CKFF off)
+    assert [r["route"] for r in b["frontier"]] == ["cb/gpt-6-astra", "cc/claude-fable-5-1"]  # InferHub Astra is not CKFF
     assert all(r["best_route"] and r["eligible"] for r in b["frontier"])
 
 
@@ -419,9 +419,9 @@ def test_builtin_table_matches_the_mac_launcher_fallback():
     assert block.strip().splitlines() == F.shell_table(F.load_defaults()).strip().splitlines()
 
 
-# ---- CKFF is off (2026-10-04): no CKFF/Astra route in any list ----
+# ---- CKFF is off (2026-10-04): no CKFF route in any list; InferHub Astra stays ----
 
-def test_without_ckff_drops_ckff_and_astra_everywhere():
+def test_without_ckff_drops_ckff_everywhere_but_keeps_inferhub_astra():
     b = F.load_defaults()
     b["top20"] = [{"rank": 1, "name": "Mix", "eligible": True, "cost_per_mtok": 0.01,
                    "ids": ["ckff/x", "cb/deepseek-v4.1-flash"]},
@@ -431,18 +431,23 @@ def test_without_ckff_drops_ckff_and_astra_everywhere():
                      {"rank": 2, "route": "ckff_astra", "name": "x"},
                      {"rank": 3, "route": "cc/claude-fable-5-1", "name": "Claude Fable 5.1"}]
     b["ladders"] = {"main": ["ckff_astra", "cb/deepseek-v4.1-flash"], "advisor": ["cx/gpt-6-astra"]}
+    b["ladders"]["fast"] = ["ckff_astra"]
     out = F.validate(b)
     flat = json.dumps(out).lower()
-    assert "ckff" not in flat and "astra" not in flat
+    assert "ckff" not in flat
     assert out["top20"][0]["ids"] == ["cb/deepseek-v4.1-flash"]
-    assert [r["route"] for r in out["frontier"]] == ["cc/claude-fable-5-1"]
+    assert out["top20"][1]["ids"] == ["cb/gpt-6-astra"]
+    assert [r["route"] for r in out["frontier"]] == ["cx/gpt-6-astra", "cc/claude-fable-5-1"]
     assert out["ladders"]["main"] == ["cb/deepseek-v4.1-flash"]
-    assert out["ladders"]["advisor"] == F.load_defaults()["ladders"]["advisor"]  # emptied -> built-in
+    assert out["ladders"]["advisor"] == ["cx/gpt-6-astra"]
+    if F.load_defaults()["ladders"].get("fast"):
+        assert out["ladders"]["fast"] == F.load_defaults()["ladders"]["fast"]  # emptied -> built-in
 
 
-def test_cache_with_astra_is_cleaned(env):
+def test_cache_with_ckff_is_cleaned_and_inferhub_astra_kept(env):
     b = F.load_defaults()
-    b["frontier"] = [{"rank": 1, "route": "cb/gpt-6-astra", "name": "GPT 6 Astra"}]
+    b["frontier"] = [{"rank": 1, "route": "cb/gpt-6-astra", "name": "GPT 6 Astra"},
+                     {"rank": 2, "route": "ckff/gpt-6-astra", "name": "GPT 6 Astra (CKFF)"}]
     F.write_cache(env, b, "abc", "2026-10-04T00:00:00Z")
     rec = F.read_cache(env)
-    assert rec and rec["bundle"]["frontier"] == []
+    assert rec and [r["route"] for r in rec["bundle"]["frontier"]] == ["cb/gpt-6-astra"]

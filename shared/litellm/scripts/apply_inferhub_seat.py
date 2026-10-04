@@ -1,38 +1,34 @@
 #!/usr/bin/env python3
-"""Write Claude-facing InferHub seat aliases into config/inferhub_aliases.yaml.
+"""Write the slot names Claude Code calls into config/inferhub_aliases.yaml.
 
-Seat file (config/inferhub_seat.json):
+Claude Code has four model slots (sonnet, opus, haiku, fable; see slots.py). Each
+slot is a chain of real InferHub routes. This writes, for every slot:
+  - one entry per name the slot answers to (sonnet, claude-sonnet-5, ...), all
+    pointing at the slot's first model;
+  - one entry per fallback model, named ccl-<slot>-2, ccl-<slot>-3, ...: the slot's
+    own copies, so a bench caused by one slot's traffic never benches another.
+merge_litellm_config.py then wires the fallbacks, retries and benching.
+
+Seat file (config/inferhub_seat.json), written by the launchers from the onboarding picks:
   {
-    "main_inferhub_id": "cb/deepseek-v4.1-flash",
-    "advisor_inferhub_id": "cbcn/glm-5.3"   # or null / omit when OFF
+    "version": 2,
+    "slots": {"sonnet": ["cb/deepseek-v4.1-flash", "ali/qwen3.8-flash", "cbcn/glm-5.3-flash"],
+              "opus": [...], "haiku": [...], "fable": [...]},
+    "main_inferhub_id": ..., "advisor_inferhub_id": ..., "fast_inferhub_id": ...   # first models, for older readers
   }
+A slot missing from the file uses the default chain in config/inferhub_fallbacks.yaml.
+Older seat files (main/advisor/fast only) are read as "no picks yet": the defaults apply.
 
-Aliases (InferHub seats; include Claude Code API ids so local Claude works):
-  main / sonnet / claude-sonnet-5 / ih-main / ih-sonnet / inferhub-sonnet  -> main seat
-  advisor / opus / claude-opus-5-5 / claude-fable-5 / claude-fable-5-1 /
-    ih-advisor / ih-opus / inferhub-opus -> advisor seat
-  (if advisor OFF, advisor aliases also point at main so /advisor opus still resolves)
-  haiku / claude-haiku-5 / claude-haiku-4-5-20251001 / small-fast / ih-haiku / ih-small-fast / inferhub-haiku
-    -> fast seat (Claude Code background/small-fast calls). Default fast seat is
-    cb/deepseek-v4.1-flash; set "fast_inferhub_id" in the seat file or pass --fast
-    (empty string = use the main seat). The fast aliases get their own fallback
-    chain in config/inferhub_fallbacks.yaml (role "fast"). claude-haiku-4-5 (no date) is
-    also aliased to the fast seat while CKFF is off (the default since 2026-10-04,
-    config/providers.yaml); with CKFF on it is left alone because CKFF serves that
-    name. The dated id is Claude Code's own haiku name, so the launchers pin the
-    haiku tier to it.
+Command line:
+  --slot sonnet=id1,id2,id3   set one slot's chain (repeatable)
+  --main / --advisor / --fast ID   older launchers: the first model of sonnet / fable /
+                              haiku, keeping the rest of that slot's chain (empty = keep)
 
-Opt-in seats (never the default): cx/gpt-6.1-sol may be picked as main or
-advisor with --main/--advisor or in the seat file. cx routes go over chat
-completions and send the system prompt as a "developer" message.
-
-These Claude Code ids (claude-sonnet-5, claude-opus-5-5, claude-fable-*) are distinct
-from CKFF catalog names (e.g. claude-sonnet-4-5) and must be InferHub seat aliases.
+cx/ routes go through LiteLLM's Responses mode. CKFF routes are never written.
 
 After writing, optionally merge into config/runtime.yaml and hot-reload the
-running proxy via POST /workbench/reload_runtime (no :4000 downtime).
-Use --no-reload / --no-merge when the proxy is not expected to be up
-(e.g. during start-litellm.ps1 boot).
+running proxy via POST /workbench/reload_runtime. Use --no-reload / --no-merge
+when the proxy is not expected to be up (e.g. during start-litellm.ps1 boot).
 """
 from __future__ import annotations
 
@@ -44,36 +40,13 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import provider_switch  # noqa: E402
+import slots  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SEAT = ROOT / "config" / "inferhub_seat.json"
 DEFAULT_OUT = ROOT / "config" / "inferhub_aliases.yaml"
 DEFAULT_API_BASE = "https://api.inferhub.dev/v1"
-
-MAIN_ALIASES = ["main", "sonnet", "claude-sonnet-5", "ih-main", "ih-sonnet", "inferhub-sonnet"]
-FAST_ALIASES = ["haiku", "claude-haiku-5", "claude-haiku-4-5-20251001", "small-fast", "ih-haiku", "ih-small-fast", "inferhub-haiku"]
-# Only used when CKFF is off; with CKFF on, CKFF owns this name.
-CKFF_OWNED_FAST_ALIASES = ["claude-haiku-4-5"]
-DEFAULT_FAST_ID = "cb/deepseek-v4.1-flash"
-# The old default. Every seat file written before the change carries it even though no
-# launcher ever offered a fast-seat pick, so it is read as "not picked".
-OLD_DEFAULT_FAST_ID = "ali/qwen3.8-flash"
-# Seats that are allowed but never chosen by default. Any other id is passed
-# through as-is (Top 20 ids are the normal choice).
-OPT_IN_SEAT_IDS = {
-    "cx/gpt-6.1-sol": "cx route: chat completions; system prompt is sent as a developer message",
-}
-ADVISOR_ALIASES = [
-    "advisor",
-    "opus",
-    "claude-opus-5-5",
-    "claude-fable-5",
-    "claude-fable-5-1",
-    "ih-advisor",
-    "ih-opus",
-    "inferhub-opus",
-]
+LEGACY_FLAG_SLOT = {"main": "sonnet", "advisor": "fable", "fast": "haiku"}
 
 
 def yaml_escape(s: str) -> str:
@@ -93,15 +66,19 @@ def litellm_model(inferhub_id: str) -> str:
     return f"openai/{inferhub_id}"
 
 
-def entry(alias: str, inferhub_id: str, api_base: str, role: str) -> list[str]:
+def entry(name: str, inferhub_id: str, api_base: str, slot: str, rung: int, last: bool) -> list[str]:
+    what = "first model" if rung == 1 else f"fallback {rung}"
     return [
-        f"  - model_name: {yaml_escape(alias)}",
+        f"  - model_name: {yaml_escape(name)}",
         "    litellm_params:",
         f"      model: {litellm_model(inferhub_id)}",
         f"      api_base: {api_base}",
         "      api_key: os.environ/INFERHUB_API_KEY",
         "    model_info:",
-        f"      description: {yaml_escape(f'InferHub Claude seat ({role}) -> {inferhub_id}')}",
+        f"      description: {yaml_escape(f'Claude Code slot {slot}, {what} -> {inferhub_id}')}",
+        f"      ccl_slot: {slot}",
+        f"      ccl_rung: {rung}",
+        f"      ccl_last: {'true' if last else 'false'}",
         "",
     ]
 
@@ -112,79 +89,75 @@ def run_helper(script: str, args: list[str]) -> int:
     return subprocess.call(cmd)
 
 
+def read_seat(path: Path) -> dict:
+    if not path.is_file():
+        return {}
+    try:
+        # utf-8-sig: Windows PowerShell 5.1 Set-Content -Encoding UTF8 writes a BOM
+        doc = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError) as e:
+        print(f"warning: ignoring unreadable seat file {path}: {e}", file=sys.stderr)
+        return {}
+    return doc if isinstance(doc, dict) else {}
+
+
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--seat", type=Path, default=DEFAULT_SEAT)
     ap.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    ap.add_argument("--fallbacks", type=Path, default=slots.DEFAULT_FALLBACKS)
     ap.add_argument("--api-base", default=DEFAULT_API_BASE)
-    ap.add_argument("--main", default=None, help="Override main InferHub model id")
-    ap.add_argument("--advisor", default=None, help="Override advisor id; empty string = OFF")
-    ap.add_argument("--fast", default=None,
-                    help=f"Override fast/haiku seat id (default {DEFAULT_FAST_ID}); empty string = use main seat")
+    ap.add_argument("--slot", action="append", default=[], help="NAME=id1,id2,... (repeatable)")
+    ap.add_argument("--main", default=None, help="older launchers: first model of the sonnet slot")
+    ap.add_argument("--advisor", default=None, help="older launchers: first model of the fable slot")
+    ap.add_argument("--fast", default=None, help="older launchers: first model of the haiku slot")
     ap.add_argument("--merge", dest="merge", action="store_true", default=True,
                     help="Also merge into config/runtime.yaml (default)")
-    ap.add_argument("--no-merge", dest="merge", action="store_false",
-                    help="Skip merge_litellm_config.py")
+    ap.add_argument("--no-merge", dest="merge", action="store_false", help="Skip merge_litellm_config.py")
     ap.add_argument("--reload", dest="reload", action="store_true", default=True,
-                    help="Hot-reload running proxy seat aliases (default)")
-    ap.add_argument("--no-reload", dest="reload", action="store_false",
-                    help="Skip live reload (proxy may be down)")
+                    help="Hot-reload the running proxy (default)")
+    ap.add_argument("--no-reload", dest="reload", action="store_false", help="Skip live reload (proxy may be down)")
     ap.add_argument("--base-url", default=None, help="Proxy base URL for reload")
     args = ap.parse_args()
 
-    seat = {}
-    if args.seat.is_file():
-        # utf-8-sig: Windows PowerShell 5.1 Set-Content -Encoding UTF8 writes a BOM
-        seat = json.loads(args.seat.read_text(encoding="utf-8-sig"))
-    main_id = args.main if args.main is not None else seat.get("main_inferhub_id")
-    if args.advisor is not None:
-        advisor_id = args.advisor.strip() or None
-    else:
-        advisor_id = seat.get("advisor_inferhub_id") or None
+    seat = read_seat(args.seat)
+    overrides = {}
+    try:
+        for spec in args.slot:
+            name, chain = slots.parse_slot_arg(spec)
+            overrides[name] = chain
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+    chains = slots.resolve_slots(seat, overrides, args.fallbacks)
+    for flag, slot in LEGACY_FLAG_SLOT.items():
+        first = (getattr(args, flag) or "").strip()
+        if first and slot not in overrides:
+            chains[slot] = slots.normalize_chain([first] + [c for c in chains[slot] if c != first])
+    ckff_on = slots.ckff_enabled()
 
-    if not main_id:
-        print("ERROR: main_inferhub_id required (seat file or --main)", file=sys.stderr)
-        return 1
-
-    if args.fast is not None:
-        fast_id = args.fast.strip() or None
-    elif "fast_inferhub_id" in seat and seat.get("fast_inferhub_id") != OLD_DEFAULT_FAST_ID:
-        fast_id = seat.get("fast_inferhub_id") or None
-    else:
-        fast_id = DEFAULT_FAST_ID
-    fast_effective = fast_id or main_id
-
-    for role, mid in (("main", main_id), ("advisor", advisor_id), ("fast", fast_id)):
-        if mid in OPT_IN_SEAT_IDS:
-            print(f"note: opt-in {role} seat {mid} ({OPT_IN_SEAT_IDS[mid]})")
-
-    advisor_effective = advisor_id or main_id
-    advisor_role = "advisor" if advisor_id else "advisor-OFF-fallback-main"
-
+    base = args.api_base.rstrip("/")
     now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     lines = [
         "# GENERATED by scripts/apply_inferhub_seat.py — do not hand-edit.",
         f"# Generated: {now}",
-        f"# main -> {main_id}",
-        f"# advisor -> {advisor_effective} ({'ON' if advisor_id else 'OFF'})",
-        f"# fast/haiku -> {fast_effective}",
-        "# Claude Code expands sonnet/opus to claude-sonnet-5 / claude-opus-5-5 / fable ids; map those to InferHub seats (not CKFF).",
-        "model_list:",
+        "# Claude Code slots -> InferHub routes (first model, then fallbacks). Never CKFF.",
     ]
-    for a in MAIN_ALIASES:
-        lines.extend(entry(a, main_id, args.api_base.rstrip("/"), "main"))
-    for a in ADVISOR_ALIASES:
-        lines.extend(entry(a, advisor_effective, args.api_base.rstrip("/"), advisor_role))
-    fast_aliases = list(FAST_ALIASES)
-    if not provider_switch.ckff_enabled():
-        fast_aliases += CKFF_OWNED_FAST_ALIASES
-    for a in fast_aliases:
-        lines.extend(entry(a, fast_effective, args.api_base.rstrip("/"), "fast" if fast_id else "fast-fallback-main"))
+    lines += [f"# {s}: {' -> '.join(chains[s])}" for s in slots.SLOTS]
+    lines.append("model_list:")
+    for s in slots.SLOTS:
+        chain = chains[s]
+        for name in slots.slot_names(s, ckff_on):
+            lines.extend(entry(name, chain[0], base, s, 1, len(chain) == 1))
+        for i, route in enumerate(chain[1:], start=2):
+            lines.extend(entry(slots.rung_name(s, i), route, base, s, i, i == len(chain)))
 
     out_seat = {
-        "main_inferhub_id": main_id,
-        "advisor_inferhub_id": advisor_id,
-        "fast_inferhub_id": fast_id,
+        "version": 2,
+        "slots": {s: chains[s] for s in slots.SLOTS},
+        "main_inferhub_id": chains["sonnet"][0],
+        "advisor_inferhub_id": chains["fable"][0],
+        "fast_inferhub_id": chains["haiku"][0],
         "updated_at": now,
     }
     args.seat.parent.mkdir(parents=True, exist_ok=True)
@@ -192,23 +165,22 @@ def main() -> int:
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
-    print(f"Wrote aliases to {args.out}")
-    print(f"Seat: main={main_id} advisor={advisor_id or 'OFF'} fast={fast_effective}")
+    print(f"Wrote slot names to {args.out}")
+    for s in slots.SLOTS:
+        print(f"Slot {s}: {' -> '.join(chains[s])}")
 
     if args.merge:
-        # merge itself may reload; pass --no-reload here and reload once below
         rc = run_helper("merge_litellm_config.py", ["--no-reload"])
         if rc != 0:
             return rc
-
     if args.reload:
-        reload_args = ["--scope", "seat"]
+        # "all": the slot chains change fallbacks too, not only the names
+        reload_args = ["--scope", "all"]
         if args.base_url:
             reload_args.extend(["--base-url", args.base_url])
         rc = run_helper("reload_runtime.py", reload_args)
         if rc != 0:
             return rc
-
     return 0
 
 

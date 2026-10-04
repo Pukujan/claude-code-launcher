@@ -50,10 +50,10 @@ _ENV_REF = re.compile(r"\$\{([^}]+)\}")
 
 
 def is_ckff(route_id: str, route: dict | None = None) -> bool:
-    """CKFF is never offered: by id (ckff-*, claude-ckff-*, any Astra route such as
-    ckff_astra, the CKFF failover hop) or by upstream host."""
+    """CKFF is never offered: by id (anything with "ckff": ckff-*, ckff_astra,
+    claude-ckff-*) or by upstream host. InferHub's Astra routes are not CKFF."""
     rid = (route_id or "").lower()
-    if rid.startswith("ckff") or rid.startswith("claude-ckff") or "astra" in rid:
+    if "ckff" in rid:
         return True
     up = str((route or {}).get("upstream") or "").lower()
     return "ckff" in urllib.parse.urlsplit(up).netloc

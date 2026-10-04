@@ -72,19 +72,21 @@ POLICY_RE = re.compile(
 )
 
 
-# CKFF is off (Alex, 2026-10-04): never offer a CKFF route, Astra (ckff_astra,
-# GPT 6 Astra, the CKFF failover hop) included. IRE's lists can still carry
-# them, so every bundle drops them before it is used (see validate()).
-CKFF_RE = re.compile(r"ckff|astra", re.IGNORECASE)
+# CKFF is off (Alex, 2026-10-04): never offer a CKFF route (ckff/..., ckff-aws/...,
+# ckff_astra, claude-ckff-*). IRE's lists can still carry them, so every bundle
+# drops them before it is used (see validate()). Only "ckff" marks a CKFF route:
+# InferHub's cb/gpt-6-astra and cx/gpt-6-astra are InferHub routes and stay
+# (cb/gpt-6-astra is the opus slot's first model, issue #53).
+CKFF_RE = re.compile(r"ckff", re.IGNORECASE)
 
 
 def is_ckff(*texts) -> bool:
-    """True when any of the given ids or names is a CKFF/Astra route."""
+    """True when any of the given ids or names is a CKFF route."""
     return any(isinstance(x, str) and CKFF_RE.search(x) for x in texts)
 
 
 def without_ckff(bundle: dict, default_ladders: dict | None = None) -> dict:
-    """The bundle with CKFF/Astra routes removed from the Top 20, the frontier list
+    """The bundle with CKFF routes removed from the Top 20, the frontier list
     and the ladders. A ladder left empty takes the built-in one for that seat."""
     out = dict(bundle)
     top = []
@@ -96,8 +98,7 @@ def without_ckff(bundle: dict, default_ladders: dict | None = None) -> dict:
             top.append(dict(r, ids=ids))
     out["top20"] = top
     out["frontier"] = [r for r in out.get("frontier") or []
-                       if isinstance(r, dict) and not is_ckff(r.get("route"), r.get("name"))
-                       and not r.get("is_astra_owner_route")]
+                       if isinstance(r, dict) and not is_ckff(r.get("route"), r.get("name"))]
     lad = dict(out.get("ladders") or {})
     for seat, chain in list(lad.items()):
         if not isinstance(chain, list):

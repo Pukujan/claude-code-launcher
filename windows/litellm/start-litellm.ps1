@@ -245,9 +245,9 @@ if ($needInstall) {
 # --- Build InferHub fragments + merge runtime config ---
 $SeatPath = Join-Path $LiteLLMRoot 'config\inferhub_seat.json'
 if (-not (Test-Path -LiteralPath $SeatPath)) {
+    # No slots yet: apply_inferhub_seat.py uses the default chains in inferhub_fallbacks.yaml.
     $defaultSeat = @{
-        main_inferhub_id = 'cb/deepseek-v4.1-flash'
-        advisor_inferhub_id = $null
+        version = 2
         updated_at = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
     } | ConvertTo-Json
     # UTF-8 without a BOM: PS 5.1's -Encoding UTF8 adds one and json.loads rejects it.
@@ -269,7 +269,7 @@ if (-not $SkipSync -or -not (Test-Path -LiteralPath $Top20Yaml)) {
     if ($LASTEXITCODE -ne 0) { throw "sync_inferhub_top20.py failed: $LASTEXITCODE" }
 }
 
-Write-Host 'Applying InferHub Claude seat aliases ...'
+Write-Host 'Writing the Claude Code slot chains ...'
 & $Python (Join-Path $PythonScripts 'apply_inferhub_seat.py') --api-base $ihUrl --no-reload
 if ($LASTEXITCODE -ne 0) { throw "apply_inferhub_seat.py failed: $LASTEXITCODE" }
 

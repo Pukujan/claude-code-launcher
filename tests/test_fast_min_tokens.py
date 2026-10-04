@@ -6,11 +6,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "shared" / "litellm"))
 import fast_min_tokens as fmt  # noqa: E402
 sys.path.insert(0, str(ROOT / "shared" / "litellm" / "scripts"))
-import apply_inferhub_seat as seat  # noqa: E402
 
 
-def test_fast_aliases_match_the_seat_script():
-    assert fmt.FAST_ALIASES == set(seat.FAST_ALIASES)
+def test_fast_aliases_match_the_haiku_slot():
+    import slots
+    assert fmt.FAST_ALIASES == set(slots.slot_names("haiku", ckff_on=False))
 
 
 def test_floor_raises_small_fast_requests_only():

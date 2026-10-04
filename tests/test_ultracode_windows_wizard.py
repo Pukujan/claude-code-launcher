@@ -1,4 +1,4 @@
-"""Windows launcher: Steps 9 and 10 (UltraCode orchestrator/worker), driven with
+"""Windows launcher: the slot steps and Steps 9 and 10 (UltraCode orchestrator/worker), driven with
 scripted keys in library mode. Needs pwsh and uv; skipped when either is missing
 (GitHub's ubuntu runners have both). Refs #40."""
 import json
@@ -19,11 +19,10 @@ foreach ($d in "C", "D") { if (-not (Get-PSDrive $d -ErrorAction SilentlyContinu
 $ProxyPort = 4017
 $ProxyBase = "http://127.0.0.1:4017"
 function Get-UltraCodeShim { return $env:CCL_FAKE_SHIM }
-function Get-DefaultChain { param([string]$Role, [string]$PrimaryId) return @() }
 $script:NavQuiet = $true
 $script:NavKeys = [System.Collections.ArrayList]@($env:CCL_KEYS.Split(","))
 $w = Invoke-LaunchWizard
-@{ launch = $w.Launch; orch = $w.UcOrch; worker = $w.UcWorker; main = $w.Main.Id; trace = @($script:NavTrace) } | ConvertTo-Json -Compress
+@{ launch = $w.Launch; orch = $w.UcOrch; worker = $w.UcWorker; sonnet = @($w.Slots.sonnet); haiku_same = $w.Slots.haiku_same; trace = @($script:NavTrace) } | ConvertTo-Json -Compress
 """
 
 
@@ -48,28 +47,33 @@ def run(tmp_path, keys):
     return result, json.loads(picks.read_text()), (json.loads(cfg.read_text()) if cfg.exists() else None)
 
 
-# main Enter, 2nd model Enter (none), advisor Enter (OFF), folder Enter, launch Down+Enter
-TO_LAUNCH = "Enter,Enter,Enter,Enter,DownArrow,Enter"
+# First run (no saved slots): sonnet, opus, fable 3 Enters each (default chains), haiku
+# Enter ("same chain as sonnet"), folder Enter, launch Down+Enter (UltraCode).
+SLOTS_DEFAULT = ",".join(["Enter"] * 10)
+TO_LAUNCH = SLOTS_DEFAULT + ",Enter,DownArrow,Enter"
 
 
 def test_ultracode_picks_orchestrator_and_worker(tmp_path):
-    result, picks, cfg = run(tmp_path, TO_LAUNCH + ",Enter,DownArrow,DownArrow,Enter")
+    # the fable slot always has a model now, so the list is main, advisor, fast
+    result, picks, cfg = run(tmp_path, TO_LAUNCH + ",Enter,DownArrow,DownArrow,DownArrow,Enter")
     assert result["launch"] == "ultracode", result["trace"]
     assert result["orch"] == "claude-ih-main"        # default orchestrator
-    assert result["worker"] == "claude-ih-fast"       # Same, main, fast
+    assert result["worker"] == "claude-ih-fast"       # Same, main, advisor, fast
     assert picks["launch"] == "ultracode"
     assert picks["uc_orch"] == "claude-ih-main" and picks["uc_worker"] == "claude-ih-fast"
     assert cfg["proxy"]["listen_port"] == 4241 + 4017
     assert cfg["proxy"]["anthropic_upstream"] == "http://127.0.0.1:4017"
     assert not [m for m in cfg["models"] if "ckff" in m["id"]]
-    # Next run highlights last time's picks: Enter, Enter keeps them.
-    result2, _, _ = run(tmp_path, TO_LAUNCH.replace("DownArrow,", "") + ",Enter,Enter")
+    assert result["sonnet"] == ["cb/deepseek-v4.1-flash", "ali/qwen3.8-flash", "cbcn/glm-5.3-flash"]
+    assert result["haiku_same"] is True and picks["version"] == 2 and picks["slots"]["opus"][0] == "cb/gpt-6-astra"
+    # Next run: Step 1 Enter keeps the saved slots, then folder, launch, orch, worker Enter.
+    result2, _, _ = run(tmp_path, "Enter,Enter,Enter,Enter,Enter")
     assert (result2["orch"], result2["worker"]) == ("claude-ih-main", "claude-ih-fast")
 
 
 def test_same_as_orchestrator_and_left_goes_back(tmp_path):
     # Left on Step 9 returns to "launch with"; Enter there keeps UltraCode.
-    result, picks, _ = run(tmp_path, TO_LAUNCH + ",DownArrow,LeftArrow,Enter,DownArrow,Enter,Enter")
+    result, picks, _ = run(tmp_path, TO_LAUNCH + ",DownArrow,LeftArrow,Enter,DownArrow,DownArrow,Enter,Enter")
     assert result["launch"] == "ultracode"
     assert result["orch"] == "claude-ih-fast"
     assert result["worker"] in ("", None)
@@ -78,6 +82,17 @@ def test_same_as_orchestrator_and_left_goes_back(tmp_path):
 
 
 def test_claude_code_launch_skips_the_ultracode_steps(tmp_path):
-    result, picks, _ = run(tmp_path, "Enter,Enter,Enter,Enter,Enter")
+    result, picks, _ = run(tmp_path, SLOTS_DEFAULT + ",Enter,Enter")
     assert result["launch"] == "claude" and not result["orch"]
     assert "uc_orch" not in picks
+
+
+def test_saved_slots_change_path_and_back_key(tmp_path):
+    # Step 1 Down+Enter = change; sonnet first model Down picks the 2nd row; Left on the
+    # next step goes back to it; then Enter through the rest.
+    run(tmp_path, SLOTS_DEFAULT + ",Enter,Enter")
+    result, picks, _ = run(tmp_path, "DownArrow,Enter,Enter,LeftArrow,Enter," + ",".join(["Enter"] * 9) + ",Enter,Enter")
+    assert result["launch"] == "claude"
+    assert any("back" in t for t in result["trace"]), result["trace"]
+    assert picks["slots"]["sonnet"][0] == "cb/deepseek-v4.1-flash"
+    assert len(picks["slots"]["fable"]) == 3

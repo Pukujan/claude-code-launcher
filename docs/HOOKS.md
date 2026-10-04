@@ -27,9 +27,11 @@ both launchers (`HOOK(ire)`); its README has the output schema.
 
 ## Fallback ladder picker (issue #5)
 
-This hook is now filled. Both launchers call `shared/ladder/ladder_cli.py`
-right after each seat is picked, and once more after the last seat apply. See
-`shared/ladder/README.md` for how it works. In short:
+Since issue #53 the slot chains (a first model and up to two fallbacks per
+Claude Code slot, picked in the launcher) replace the ladder on Windows, and
+the Mac launcher only runs it when `CLAUDE_IH_LADDER=ask` or `=default`. The rest of this section
+describes the ladder for that case. `shared/ladder/README.md` has the details.
+In short:
 
 - The default ladder comes from `shared/ladder/inputs.py` `load_inputs()`. It
   uses an IRE bundle when one is available and otherwise the Top 20 table plus
@@ -90,20 +92,22 @@ right after each seat is picked, and once more after the last seat apply. See
   usable logs `<source> gave 0 usable results ...`. Run the setup
   with `-Uninstall` to remove the task; the proxy needs a restart to pick up a
   changed chain.
-- **Fast seat max_tokens floor.** WebFetch summaries go to the fast seat with a
+- **Haiku slot max_tokens floor.** WebFetch summaries go to the haiku slot with a
   small `max_tokens`; reasoning models could spend all of it thinking and send
   back nothing. `shared/litellm/fast_min_tokens.py` raises `max_tokens` to 4096
-  for the fast aliases only. `CCL_FAST_MIN_MAX_TOKENS` changes the floor (0
+  for the haiku slot names only. `CCL_FAST_MIN_MAX_TOKENS` changes the floor (0
   turns it off).
 - **Request fixes.** `shared/litellm/request_fixes.py` does three small things.
-  A `claude-*` id the proxy does not serve (for example `claude-opus-4-8`), or
-  any unknown name ending in `[1m]`, goes to the `main` seat and its fallbacks
-  instead of failing with "model not found"; names the proxy serves keep their
-  routing. An assistant `tool_use` with no `tool_result` in the next user
+  A `claude-*` id the proxy does not serve goes to the slot in its name
+  (`claude-opus-4-8` to opus, `claude-3-5-haiku-*` to haiku) and a name ending
+  in `[1m]` loses the suffix; a `claude-*` name with no slot word goes to
+  sonnet with a `WARNING: unmapped model` log line. Names the proxy serves keep
+  their routing. An assistant `tool_use` with no `tool_result` in the next user
   message gets a placeholder result ("Tool call was rejected or not run."), so
   strict backends such as DeepSeek don't answer 400. A non-streaming reply with
-  no text and no tool call raises a retryable 500, so retries and fallbacks
-  take over; streaming replies are not checked.
+  no text and no tool call is retried once on the same model; a second empty
+  reply from that model moves the request to the slot's next model. Empty
+  replies never bench a model. Streaming replies are not checked.
 - **Advisor.** LiteLLM runs Claude Code's advisor tool itself for
   non-Anthropic providers, and it sends the advisor model the agent's history
   with its tool calls and tool results still in it, no system prompt and no

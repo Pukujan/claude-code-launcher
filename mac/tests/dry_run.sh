@@ -82,18 +82,19 @@ expect "ANTHROPIC_API_KEY=<set>"
 expect "api_key_is_local: yes"
 expect "ANTHROPIC_BASE_URL=http://127.0.0.1:$PORT"
 expect "ANTHROPIC_MODEL=sonnet"
-expect "ANTHROPIC_SMALL_FAST_MODEL=small-fast"
 expect "ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet-5"
 expect "ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-5-5"
 expect "ANTHROPIC_DEFAULT_FABLE_MODEL=claude-fable-5"
 expect "ANTHROPIC_DEFAULT_HAIKU_MODEL=claude-haiku-4-5-20251001"
 expect "CLAUDE_CODE_WORKFLOWS=1"
+expect "CLAUDE_CODE_AUTO_COMPACT_WINDOW=272000"
+grep -q "^ANTHROPIC_SMALL_FAST_MODEL=" "$T/claude-call.txt" && { echo "deprecated small-fast variable still set"; fail=1; }
 expect "ire_json: present"
 expect "ire_frontier_key: present"
 grep -q "weak_key_flag_leaked" "$T/claude-call.txt" && { echo "keyless flag reached claude (proxy only)"; fail=1; }
 grep -q "IRE: source=defaults" "$T/launcher-output.txt" || { echo "IRE status line missing"; fail=1; }
 n="$(grep -c -E '^(ANTHROPIC_|CLAUDE_CODE_|CKFF_|ckff_)' "$T/claude-call.txt")"
-[ "$n" = "9" ] || { echo "expected exactly 8 ANTHROPIC_* vars plus CLAUDE_CODE_WORKFLOWS and no CKFF vars, got $n"; fail=1; }
+[ "$n" = "9" ] || { echo "expected exactly 7 ANTHROPIC_* vars plus 2 CLAUDE_CODE_* vars and no CKFF vars, got $n"; fail=1; }
 grep -q '"main_inferhub_id": "cbcn/glm-5.3-flash"' "$LL/config/inferhub_seat.json" || { echo "seat main wrong"; fail=1; }
 grep -q '"advisor_inferhub_id": "cbcn/minimax-m3"' "$LL/config/inferhub_seat.json" || { echo "seat advisor wrong"; fail=1; }
 grep -q "LITELLM_MASTER_KEY" "$T/home/.config/inferhub/.env" 2>/dev/null && { echo "launcher wrote a master key"; fail=1; }
@@ -116,7 +117,7 @@ else
 fi
 grep -q "auth=dummy API key" "$T/launcher-output.txt" || { echo "logged-out run did not report the dummy key"; fail=1; }
 # Keyless hot reload: the picked seat must have reached the running proxy.
-grep -q "Reloaded scope=seat" "$T/home/.local/state/claude-inferhub/launcher.log" "$T/home/Library/Logs/claude-inferhub/launcher.log" 2>/dev/null \
+grep -q "Reloaded scope=all" "$T/home/.local/state/claude-inferhub/launcher.log" "$T/home/Library/Logs/claude-inferhub/launcher.log" 2>/dev/null \
   || { echo "seat was not hot-reloaded into the running proxy"; fail=1; }
 # Bound to loopback only.
 pid="$(cat "$LL/logs/litellm.pid" 2>/dev/null)"
@@ -127,7 +128,7 @@ else
 fi
 # Keyless proxy serves the seat and the fast aliases, from loopback, no key.
 models="$(curl -fsS -m 5 "http://127.0.0.1:$PORT/v1/models" 2>/dev/null)"
-for name in sonnet opus haiku small-fast; do
+for name in sonnet opus haiku fable small-fast claude-fable-5 ccl-opus-2; do
   printf '%s' "$models" | grep -q "\"$name\"" || { echo "proxy does not serve $name"; fail=1; }
 done
 # The weak-key flag is in the proxy's own environment (Linux can check).

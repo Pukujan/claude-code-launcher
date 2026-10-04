@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Merge CKFF config.yaml + InferHub fragments into config/runtime.yaml.
+"""Merge config.yaml + the InferHub fragments into config/runtime.yaml.
 
 ONE local proxy serves both groups. CKFF is OFF by default (since 2026-10-04;
 see config/providers.yaml / LITELLM_ENABLE_CKFF). When it is off, no CKFF
@@ -29,6 +29,7 @@ except ImportError:
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import provider_switch  # noqa: E402
+import slots  # noqa: E402
 
 _ROUTER_FALLBACK_KEYS = ("fallbacks", "context_window_fallbacks", "content_policy_fallbacks")
 
@@ -216,6 +217,34 @@ def apply_env_overrides(pol, cd):
     return pol, cd
 
 
+def slot_chains(models: list) -> dict:
+    """{slot: {"names": [...], "rungs": [ccl-<slot>-2, ...], "last": name}} from the
+    ccl_slot / ccl_rung tags apply_inferhub_seat.py writes into model_info."""
+    out = {}
+    for m in models:
+        if not isinstance(m, dict):
+            continue
+        mi = m.get("model_info") or {}
+        slot, rung = mi.get("ccl_slot"), mi.get("ccl_rung")
+        if slot not in slots.SLOTS or rung is None:
+            continue
+        d = out.setdefault(slot, {"names": [], "rungs": {}, "last": None})
+        if int(rung) == 1:
+            d["names"].append(m["model_name"])
+        else:
+            d["rungs"][int(rung)] = m["model_name"]
+        if mi.get("ccl_last"):
+            d["last"] = m["model_name"]
+    for d in out.values():
+        d["rungs"] = [d["rungs"][k] for k in sorted(d["rungs"])]
+    return out
+
+
+def slot_fallbacks(chains: dict) -> list:
+    """Every slot name falls back to its own slot's rungs, in order."""
+    return [{name: list(d["rungs"])} for d in chains.values() if d["rungs"] for name in d["names"]]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--ckff", type=Path, default=ROOT / "config" / "config.yaml")
@@ -260,38 +289,59 @@ def main() -> int:
     if not ckff_on:
         leaked = [m.get("model_name") for m in merged["model_list"] if provider_switch.is_ckff_deployment(m)]
         if leaked:
-            print("ERROR: CKFF is disabled but these entries still route to CKFF: " + ", ".join(map(str, leaked)), file=sys.stderr)
+            print("ERROR: CKFF is off but these entries still route to CKFF: " + ", ".join(map(str, leaked)),
+                  file=sys.stderr)
             return 1
 
+    chains = slot_chains(ih_alias)
+    slot_fb = slot_fallbacks(chains)
     ih_fallbacks = build_inferhub_fallbacks(args.inferhub_fallbacks, ih_top + ih_alias)
-    if ih_fallbacks:
+    slot_named = {k for d in slot_fb for k in d}
+    ih_fallbacks = [d for d in ih_fallbacks if not (set(d) & slot_named)] + slot_fb
+    last_rungs = {d["last"] for d in chains.values() if d["last"]}
+    if ih_fallbacks or chains:
         rs = dict(merged.get("router_settings") or {})
         generated = {k for d in ih_fallbacks for k in d}
         kept = [d for d in (rs.get("fallbacks") or []) if isinstance(d, dict) and not (set(d) & generated)]
         rs["fallbacks"] = kept + ih_fallbacks
-        # Fail over fast on seat names: InferHub 402 no_provider_under_bid / 5xx are not
-        # transient within seconds, so 1 retry then fall back (issue #36).
+        # A context-window or content-filter error on a slot walks the same chain.
+        for key in ("context_window_fallbacks", "content_policy_fallbacks"):
+            kept = [d for d in (rs.get(key) or []) if isinstance(d, dict) and not (set(d) & slot_named)]
+            if kept or slot_fb:
+                rs[key] = kept + [dict(d) for d in slot_fb]
         fb_doc = yaml.safe_load(args.inferhub_fallbacks.read_text(encoding="utf-8")) or {}
         pol, cd = apply_env_overrides(fb_doc.get("retry_policy"), fb_doc.get("cooldown"))
         targets = set(generated) | {t for d in ih_fallbacks for v in d.values() for t in v}
+        for d in chains.values():
+            targets |= set(d["names"]) | set(d["rungs"])
         if isinstance(pol, dict):
             mgrp = dict(rs.get("model_group_retry_policy") or {})
-            # every seat name and every chain target gets the same retries
+            # every slot name, slot fallback and chain target gets the same retries
             for name in targets:
                 mgrp[name] = dict(pol)
             rs["model_group_retry_policy"] = mgrp
         merged["router_settings"] = rs
         # Per-deployment benching (cooldown_time + allowed_fails_policy in model_info, which
-        # stays router-internal and is not sent upstream).
+        # stays router-internal and is not sent upstream). The last model of a slot chain
+        # gets cooldown_time 0: LiteLLM and bench_after_retries.py then never bench it, so
+        # a chain can't turn into "all deployments in cooldown" 429s.
         if isinstance(cd, dict):
             for m in ih_top + ih_alias:
-                if isinstance(m, dict) and m.get("model_name") in targets:
-                    mi = dict(m.get("model_info") or {})
+                if not isinstance(m, dict) or m.get("model_name") not in targets:
+                    continue
+                mi = dict(m.get("model_info") or {})
+                if m.get("model_name") in last_rungs or ((mi.get("ccl_rung") == 1) and mi.get("ccl_last")):
+                    mi["cooldown_time"] = 0.0
+                    mi.pop("allowed_fails_policy", None)
+                else:
                     if cd.get("cooldown_time") is not None:
                         mi["cooldown_time"] = float(cd["cooldown_time"])
                     if isinstance(cd.get("allowed_fails_policy"), dict):
                         mi["allowed_fails_policy"] = dict(cd["allowed_fails_policy"])
-                    m["model_info"] = mi
+                m["model_info"] = mi
+        for s_, d in chains.items():
+            print(f"note: slot {s_}: {len(d['names'])} names -> " + " -> ".join(["first", *d["rungs"]])
+                  + f" (never benched: {d['last']})")
 
     if not ckff_on:
         served = {m.get("model_name") for m in merged["model_list"] if isinstance(m, dict)}
