@@ -43,3 +43,18 @@ right after each seat is picked, and once more after the last seat apply. See
   (details in `shared/ladder/README.md`).
 - `inferhub_fallbacks.yaml` is still the starting point after a proxy restart.
   The next launch puts the picked ladder back on top.
+
+## Proxy-side fixes for Claude Code tools
+
+- **WebSearch.** Claude Code asks for Anthropic's server-side `web_search`
+  tool, which only Anthropic runs. `merge_litellm_config.py` turns on LiteLLM's
+  `websearch_interception` callback and a `duckduckgo` search tool, and
+  `shared/litellm/web_search.py` (installed by `sitecustomize.py`) runs those
+  searches through the keyless `ddgs` package: Yahoo, then ddgs's `auto` mix,
+  then Yahoo again, 1 s apart. A `search_tools` list already in `config.yaml`
+  wins.
+- **Fast seat max_tokens floor.** WebFetch summaries go to the fast seat with a
+  small `max_tokens`; reasoning models could spend all of it thinking and send
+  back nothing. `shared/litellm/fast_min_tokens.py` raises `max_tokens` to 4096
+  for the fast aliases only. `CCL_FAST_MIN_MAX_TOKENS` changes the floor (0
+  turns it off).

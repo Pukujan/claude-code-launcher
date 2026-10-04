@@ -140,7 +140,7 @@ $needInstall = [bool]$ForceInstall
 if (-not $needInstall) {
     # PS 5.1 + $ErrorActionPreference=Stop turns any native stderr into a terminating error; judge by exit code only.
     $prevEap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-    & $Python -c "import litellm, yaml" 2>$null
+    & $Python -c "import litellm, yaml, ddgs" 2>$null
     $importOk = ($LASTEXITCODE -eq 0)
     $ErrorActionPreference = $prevEap
     if (-not $importOk) { $needInstall = $true }

@@ -636,6 +636,20 @@ def _install_bench_hook():
         _bar.install()
     except Exception as e:
         print(f"[sitecustomize] bench-after-retries hook not installed: {e}", flush=True)
+    # Claude Code's WebSearch gets real results (see web_search.py).
+    try:
+        import web_search as _ws
+
+        _ws.install()
+    except Exception as e:
+        print(f"[sitecustomize] web search hook not installed: {e}", flush=True)
+    # WebFetch summaries on reasoning models: room to think and still answer.
+    try:
+        import fast_min_tokens as _fmt
+
+        _fmt.install()
+    except Exception as e:
+        print(f"[sitecustomize] fast seat max_tokens floor not installed: {e}", flush=True)
 
 
 async def _starlette_call_with_reload(self, scope, receive, send, _o=_prev_starlette_call):

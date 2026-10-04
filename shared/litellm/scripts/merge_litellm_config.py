@@ -41,6 +41,26 @@ def apply_master_key_setting(general_settings: dict | None, env: dict | None = N
     return gs
 
 
+def apply_web_search(merged: dict) -> dict:
+    """Make Claude Code's WebSearch work on non-Anthropic models.
+
+    Its WebSearch sends Anthropic's server-side web_search tool, which only
+    Anthropic runs. websearch_interception turns it into a normal tool and runs
+    the search in the proxy; duckduckgo needs no key (sitecustomize sends it
+    through ddgs, see web_search.py). Anything already in config.yaml wins.
+    """
+    ls = dict(merged.get("litellm_settings") or {})
+    cbs = list(ls.get("callbacks") or [])
+    if "websearch_interception" not in cbs:
+        cbs.append("websearch_interception")
+    ls["callbacks"] = cbs
+    ls.setdefault("websearch_interception_params", {"enabled_providers": ["openai"]})
+    merged["litellm_settings"] = ls
+    if not merged.get("search_tools"):
+        merged["search_tools"] = [{"search_tool_name": "web", "litellm_params": {"search_provider": "duckduckgo"}}]
+    return merged
+
+
 def load_models(path: Path) -> list:
     if not path.is_file():
         return []
@@ -216,6 +236,7 @@ def main() -> int:
                         mi["allowed_fails_policy"] = dict(cd["allowed_fails_policy"])
                     m["model_info"] = mi
 
+    apply_web_search(merged)
     merged["general_settings"] = apply_master_key_setting(merged.get("general_settings"))
     if "master_key" not in merged["general_settings"]:
         print("note: LITELLM_MASTER_KEY not set; runtime.yaml has no master_key (keyless, 127.0.0.1 only)")
