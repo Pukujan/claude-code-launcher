@@ -162,5 +162,26 @@ def test_env_parsing():
     assert ws.chain_from_env({"CCL_WEB_SEARCH_CHAIN": "searxng, ddgs ,brave"}) == ["searxng", "ddgs", "brave"]
     assert ws.chain_from_env({"CCL_WEB_SEARCH_CHAIN": "duckduckgo"}) == ["ddgs"]
     assert ws.chain_from_env({"CCL_WEB_SEARCH_CHAIN": "searxng,ddgs,tavily,exa"}) == ["searxng", "ddgs", "tavily", "exa_ai"]
+    assert ws.chain_from_env({"CCL_WEB_SEARCH_CHAIN": "searxng,tinyfish,ddgs,you_com,tavily,exa"}) == [
+        "searxng", "tinyfish", "ddgs", "you_com", "tavily", "exa_ai"]
+    assert ws.chain_from_env({"CCL_WEB_SEARCH_CHAIN": "youcom,you"}) == ["you_com", "you_com"]
     assert ws.backends_from_env({}) == ws.DEFAULT_BACKENDS
     assert ws.backends_from_env({"CCL_DDGS_BACKENDS": "yahoo,auto"}) == ("yahoo", "auto")
+
+
+def test_empty_provider_is_logged_and_the_chain_moves_on(capsys):
+    seen = []
+
+    async def orig(**kw):
+        seen.append(kw["search_provider"])
+        if kw["search_provider"] == "tinyfish":
+            return _Response(results=[_Result("no url", "", "s")])
+        return _Response(results=[_Result("You hit", "https://you.example/", "s")])
+
+    def ddgs(q, n):
+        return [], ["ddgs/yahoo: No results found."]
+
+    r = asyncio.run(ws.run_search("q", 8, chain=["tinyfish", "ddgs", "you_com"], orig=orig, ddgs=ddgs))
+    assert seen == ["tinyfish", "you_com"] and r.results[0].url == "https://you.example/"
+    out = capsys.readouterr().out
+    assert "tinyfish gave 0 usable results (1 returned)" in out and "you_com ok: 1 results" in out
