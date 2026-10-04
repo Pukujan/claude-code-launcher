@@ -1,171 +1,288 @@
-"""IRE fetch: online, offline with cache, offline without cache.
+"""shared/ire/ire_fetch.py with the network mocked out.
 
-The "online" cases talk to a local stand-in for the GitHub contents API, so
-the tests need no network and no token.
+Cases: online, offline with a cache, offline with no cache, bad auth, plus the
+JSON contract the ladder picker (#5) relies on. No test opens a socket.
 """
+import csv
+import io
 import json
-import os
+import subprocess
 import sys
-import tempfile
-import threading
-import unittest
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import urllib.error
 from pathlib import Path
-from unittest import mock
+from urllib.parse import unquote, urlsplit
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "shared" / "ire"))
+import pytest
+
+from conftest import REPO
+
+sys.path.insert(0, str(REPO / "shared" / "ire"))
 import ire_fetch as F  # noqa: E402
 
 FIX = Path(__file__).resolve().parent / "fixtures" / "ire"
-FILES = {
-    F.TOP20_PATH: (FIX / "top20.csv").read_bytes(),
-    F.SHORTLIST_PATH: (FIX / "shortlist.csv").read_bytes(),
-    F.POLICY_PATH: (FIX / "policy.md").read_bytes(),
-}
+SHA = "0123456789abcdef0123456789abcdef01234567"
+TOKEN = "test-token-not-real"
+KEYS = {"source", "top20", "price_policy", "ladders", "retries", "cooldown_s"}
 
 
-class FakeGitHub(BaseHTTPRequestHandler):
-    files = FILES
-    hits = []
+class FakeGitHub:
+    """Stands in for urllib.request.urlopen against the GitHub contents API."""
 
-    def log_message(self, *a):
-        pass
+    def __init__(self, files=None, token=TOKEN):
+        self.files = {
+            F.TOP20_PATH: (FIX / "top20.csv").read_bytes(),
+            F.POLICY_PATH: (FIX / "policy.md").read_bytes(),
+        }
+        self.files.update(files or {})
+        self.token = token
+        self.calls = []
 
-    def do_GET(self):
-        FakeGitHub.hits.append((self.path, self.headers.get("Authorization")))
-        path = self.path.split("?")[0]
-        repo = f"/repos/{F.IRE_REPO}"
-        if path.startswith(repo + "/commits/"):
-            body, code = b"0123456789abcdef0123456789abcdef01234567", 200
-        elif path.startswith(repo + "/contents/"):
-            from urllib.parse import unquote
-            rel = unquote(path[len(repo + "/contents/"):])
-            body = self.files.get(rel)
-            code = 200 if body is not None else 404
-            body = body or b'{"message":"Not Found"}'
-        else:
-            body, code = b"{}", 404
-        self.send_response(code)
-        self.end_headers()
-        self.wfile.write(body)
-
-
-class Base(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.cache = Path(self.tmp.name) / "cache"
-        self.env = mock.patch.dict(os.environ, {
-            "CCL_IRE_NO_GH": "1", "CCL_IRE_NO_GIT_CRED": "1",
-        }, clear=False)
-        self.env.start()
-        for k in ("GH_TOKEN", "GITHUB_TOKEN", "CCL_IRE_OFFLINE", "CCL_IRE_ANON"):
-            os.environ.pop(k, None)
-        FakeGitHub.hits = []
-
-    def tearDown(self):
-        self.env.stop()
-        self.tmp.cleanup()
-
-    def serve(self):
-        srv = HTTPServer(("127.0.0.1", 0), FakeGitHub)
-        t = threading.Thread(target=srv.serve_forever, daemon=True)
-        t.start()
-        self.addCleanup(srv.server_close)
-        self.addCleanup(srv.shutdown)
-        os.environ["CCL_IRE_API_BASE"] = f"http://127.0.0.1:{srv.server_port}"
-        self.addCleanup(os.environ.pop, "CCL_IRE_API_BASE", None)
-        return srv
+    def __call__(self, req, timeout=None):
+        assert timeout is not None and timeout <= F.DEFAULT_TIMEOUT
+        auth = req.get_header("Authorization")
+        self.calls.append((req.full_url, auth))
+        if auth != f"Bearer {self.token}":
+            raise urllib.error.HTTPError(req.full_url, 401, "Bad credentials", {}, None)
+        parts = urlsplit(req.full_url)
+        prefix = f"/repos/{F.IRE_REPO}/"
+        rest = parts.path[len(prefix):]
+        if rest.startswith("commits/"):
+            return io.BytesIO(SHA.encode())
+        if rest.startswith("contents/"):
+            assert parts.query == f"ref={SHA}"  # files are read at the resolved commit
+            body = self.files.get(unquote(rest[len("contents/"):]))
+            if body is not None:
+                return io.BytesIO(body)
+        raise urllib.error.HTTPError(req.full_url, 404, "Not Found", {}, None)
 
 
-class Online(Base):
-    def test_fetches_with_token_and_caches(self):
-        self.serve()
-        os.environ["GH_TOKEN"] = "test-token-not-real"
-        b = F.get_bundle(cache_dir=self.cache, timeout=5)
-        self.assertEqual(b["source"]["kind"], "github")
-        self.assertEqual(b["source"]["auth"], "$GH_TOKEN")
-        self.assertEqual(len(b["top20"]), 20)
-        self.assertEqual(b["top20"][0]["ids"][0], "cb/deepseek-v4.1-flash")
-        self.assertFalse(b["top20"][2]["eligible"])  # Gemini 3.8 Flash is gated
-        self.assertEqual(b["price_policy"]["max_cost_per_mtok"], 0.10)
-        self.assertEqual(len(b["shortlist"]), 9)
-        self.assertEqual(b["ladders_from"], "derived")  # IRE has no picks file
-        self.assertTrue(F.cache_file(self.cache).is_file())
-        self.assertTrue(all(h[1] == "Bearer test-token-not-real" for h in FakeGitHub.hits))
-        self.assertNotIn("test-token-not-real", json.dumps(b))  # never stored
-
-    def test_uses_ire_fallback_picks_when_published(self):
-        picks = {"main": {"fallbacks": ["cbcn/deepseek-v4-flash"]}, "advisor": {"fallbacks": ["cbcn/minimax-m3"]}}
-        with mock.patch.dict(FakeGitHub.files, {F.FALLBACK_PICKS_PATH: json.dumps(picks).encode()}):
-            self.serve()
-            os.environ["CCL_IRE_ANON"] = "1"
-            b = F.get_bundle(cache_dir=self.cache, timeout=5)
-        self.assertEqual(b["ladders_from"], "ire")
-        self.assertEqual(b["ladders"]["main"]["fallbacks"], ["cbcn/deepseek-v4-flash"])
-
-    def test_price_cap_follows_ire_docs(self):
-        with mock.patch.dict(FakeGitHub.files, {F.POLICY_PATH: b"cost below **$0.05 USDC per 1 million tokens** is fine"}):
-            self.serve()
-            os.environ["CCL_IRE_ANON"] = "1"
-            b = F.get_bundle(cache_dir=self.cache, timeout=5)
-        self.assertEqual(b["price_policy"]["max_cost_per_mtok"], 0.05)
+def no_network(req, timeout=None):
+    raise urllib.error.URLError(OSError("network is unreachable"))
 
 
-class OfflineWithCache(Base):
-    def test_falls_back_to_last_good_copy(self):
-        self.serve()
-        os.environ["CCL_IRE_ANON"] = "1"
-        first = F.get_bundle(cache_dir=self.cache, timeout=5)
-        os.environ["CCL_IRE_API_BASE"] = "http://127.0.0.1:9"  # nothing listens here
-        b = F.get_bundle(cache_dir=self.cache, timeout=2)
-        self.assertEqual(b["source"]["kind"], "cache")
-        self.assertEqual(b["fetched_at"], first["fetched_at"])
-        self.assertEqual(len(b["top20"]), 20)
-        self.assertTrue(any("GitHub unavailable" in w for w in b["warnings"]))
-
-    def test_offline_flag_skips_network(self):
-        self.serve()
-        os.environ["CCL_IRE_ANON"] = "1"
-        F.get_bundle(cache_dir=self.cache, timeout=5)
-        FakeGitHub.hits = []
-        b = F.get_bundle(offline=True, cache_dir=self.cache)
-        self.assertEqual(b["source"]["kind"], "cache")
-        self.assertEqual(FakeGitHub.hits, [])
-
-    def test_corrupt_cache_is_ignored(self):
-        self.cache.mkdir(parents=True)
-        F.cache_file(self.cache).write_text("{not json", encoding="utf-8")
-        b = F.get_bundle(offline=True, cache_dir=self.cache)
-        self.assertEqual(b["source"]["kind"], "defaults")
+@pytest.fixture
+def env(monkeypatch, tmp_path):
+    for name in ("GITHUB_TOKEN", "GH_TOKEN", "CCL_IRE_OFFLINE", "CCL_IRE_API_BASE", "CCL_IRE_CACHE_DIR"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(F.shutil, "which", lambda name: None)  # no gh unless a test adds it
+    return tmp_path / "cache"
 
 
-class OfflineNoCache(Base):
-    def test_built_in_defaults(self):
-        os.environ["CCL_IRE_API_BASE"] = "http://127.0.0.1:9"
-        os.environ["CCL_IRE_ANON"] = "1"
-        b = F.get_bundle(cache_dir=self.cache, timeout=2)
-        self.assertEqual(b["source"]["kind"], "defaults")
-        self.assertEqual(b["ladders"]["main"]["primary"], "cb/deepseek-v4.1-flash")
-        self.assertEqual(b["ladders"]["main"]["fallbacks"], ["ali/qwen3.8-flash", "cbcn/deepseek-v4-flash"])
-        self.assertEqual(b["ladders"]["advisor"]["fallbacks"], ["cbcn/minimax-m3"])
-        self.assertEqual(b["retry"], {"retries": 1, "cooldown_seconds": 180})
-        self.assertFalse(F.cache_file(self.cache).exists())  # defaults are never cached
-
-    def test_no_auth_degrades_quietly(self):
-        os.environ.pop("CCL_IRE_API_BASE", None)
-        b = F.get_bundle(cache_dir=self.cache, timeout=2)
-        self.assertEqual(b["source"]["kind"], "defaults")
-        self.assertTrue(any("no GitHub auth" in w for w in b["warnings"]))
+def online(monkeypatch, fake=None):
+    fake = fake or FakeGitHub()
+    monkeypatch.setattr(F.urllib.request, "urlopen", fake)
+    return fake
 
 
-class CLI(Base):
-    def test_cli_writes_bundle_file(self):
-        out = Path(self.tmp.name) / "b.json"
-        rc = F.main(["--offline", "--cache-dir", str(self.cache), "--out", str(out)])
-        self.assertEqual(rc, 0)
-        self.assertEqual(json.loads(out.read_text())["schema"], F.SCHEMA)
+def check_contract(b):
+    assert set(b) == KEYS
+    assert b["source"] in ("live", "cache", "defaults")
+    assert isinstance(b["top20"], list) and b["top20"]
+    for row in b["top20"]:
+        assert set(row) == {"rank", "name", "vendor", "eligible", "gate_reasons", "cost_per_mtok", "ids"}
+    assert set(b["price_policy"]) == {"free_below_per_mtok", "unit", "source"}
+    assert set(b["ladders"]) == {"main", "advisor"}
+    assert all(isinstance(x, str) for chain in b["ladders"].values() for x in chain)
+    assert isinstance(b["retries"], int) and isinstance(b["cooldown_s"], int)
+    json.dumps(b)
 
 
-if __name__ == "__main__":
-    unittest.main()
+# ------------------------------------------------------------------ online
+
+
+def test_online_fetches_and_caches(monkeypatch, env, capsys):
+    monkeypatch.setenv("GH_TOKEN", TOKEN)
+    fake = online(monkeypatch)
+    b = F.get_recommendations(directory=env)
+    check_contract(b)
+    assert b["source"] == "live"
+    assert len(b["top20"]) == 20
+    assert b["top20"][0]["ids"][0] == "cb/deepseek-v4.1-flash"
+    assert b["top20"][2]["eligible"] is False and b["top20"][2]["gate_reasons"]
+    assert b["price_policy"]["free_below_per_mtok"] == 0.10
+    assert b["ladders"] == {"main": ["cb/deepseek-v4.1-flash", "ali/qwen3.8-flash", "cbcn/deepseek-v4-flash"],
+                            "advisor": ["cbcn/glm-5.3-flash", "cbcn/minimax-m3"]}
+    assert (b["retries"], b["cooldown_s"]) == (1, 180)
+    record = json.loads((env / F.CACHE_NAME).read_text())
+    assert record["source_sha"] == SHA
+    assert record["fetched_at"].endswith("Z")
+    assert record["bundle"]["top20"] == b["top20"]
+    assert all(auth == f"Bearer {TOKEN}" for _, auth in fake.calls)
+    out = capsys.readouterr()
+    assert TOKEN not in out.out + out.err
+    assert TOKEN not in (env / F.CACHE_NAME).read_text()
+
+
+def test_online_uses_gh_auth_token(monkeypatch, env):
+    monkeypatch.setattr(F.shutil, "which", lambda name: "/usr/bin/gh" if name == "gh" else None)
+    seen = []
+
+    def fake_run(cmd, **kw):
+        seen.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout=TOKEN + "\n", stderr="")
+
+    monkeypatch.setattr(F.subprocess, "run", fake_run)
+    online(monkeypatch)
+    assert F.get_recommendations(directory=env)["source"] == "live"
+    assert seen[0][1:3] == ["auth", "token"]
+
+
+def test_env_token_beats_gh(monkeypatch, env):
+    monkeypatch.setenv("GITHUB_TOKEN", TOKEN)
+    monkeypatch.setattr(F.shutil, "which", lambda name: pytest.fail("gh should not be asked"))
+    online(monkeypatch)
+    assert F.get_recommendations(directory=env)["source"] == "live"
+
+
+def test_price_cap_follows_ire_doc(monkeypatch, env):
+    monkeypatch.setenv("GH_TOKEN", TOKEN)
+    online(monkeypatch, FakeGitHub({F.POLICY_PATH: b"cost below **$0.05 USDC per 1 million tokens** counts"}))
+    assert F.get_recommendations(directory=env)["price_policy"]["free_below_per_mtok"] == 0.05
+
+
+def test_ire_fallback_picks_replace_ladders(monkeypatch, env):
+    monkeypatch.setenv("GH_TOKEN", TOKEN)
+    picks = {"main": ["cbcn/deepseek-v4-flash", "ali/qwen3.8-flash"], "advisor": ["cbcn/minimax-m3"],
+             "retries": 2, "cooldown_s": 60}
+    online(monkeypatch, FakeGitHub({F.PICKS_PATH: json.dumps(picks).encode()}))
+    b = F.get_recommendations(directory=env)
+    check_contract(b)
+    assert b["ladders"] == {"main": picks["main"], "advisor": picks["advisor"]}
+    assert (b["retries"], b["cooldown_s"]) == (2, 60)
+
+
+def test_malformed_picks_are_ignored(monkeypatch, env):
+    monkeypatch.setenv("GH_TOKEN", TOKEN)
+    online(monkeypatch, FakeGitHub({F.PICKS_PATH: b'{"main": "not-a-list"}'}))
+    b = F.get_recommendations(directory=env)
+    assert b["source"] == "live"
+    assert b["ladders"]["main"][0] == "cb/deepseek-v4.1-flash"
+
+
+# ------------------------------------------------------------------ offline with cache
+
+
+def test_offline_uses_last_good_copy(monkeypatch, env):
+    monkeypatch.setenv("GH_TOKEN", TOKEN)
+    online(monkeypatch)
+    live = F.get_recommendations(directory=env)
+    monkeypatch.setattr(F.urllib.request, "urlopen", no_network)
+    b = F.get_recommendations(directory=env)
+    check_contract(b)
+    assert b["source"] == "cache"
+    assert b["top20"] == live["top20"]
+    assert json.loads((env / F.CACHE_NAME).read_text())["source_sha"] == SHA
+
+
+def test_offline_flag_never_touches_network(monkeypatch, env):
+    monkeypatch.setenv("GH_TOKEN", TOKEN)
+    online(monkeypatch)
+    F.get_recommendations(directory=env)
+    monkeypatch.setattr(F.urllib.request, "urlopen", lambda *a, **k: pytest.fail("network used"))
+    assert F.get_recommendations(offline=True, directory=env)["source"] == "cache"
+
+
+def test_no_auth_goes_straight_to_cache(monkeypatch, env):
+    monkeypatch.setenv("GH_TOKEN", TOKEN)
+    online(monkeypatch)
+    F.get_recommendations(directory=env)
+    monkeypatch.delenv("GH_TOKEN")
+    monkeypatch.setattr(F.urllib.request, "urlopen", lambda *a, **k: pytest.fail("network used"))
+    assert F.get_recommendations(directory=env)["source"] == "cache"
+
+
+def test_corrupt_cache_falls_to_defaults(env):
+    env.mkdir(parents=True)
+    (env / F.CACHE_NAME).write_text("{not json", encoding="utf-8")
+    assert F.get_recommendations(offline=True, directory=env)["source"] == "defaults"
+
+
+# ------------------------------------------------------------------ offline, no cache
+
+
+def test_offline_no_cache_uses_defaults(monkeypatch, env):
+    monkeypatch.setenv("GH_TOKEN", TOKEN)
+    monkeypatch.setattr(F.urllib.request, "urlopen", no_network)
+    b = F.get_recommendations(directory=env)
+    check_contract(b)
+    assert b["source"] == "defaults"
+    assert b["ladders"]["main"] == ["cb/deepseek-v4.1-flash", "ali/qwen3.8-flash", "cbcn/deepseek-v4-flash"]
+    assert b["ladders"]["advisor"] == ["cbcn/glm-5.3-flash", "cbcn/minimax-m3"]
+    assert (b["retries"], b["cooldown_s"]) == (1, 180)
+    assert b["price_policy"]["free_below_per_mtok"] == 0.10
+    assert not (env / F.CACHE_NAME).exists()  # defaults are never cached
+
+
+def test_gh_not_logged_in_uses_defaults(monkeypatch, env):
+    monkeypatch.setattr(F.shutil, "which", lambda name: "/usr/bin/gh")
+    monkeypatch.setattr(F.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, "", "not logged in"))
+    monkeypatch.setattr(F.urllib.request, "urlopen", lambda *a, **k: pytest.fail("network used"))
+    assert F.get_recommendations(directory=env)["source"] == "defaults"
+
+
+def test_slow_github_respects_the_deadline(monkeypatch, env):
+    monkeypatch.setenv("GH_TOKEN", TOKEN)
+
+    def slow(req, timeout=None):
+        raise urllib.error.URLError(TimeoutError("timed out"))
+
+    monkeypatch.setattr(F.urllib.request, "urlopen", slow)
+    assert F.get_recommendations(directory=env, timeout=0.5)["source"] == "defaults"
+
+
+# ------------------------------------------------------------------ bad auth
+
+
+def test_bad_token_falls_back_to_cache(monkeypatch, env, capsys):
+    monkeypatch.setenv("GH_TOKEN", TOKEN)
+    online(monkeypatch)
+    F.get_recommendations(directory=env)
+    monkeypatch.setenv("GH_TOKEN", "expired-token-value")
+    b = F.get_recommendations(directory=env)
+    assert b["source"] == "cache"
+    err = capsys.readouterr().err
+    assert "401" in err
+    assert "expired-token-value" not in err
+
+
+def test_bad_token_no_cache_uses_defaults(monkeypatch, env, capsys):
+    monkeypatch.setenv("GITHUB_TOKEN", "expired-token-value")
+    online(monkeypatch)
+    assert F.get_recommendations(directory=env)["source"] == "defaults"
+    assert "expired-token-value" not in capsys.readouterr().err
+
+
+def test_token_without_repo_access(monkeypatch, env):
+    # GitHub answers 404 for a private repo the token cannot see.
+    monkeypatch.setenv("GH_TOKEN", TOKEN)
+    monkeypatch.setattr(F.urllib.request, "urlopen",
+                        lambda req, timeout=None: (_ for _ in ()).throw(
+                            urllib.error.HTTPError(req.full_url, 404, "Not Found", {}, None)))
+    assert F.get_recommendations(directory=env)["source"] == "defaults"
+
+
+# ------------------------------------------------------------------ contract and CLI
+
+
+def test_defaults_match_the_builtin_top20_table():
+    b = F.load_defaults()
+    check_contract(b)
+    with open(REPO / "shared/litellm/config/top20-builtin.csv", encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh))
+    assert [r["ids"][0] for r in b["top20"]] == [r["model_ids"].strip() for r in rows]
+
+
+def test_cache_dir_per_platform(monkeypatch, tmp_path):
+    monkeypatch.delenv("CCL_IRE_CACHE_DIR", raising=False)
+    monkeypatch.setattr(F.os, "name", "posix")
+    monkeypatch.setattr(F.sys, "platform", "linux")
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    assert F.cache_dir() == tmp_path / "claude-code-launcher" / "ire"
+    monkeypatch.setattr(F.sys, "platform", "darwin")
+    assert F.cache_dir() == Path.home() / "Library" / "Caches" / "claude-code-launcher" / "ire"
+
+
+def test_cli_writes_json(env, tmp_path):
+    out = tmp_path / "ire.json"
+    assert F.main(["--offline", "--cache-dir", str(env), "--out", str(out)]) == 0
+    check_contract(json.loads(out.read_text()))

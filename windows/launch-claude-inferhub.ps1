@@ -403,7 +403,39 @@ function Apply-InferHubSeat {
   }
 }
 
+function Get-IreRecommendations {
+  # HOOK(ire): shared\ire\ire_fetch.py pulls IRE's Top 20, price policy and any
+  # fallback picks from GitHub (5 s budget), then falls back to the last good
+  # copy and then built-in defaults. Never fatal. The JSON path goes into
+  # $env:CCL_IRE_JSON for the ladder picker; schema in shared\ire\README.md.
+  $helper = Join-Path $RepoRoot "shared\ire\ire_fetch.py"
+  $base = $(if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $HOME "AppData\Local" })
+  $out = Join-Path $base "claude-code-launcher\ire.json"
+  $pyArgs = @()
+  $py = Join-Path $LiteLLMRoot ".litellm-venv\Scripts\python.exe"
+  if (-not (Test-Path -LiteralPath $py)) {
+    $cmd = Get-Command py -ErrorAction SilentlyContinue
+    if ($cmd) { $py = $cmd.Source; $pyArgs = @("-3") }
+    else {
+      $cmd = Get-Command python -ErrorAction SilentlyContinue
+      if (-not $cmd) { Write-Host "IRE: no Python found; using the built-in model table"; return }
+      $py = $cmd.Source
+    }
+  }
+  $ErrorActionPreference = "Continue"   # the helper reports on stderr; that is not a failure
+  try {
+    & $py @pyArgs $helper --out $out 2>&1 | ForEach-Object {
+      $line = "$_"
+      if ($line) { Write-Host ("IRE: " + ($line -replace '^\[ire\] ', '')) }
+    }
+  } catch {
+    Write-Host "IRE: helper did not run; using the built-in model table"
+  }
+  if (Test-Path -LiteralPath $out) { $env:CCL_IRE_JSON = $out }
+}
+
 # ---- interactive flow ----
+Get-IreRecommendations
 $main = Select-MainModel
 $advisor = Select-AdvisorModel
 # HOOK(fallback-ladder): a ladder picker goes here, after the seats are chosen

@@ -326,6 +326,25 @@ export_proxy_env() {
   export INFERHUB_API_URL="$IH_URL"
 }
 
+fetch_ire() {
+  # HOOK(ire): shared/ire/ire_fetch.py pulls IRE's Top 20, price policy and any
+  # fallback picks from GitHub (5 s budget), then falls back to the last good
+  # copy and then built-in defaults. Never fatal. The JSON lands in
+  # $IRE_JSON for the ladder picker; its schema is in shared/ire/README.md.
+  local py line
+  IRE_JSON="$STATE_DIR/ire.json"
+  py="$VENV_PY"; [ -x "$py" ] || py="$(command -v python3 || true)"
+  if [ -z "$py" ] || ! mkdir -p "$STATE_DIR" 2>/dev/null; then
+    log "IRE: no Python or state folder; using the built-in model table"
+    return 0
+  fi
+  while IFS= read -r line; do
+    [ -n "$line" ] && log "IRE: ${line#\[ire\] }"
+  done < <("$py" "$REPO_ROOT/shared/ire/ire_fetch.py" --out "$IRE_JSON" 2>&1 >/dev/null)
+  [ -f "$IRE_JSON" ] && export CCL_IRE_JSON="$IRE_JSON"
+  return 0
+}
+
 ensure_top20() {
   local out="$LITELLM_DIR/config/inferhub_top20.yaml" csv
   [ -f "$out" ] && return 0
@@ -628,6 +647,7 @@ main() {
   ensure_claude
   ensure_keys
   IH_URL="$(inferhub_url)"
+  fetch_ire
   ensure_top20
   ensure_proxy
 

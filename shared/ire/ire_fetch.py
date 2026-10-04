@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""Fetch IRE recommendations for the Claude Code launcher, on demand.
+"""Fetch IRE recommendations for the Claude Code launcher at start-up.
 
-What it pulls from the private repo Pukujan/inference-recommendation-engine:
-  - the Top 20 recommendation list (CSV)
-  - the daily shortlist, which IRE treats as its "Top 20+" list (CSV)
-  - the price policy line in docs/INFERHUB-API-SETUP.md (the $/1M-token cap)
-  - fallback picks, if IRE publishes them (optional JSON; see FALLBACK_PICKS_PATH)
+Both launchers (windows/ and mac/) run this file. It reads three things from the
+private repo Pukujan/inference-recommendation-engine on main:
 
-Order of sources, first one that works wins:
-  1. GitHub, using whatever auth this machine already has
-     (GH_TOKEN / GITHUB_TOKEN, then the `gh` CLI, then git's credential helper)
-  2. the last good copy cached on this machine
-  3. the built-in defaults shipped next to this file (defaults.json)
+  - the Top 20 list (CSV)
+  - the price policy line in docs/INFERHUB-API-SETUP.md
+    ("below $0.10 USDC per 1 million tokens" counts as effectively free)
+  - fallback picks, if IRE ever publishes them (optional JSON, see PICKS_PATH)
 
-Standard library only, so it runs on stock Python 3.8+ on Windows and macOS.
-It never prints a token. Output is one JSON document (the "bundle") on stdout
-or in --out; progress and warnings go to stderr.
+and prints one JSON document. The schema is documented in README.md next to
+this file and is consumed by the ladder picker (issue #5), so do not add or
+rename top-level keys without updating both.
+
+Sources, first one that works wins: live (GitHub) -> cache -> built-in defaults.
+Standard library only. Tokens are sent in a request header and never printed,
+logged or written to the cache.
 """
 from __future__ import annotations
 
@@ -30,6 +30,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -37,384 +38,310 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 DEFAULTS_PATH = HERE / "defaults.json"
-SCHEMA = "ccl-ire-bundle/v1"
 
-IRE_REPO = os.environ.get("CCL_IRE_REPO", "Pukujan/inference-recommendation-engine")
-IRE_REF = os.environ.get("CCL_IRE_REF", "main")
-LISTS_DIR = "operational/telemetry/gravebuster/pipeline/ihub/lists"
-TOP20_PATH = f"{LISTS_DIR}/research_model_top20_recommendations.csv"
-SHORTLIST_PATH = f"{LISTS_DIR}/research_model_daily_shortlist.csv"
+IRE_REPO = "Pukujan/inference-recommendation-engine"
+IRE_REF = "main"
+API_BASE = "https://api.github.com"
+TOP20_PATH = "operational/telemetry/gravebuster/pipeline/ihub/lists/research_model_top20_recommendations.csv"
 POLICY_PATH = "docs/INFERHUB-API-SETUP.md"
-# IRE does not publish this file yet (checked 2026-10-03). When it does, the
-# launcher uses it as the default ladders; until then ladders are derived.
-FALLBACK_PICKS_PATH = "operational/recommendations/claude-code-fallbacks.v1.json"
+# IRE has no fallback-picks file yet (checked main at 9a8fba0 on 2026-10-03).
+# If this path appears, its ladders replace the built-in ones.
+PICKS_PATH = "operational/recommendations/claude-code-fallbacks.v1.json"
+
+DEFAULT_TIMEOUT = 5.0
+CACHE_NAME = "ire-cache.json"
+KEYS = ("source", "top20", "price_policy", "ladders", "retries", "cooldown_s")
 
 POLICY_RE = re.compile(
-    r"below\s*\*{0,2}\s*\$\s*([0-9]+(?:\.[0-9]+)?)\s*(?:USDC|USD)?\s*per\s*1\s*million\s*tokens",
+    r"below\s*\**\s*\$\s*([0-9]+(?:\.[0-9]+)?)\s*(?:USDC|USD)?\s*per\s*1\s*(?:million|M)\s*tokens",
     re.IGNORECASE,
 )
+
+
+class FetchError(Exception):
+    """GitHub could not be reached, refused the request, or sent something unusable."""
 
 
 def log(msg: str) -> None:
     print(f"[ire] {msg}", file=sys.stderr, flush=True)
 
 
-def now_utc() -> str:
-    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+# ---------------------------------------------------------------- locations
 
 
-def default_cache_dir() -> Path:
-    env = os.environ.get("CCL_CACHE_DIR")
-    if env:
-        return Path(env) / "ire"
+def cache_dir() -> Path:
+    """%LOCALAPPDATA%, ~/Library/Caches or XDG cache, under claude-code-launcher/ire."""
+    override = os.environ.get("CCL_IRE_CACHE_DIR")
+    if override:
+        return Path(override)
     if os.name == "nt":
         base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
         return Path(base) / "claude-code-launcher" / "ire"
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Caches" / "claude-code-launcher" / "ire"
-    return Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "claude-code-launcher" / "ire"
+    base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    return Path(base) / "claude-code-launcher" / "ire"
 
 
-# --------------------------------------------------------------------------- transports
+# ---------------------------------------------------------------- auth
 
 
-class FetchError(Exception):
-    """GitHub could not be reached or refused us (network, auth, rate limit)."""
+def find_token(timeout: float = DEFAULT_TIMEOUT) -> tuple[str | None, str]:
+    """Return (token, where it came from). (None, reason) when there is no auth."""
+    for name in ("GITHUB_TOKEN", "GH_TOKEN"):
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value, name
+    gh = shutil.which("gh")
+    if not gh:
+        return None, "no GITHUB_TOKEN/GH_TOKEN and gh is not installed"
+    try:
+        p = subprocess.run([gh, "auth", "token", "--hostname", "github.com"],
+                           capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
+        return None, "gh auth token did not answer"
+    token = (p.stdout or "").strip()
+    if p.returncode != 0 or not token:
+        return None, "gh is installed but not logged in"
+    return token, "gh auth token"
 
 
-class NotFound(Exception):
-    """The file does not exist at that ref (a real answer, not an outage)."""
+# ---------------------------------------------------------------- GitHub
 
 
-class TokenTransport:
-    """GitHub REST contents API with a bearer token (or none, for tests)."""
+class GitHub:
+    """Minimal GitHub contents API client with a shared deadline."""
 
-    def __init__(self, token: str | None, label: str, timeout: float,
-                 api_base: str = "https://api.github.com"):
+    def __init__(self, token: str, timeout: float = DEFAULT_TIMEOUT, api_base: str | None = None):
         self._token = token
-        self.label = label
-        self.timeout = timeout
-        self.api_base = api_base.rstrip("/")
+        self.api_base = (api_base or os.environ.get("CCL_IRE_API_BASE") or API_BASE).rstrip("/")
+        self.deadline = time.monotonic() + timeout
 
-    def _get(self, url: str, accept: str) -> bytes:
-        headers = {"Accept": accept, "User-Agent": "claude-code-launcher-ire",
-                   "X-GitHub-Api-Version": "2022-11-28"}
-        if self._token:
-            headers["Authorization"] = f"Bearer {self._token}"
-        req = urllib.request.Request(url, headers=headers)
+    def _get(self, url: str, accept: str) -> bytes | None:
+        """Body, or None on 404. Raises FetchError on anything else."""
+        left = self.deadline - time.monotonic()
+        if left <= 0:
+            raise FetchError("timed out")
+        req = urllib.request.Request(url, headers={
+            "Accept": accept,
+            "Authorization": f"Bearer {self._token}",
+            "User-Agent": "claude-code-launcher-ire",
+            "X-GitHub-Api-Version": "2022-11-28",
+        })
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as r:
+            with urllib.request.urlopen(req, timeout=left) as r:
                 return r.read()
         except urllib.error.HTTPError as e:
             if e.code == 404:
-                raise NotFound(url) from None
-            raise FetchError(f"HTTP {e.code} from GitHub via {self.label}") from None
-        except (urllib.error.URLError, OSError, TimeoutError) as e:
-            raise FetchError(f"network error via {self.label}: {getattr(e, 'reason', e)}") from None
+                return None
+            if e.code in (401, 403):
+                raise FetchError(f"GitHub refused the credentials (HTTP {e.code})") from None
+            raise FetchError(f"GitHub answered HTTP {e.code}") from None
+        except (urllib.error.URLError, OSError) as e:
+            reason = getattr(e, "reason", e)
+            raise FetchError(f"network error: {type(reason).__name__}") from None
 
-    def get_file(self, repo: str, path: str, ref: str) -> bytes:
-        q = urllib.parse.quote(path)
-        return self._get(f"{self.api_base}/repos/{repo}/contents/{q}?ref={urllib.parse.quote(ref)}",
+    def commit_sha(self, repo: str, ref: str) -> str:
+        body = self._get(f"{self.api_base}/repos/{repo}/commits/{urllib.parse.quote(ref, safe='')}",
+                         "application/vnd.github.sha")
+        sha = (body or b"").decode("ascii", "replace").strip()
+        if not re.fullmatch(r"[0-9a-f]{40}", sha):
+            # 404 here means the repo is invisible to this token, which is an auth problem.
+            raise FetchError("could not resolve the IRE commit (no access to the repo?)")
+        return sha
+
+    def file(self, repo: str, path: str, sha: str) -> str | None:
+        body = self._get(f"{self.api_base}/repos/{repo}/contents/{urllib.parse.quote(path)}?ref={sha}",
                          "application/vnd.github.raw")
-
-    def get_sha(self, repo: str, ref: str) -> str:
-        return self._get(f"{self.api_base}/repos/{repo}/commits/{urllib.parse.quote(ref)}",
-                         "application/vnd.github.sha").decode().strip()
+        return None if body is None else body.decode("utf-8-sig")
 
 
-class GhCliTransport:
-    """Shells out to `gh api`, so the token never passes through this process."""
-
-    label = "gh CLI"
-
-    def __init__(self, gh: str, timeout: float):
-        self.gh = gh
-        self.timeout = timeout
-
-    def _api(self, endpoint: str, accept: str) -> bytes:
-        try:
-            p = subprocess.run([self.gh, "api", "-H", f"Accept: {accept}", endpoint],
-                               capture_output=True, timeout=self.timeout)
-        except (OSError, subprocess.TimeoutExpired) as e:
-            raise FetchError(f"gh CLI failed: {type(e).__name__}") from None
-        if p.returncode == 0:
-            return p.stdout
-        err = (p.stderr or b"").decode("utf-8", "replace")
-        if "404" in err or "Not Found" in err:
-            raise NotFound(endpoint)
-        first = err.strip().splitlines()[0] if err.strip() else f"exit {p.returncode}"
-        raise FetchError(f"gh CLI: {first[:160]}")
-
-    def get_file(self, repo: str, path: str, ref: str) -> bytes:
-        return self._api(f"repos/{repo}/contents/{urllib.parse.quote(path)}?ref={urllib.parse.quote(ref)}",
-                         "application/vnd.github.raw")
-
-    def get_sha(self, repo: str, ref: str) -> str:
-        return self._api(f"repos/{repo}/commits/{urllib.parse.quote(ref)}",
-                         "application/vnd.github.sha").decode().strip()
+# ---------------------------------------------------------------- parsing
 
 
-def _gh_is_authed(gh: str, timeout: float) -> bool:
+def _cost(v):
     try:
-        p = subprocess.run([gh, "auth", "status", "--hostname", "github.com"],
-                           capture_output=True, timeout=timeout)
-        return p.returncode == 0
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-
-
-def _git_credential_token(timeout: float) -> str | None:
-    """Ask git's configured credential helper for the github.com password/token.
-
-    Non-interactive: prompts are disabled, so a machine without a stored
-    credential simply returns None.
-    """
-    git = shutil.which("git")
-    if not git:
-        return None
-    env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GCM_INTERACTIVE="never", GIT_ASKPASS="")
-    try:
-        p = subprocess.run([git, "credential", "fill"], input=b"protocol=https\nhost=github.com\n\n",
-                           capture_output=True, timeout=timeout, env=env)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    if p.returncode != 0:
-        return None
-    for line in p.stdout.decode("utf-8", "replace").splitlines():
-        if line.startswith("password="):
-            return line.split("=", 1)[1].strip() or None
-    return None
-
-
-def pick_transports(timeout: float) -> list:
-    """Every auth route this machine has, best first. Empty list = no auth."""
-    api_base = os.environ.get("CCL_IRE_API_BASE", "https://api.github.com")
-    out = []
-    for name in ("GH_TOKEN", "GITHUB_TOKEN"):
-        if os.environ.get(name):
-            out.append(TokenTransport(os.environ[name], f"${name}", timeout, api_base))
-            break
-    if os.environ.get("CCL_IRE_NO_GH") != "1" and api_base == "https://api.github.com":
-        gh = shutil.which("gh")
-        if gh and _gh_is_authed(gh, timeout):
-            out.append(GhCliTransport(gh, timeout))
-    if os.environ.get("CCL_IRE_NO_GIT_CRED") != "1":
-        tok = _git_credential_token(timeout)
-        if tok:
-            out.append(TokenTransport(tok, "git credential helper", timeout, api_base))
-    if os.environ.get("CCL_IRE_ANON") == "1":  # tests / public mirrors only
-        out.append(TokenTransport(None, "anonymous", timeout, api_base))
-    return out
-
-
-# --------------------------------------------------------------------------- parsing
-
-
-def _f(v):
-    try:
-        return float(v)
+        return round(float(v), 6)
     except (TypeError, ValueError):
         return None
 
 
-def _ids(v: str) -> list:
-    return [x.strip() for x in (v or "").split(";") if x.strip()]
-
-
-def parse_top20(text: str) -> list:
+def parse_top20(text: str) -> list[dict]:
     rows = []
     for r in csv.DictReader(io.StringIO(text)):
-        rank = r.get("recommendation_rank") or r.get("rank")
-        ids = _ids(r.get("model_ids", ""))
-        if not rank or not ids:
+        rank = (r.get("recommendation_rank") or r.get("rank") or "").strip()
+        ids = [x.strip() for x in (r.get("model_ids") or "").split(";") if x.strip()]
+        if not rank.isdigit() or not ids:
             continue
         rows.append({
             "rank": int(rank),
-            "name": r.get("model_family", "").strip(),
-            "vendor": r.get("vendor", "").strip(),
-            "eligible": str(r.get("recommendation_eligible", "true")).strip().lower() == "true",
-            "gate_reasons": r.get("gate_reasons", "").strip(),
-            "cost_per_mtok": _f(r.get("supply_weighted_median_cost_usdc_per_1m")),
-            "price_regime": r.get("price_regime", "").strip(),
+            "name": (r.get("model_family") or "").strip(),
+            "vendor": (r.get("vendor") or "").strip(),
+            "eligible": (r.get("recommendation_eligible") or "true").strip().lower() == "true",
+            "gate_reasons": [g.strip() for g in (r.get("gate_reasons") or "").split(";") if g.strip()],
+            "cost_per_mtok": _cost(r.get("supply_weighted_median_cost_usdc_per_1m")),
             "ids": ids,
         })
     rows.sort(key=lambda x: x["rank"])
     return rows
 
 
-def parse_shortlist(text: str) -> list:
-    out = []
-    for r in csv.DictReader(io.StringIO(text)):
-        ids = _ids(r.get("model_ids", ""))
-        if r.get("rank") and ids:
-            out.append({"rank": int(r["rank"]), "name": r.get("model_family", "").strip(),
-                        "vendor": r.get("vendor", "").strip(),
-                        "cost_per_mtok": _f(r.get("supply_weighted_median_cost_usdc_per_1m")),
-                        "ids": ids})
-    return out
-
-
-def parse_price_policy(md: str) -> float | None:
-    m = POLICY_RE.search(md)
+def parse_price_cap(markdown: str) -> float | None:
+    m = POLICY_RE.search(markdown)
     return float(m.group(1)) if m else None
 
 
-def parse_fallback_picks(raw: str) -> dict:
-    doc = json.loads(raw)
+def price_policy(cap: float, source: str) -> dict:
+    return {"free_below_per_mtok": cap, "unit": "USDC per 1M tokens", "source": source}
+
+
+def parse_picks(text: str) -> dict:
+    """IRE fallback picks. Accepts {"main": [...], "advisor": [...]} or the same under "ladders",
+    plus optional "retries" and "cooldown_s". Raises ValueError if unusable."""
+    doc = json.loads(text)
+    ladders = doc.get("ladders", doc)
     out = {}
-    for role in ("main", "advisor"):
-        spec = doc.get(role) or {}
-        fb = [x for x in (spec.get("fallbacks") or []) if isinstance(x, str)]
-        out[role] = {"primary": spec.get("primary"), "fallbacks": fb[:3]}
-    return out
+    for seat in ("main", "advisor"):
+        chain = ladders.get(seat)
+        if not isinstance(chain, list) or not chain or not all(isinstance(x, str) and x for x in chain):
+            raise ValueError(f"picks: '{seat}' must be a non-empty list of model ids")
+        out[seat] = chain
+    picks = {"ladders": out}
+    for key in ("retries", "cooldown_s"):
+        if isinstance(doc.get(key), int) and doc[key] >= 0:
+            picks[key] = doc[key]
+    return picks
 
 
-# --------------------------------------------------------------------------- bundle
+# ---------------------------------------------------------------- bundle
 
 
 def load_defaults() -> dict:
     doc = json.loads(DEFAULTS_PATH.read_text(encoding="utf-8"))
-    doc["source"] = {"kind": "defaults", "detail": "built-in defaults.json"}
-    doc["fetched_at"] = None
-    return doc
+    doc["source"] = "defaults"
+    return {k: doc[k] for k in KEYS}
 
 
-def validate(bundle: dict) -> None:
-    if bundle.get("schema") != SCHEMA:
-        raise ValueError("wrong schema")
-    if not bundle.get("top20"):
+def validate(bundle: dict) -> dict:
+    if set(bundle) != set(KEYS):
+        raise ValueError(f"bundle keys must be exactly {KEYS}")
+    if bundle["source"] not in ("live", "cache", "defaults"):
+        raise ValueError("bad source")
+    if not bundle["top20"] or not all(r.get("ids") for r in bundle["top20"]):
         raise ValueError("empty top20")
-    cap = (bundle.get("price_policy") or {}).get("max_cost_per_mtok")
-    if not isinstance(cap, (int, float)) or not (0 < cap < 100):
+    cap = bundle["price_policy"].get("free_below_per_mtok")
+    if not isinstance(cap, (int, float)) or not 0 < cap < 100:
         raise ValueError("bad price cap")
-
-
-def fetch_online(transport, repo: str = IRE_REPO, ref: str = IRE_REF) -> dict:
-    defaults = load_defaults()
-    warnings = []
-    top20 = parse_top20(transport.get_file(repo, TOP20_PATH, ref).decode("utf-8-sig"))
-    try:
-        shortlist = parse_shortlist(transport.get_file(repo, SHORTLIST_PATH, ref).decode("utf-8-sig"))
-    except NotFound:
-        shortlist, _ = [], warnings.append("IRE shortlist (Top 20+) not found; skipped")
-    cap = None
-    try:
-        cap = parse_price_policy(transport.get_file(repo, POLICY_PATH, ref).decode("utf-8"))
-    except NotFound:
-        pass
-    if cap is None:
-        cap = defaults["price_policy"]["max_cost_per_mtok"]
-        warnings.append("could not read the price line in IRE docs; using the built-in $%.2f cap" % cap)
-    picks, picks_from = None, "derived"
-    try:
-        picks = parse_fallback_picks(transport.get_file(repo, FALLBACK_PICKS_PATH, ref).decode("utf-8"))
-        picks_from = "ire"
-    except NotFound:
-        warnings.append("IRE publishes no fallback picks yet; ladders are derived from the Top 20 and the built-in chains")
-    except (ValueError, json.JSONDecodeError):
-        warnings.append("IRE fallback picks file is malformed; ignored")
-    sha = None
-    try:
-        sha = transport.get_sha(repo, ref)
-    except (FetchError, NotFound):
-        pass
-    bundle = {
-        "schema": SCHEMA,
-        "source": {"kind": "github", "detail": f"{repo}@{ref}", "commit": sha, "auth": transport.label},
-        "fetched_at": now_utc(),
-        "price_policy": {"max_cost_per_mtok": cap, "unit": "USDC per 1M tokens", "source": POLICY_PATH},
-        "top20": top20,
-        "shortlist": shortlist,
-        # Built-in chains stay as the base; IRE picks override when published.
-        "ladders": picks if picks else defaults["ladders"],
-        "ladders_from": picks_from,
-        "retry": defaults["retry"],
-        "warnings": warnings,
-    }
-    validate(bundle)
+    for seat in ("main", "advisor"):
+        if not bundle["ladders"].get(seat):
+            raise ValueError(f"empty {seat} ladder")
+    if not isinstance(bundle["retries"], int) or not isinstance(bundle["cooldown_s"], int):
+        raise ValueError("bad retries/cooldown_s")
     return bundle
 
 
-def cache_file(cache_dir: Path) -> Path:
-    return cache_dir / "ire-bundle.json"
+def fetch_live(gh: GitHub, repo: str = IRE_REPO, ref: str = IRE_REF) -> tuple[dict, str]:
+    """(bundle, commit sha). Raises FetchError or ValueError."""
+    defaults = load_defaults()
+    sha = gh.commit_sha(repo, ref)
+    top20_csv = gh.file(repo, TOP20_PATH, sha)
+    if top20_csv is None:
+        raise FetchError(f"{TOP20_PATH} is missing at {sha[:10]}")
+    top20 = parse_top20(top20_csv)
+    if not top20:
+        raise FetchError("the IRE Top 20 CSV had no usable rows")
+    doc = gh.file(repo, POLICY_PATH, sha)
+    cap = parse_price_cap(doc) if doc else None
+    if cap is None:
+        log(f"could not read the price line in {POLICY_PATH}; keeping the built-in cap")
+        policy = defaults["price_policy"]
+    else:
+        policy = price_policy(cap, f"{POLICY_PATH}@{sha[:10]}")
+    bundle = dict(defaults, source="live", top20=top20, price_policy=policy)
+    picks_text = gh.file(repo, PICKS_PATH, sha)
+    if picks_text is not None:
+        try:
+            picks = parse_picks(picks_text)
+            bundle.update(picks)
+            log(f"using IRE fallback picks from {PICKS_PATH}")
+        except (ValueError, AttributeError, json.JSONDecodeError) as e:
+            log(f"ignoring malformed {PICKS_PATH}: {e}")
+    return validate(bundle), sha
 
 
-def write_cache(cache_dir: Path, bundle: dict) -> None:
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(cache_dir), prefix=".ire-", suffix=".tmp")
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        json.dump(bundle, fh, indent=2)
-    os.replace(tmp, cache_file(cache_dir))
-
-
-def read_cache(cache_dir: Path) -> dict | None:
-    p = cache_file(cache_dir)
-    if not p.is_file():
-        return None
+def write_cache(directory: Path, bundle: dict, sha: str, fetched_at: str) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    record = {"fetched_at": fetched_at, "source_sha": sha, "repo": IRE_REPO, "ref": IRE_REF,
+              "bundle": bundle}
+    fd, tmp = tempfile.mkstemp(dir=str(directory), prefix=".ire-", suffix=".tmp")
     try:
-        b = json.loads(p.read_text(encoding="utf-8"))
-        validate(b)
-    except (ValueError, OSError, json.JSONDecodeError):
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(record, fh, indent=2)
+        os.replace(tmp, directory / CACHE_NAME)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def read_cache(directory: Path) -> dict | None:
+    """The cache record ({fetched_at, source_sha, ..., bundle}) or None if missing or bad."""
+    try:
+        record = json.loads((directory / CACHE_NAME).read_text(encoding="utf-8"))
+        bundle = dict(record["bundle"], source="cache")
+        record["bundle"] = validate(bundle)
+        return record
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, json.JSONDecodeError):
         return None
-    when = b.get("fetched_at")
-    b["source"] = dict(b.get("source") or {}, kind="cache", detail=f"cached copy from {when} ({p})")
-    return b
 
 
-def get_bundle(offline: bool = False, cache_dir: Path | None = None, timeout: float = 8.0) -> dict:
-    cache_dir = cache_dir or default_cache_dir()
-    reasons = []
+def now_utc() -> str:
+    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def get_recommendations(offline: bool = False, timeout: float = DEFAULT_TIMEOUT,
+                        directory: Path | None = None) -> dict:
+    """The one entry point. Always returns a valid bundle; never raises for network trouble."""
+    directory = directory or cache_dir()
     if offline or os.environ.get("CCL_IRE_OFFLINE") == "1":
-        reasons.append("offline mode requested")
+        why = "offline mode"
     else:
-        transports = pick_transports(timeout)
-        if not transports:
-            reasons.append("no GitHub auth on this machine (no GH_TOKEN/GITHUB_TOKEN, gh not logged in, no git credential)")
-        for t in transports:
+        token, where = find_token(timeout)
+        if token is None:
+            why = where
+        else:
             try:
-                b = fetch_online(t)
-                log(f"fetched IRE from GitHub via {t.label}" + (f" @ {b['source']['commit'][:10]}" if b["source"].get("commit") else ""))
+                bundle, sha = fetch_live(GitHub(token, timeout))
+                log(f"source=live  IRE {IRE_REPO}@{sha[:10]} via {where}")
                 try:
-                    write_cache(cache_dir, b)
+                    write_cache(directory, bundle, sha, now_utc())
                 except OSError as e:
-                    log(f"warning: could not write cache: {e}")
-                return b
-            except (FetchError, NotFound, ValueError) as e:
-                reasons.append(f"{t.label}: {e}")
-    for r in reasons:
-        log(f"GitHub fetch skipped/failed: {r}")
-    b = read_cache(cache_dir)
-    if b:
-        log(f"using cached IRE copy from {b.get('fetched_at')}")
-    else:
-        log("no cached IRE copy; using built-in defaults")
-        b = load_defaults()
-    b.setdefault("warnings", [])
-    b["warnings"] = list(b["warnings"]) + [f"GitHub unavailable: {r}" for r in reasons]
-    return b
+                    log(f"could not write the cache ({type(e).__name__}); continuing")
+                return bundle
+            except (FetchError, ValueError) as e:
+                why = f"{e} (auth from {where})"
+    record = read_cache(directory)
+    if record:
+        log(f"source=cache  IRE @{str(record.get('source_sha'))[:10]} fetched {record.get('fetched_at')}"
+            f"  (GitHub skipped: {why})")
+        return record["bundle"]
+    log(f"source=defaults  built-in picks  (GitHub skipped: {why}; no cache yet)")
+    return validate(load_defaults())
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--offline", action="store_true", help="skip GitHub; use cache, then defaults")
-    ap.add_argument("--cache-dir", type=Path, default=None)
-    ap.add_argument("--timeout", type=float, default=8.0)
-    ap.add_argument("--out", type=Path, default=None, help="write the bundle here instead of stdout")
-    ap.add_argument("--summary", action="store_true", help="print a short human summary to stderr")
+    ap = argparse.ArgumentParser(description="Print the launcher's IRE recommendations as JSON.")
+    ap.add_argument("--offline", action="store_true", help="skip GitHub; use the cache, then defaults")
+    ap.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT, help="seconds for the whole fetch (default 5)")
+    ap.add_argument("--cache-dir", type=Path, default=None, help="override the cache folder")
+    ap.add_argument("--out", type=Path, default=None, help="write the JSON here instead of stdout")
     a = ap.parse_args(argv)
-    b = get_bundle(offline=a.offline, cache_dir=a.cache_dir, timeout=a.timeout)
-    text = json.dumps(b, indent=2)
+    bundle = get_recommendations(offline=a.offline, timeout=a.timeout, directory=a.cache_dir)
+    text = json.dumps(bundle, indent=2) + "\n"
     if a.out:
         a.out.parent.mkdir(parents=True, exist_ok=True)
-        a.out.write_text(text + "\n", encoding="utf-8")
+        a.out.write_text(text, encoding="utf-8")
     else:
-        sys.stdout.write(text + "\n")
-    if a.summary:
-        src = b["source"]
-        log(f"source={src['kind']} ({src.get('detail')}) cap=${b['price_policy']['max_cost_per_mtok']}/1M "
-            f"top20={len(b['top20'])} ladders_from={b.get('ladders_from', 'defaults')}")
-        for w in b.get("warnings") or []:
-            log(f"note: {w}")
+        sys.stdout.write(text)
     return 0
 
 
