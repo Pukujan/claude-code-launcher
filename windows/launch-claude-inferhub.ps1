@@ -181,66 +181,232 @@ function Get-ProjectDirs([string]$Path) {
     Sort-Object Name)
 }
 
-function Select-MainModel {
-  $lines = @(foreach ($m in $Models) {
-    $tag = $(if ($m.Eligible) { "eligible" } else { "gated" })
-    $star = $(if ($m.Id -eq $DefaultModelId) { "*" } else { " " })
-    "{0}{1,2}  {2,-28} {3,-42} {4}  ~{5}/Mtok" -f $star, $m.Rank, $m.Name, $m.Id, $tag, $m.Cost
-  })
-  $help = @(
-    "MAIN executor (maps to alias sonnet/main). Up/Down/PgUp/PgDn/Home/End. Enter. Esc quits.",
-    "gated = ranked but not currently recommendation-eligible."
-  )
-  $index = 0
-  while ($true) {
-    Show-Picker -Title "Choose MAIN model (IRE Top 20). Default DeepSeek V4.1 Flash." -Lines $lines -Index $index -Help $help
-    $key = Read-MenuKey
-    $page = (Get-ConsoleLayout -HelpCount $help.Count).MaxItems
-    if ($key.VirtualKeyCode -eq 13) { return $Models[$index] }
-    if ($key.VirtualKeyCode -eq 27) { throw "Cancelled." }
-    $index = Move-MenuIndex -Index $index -Count $lines.Count -KeyCode $key.VirtualKeyCode -PageSize $page
+# ---- launch wizard (no typing) ----
+# Steps: MAIN model, MAIN 2nd (fallback 1), MAIN 3rd (fallback 2), ADVISOR model
+# (or OFF), ADVISOR 2nd, ADVISOR 3rd, folder. Up/Down move, Enter picks and
+# goes on, Left goes back a step (picks are remembered), Right goes on keeping
+# the highlighted pick. Esc quits. Tests fill $script:NavKeys with key names.
+$script:NavKeys = $null
+$script:NavQuiet = $false
+$script:NavTrace = New-Object System.Collections.ArrayList
+$script:ChainCache = @{}
+
+function Read-NavKey {
+  if ($null -ne $script:NavKeys) {
+    if ($script:NavKeys.Count -eq 0) { throw "test keys ran out" }
+    $k = $script:NavKeys[0]; $script:NavKeys.RemoveAt(0)
+    return [ConsoleKey]$k
   }
+  return [Console]::ReadKey($true).Key
 }
 
-function Select-AdvisorModel {
-  $off = @{ Rank = 0; Name = "OFF (no advisor)"; Id = ""; Eligible = $true; Cost = "-" }
-  $choices = @($off) + $Models
-  $lines = @(foreach ($m in $choices) {
-    if ($m.Id -eq "") { "   OFF  (disable advisor tool / seat aliases fall back to main)" }
-    else {
-      $tag = $(if ($m.Eligible) { "eligible" } else { "gated" })
-      "{0,2}  {1,-28} {2,-42} {3}  ~{4}/Mtok" -f $m.Rank, $m.Name, $m.Id, $tag, $m.Cost
+function Select-FromList {
+  # One pointer list. Returns @{ Action = "pick"|"forward"|"back"; Index = n }.
+  param([string]$Title, [string[]]$Lines, [int]$Index, [string[]]$Help)
+  if ($Index -lt 0 -or $Index -ge $Lines.Count) { $Index = 0 }
+  while ($true) {
+    if (-not $script:NavQuiet) { Show-Picker -Title $Title -Lines $Lines -Index $Index -Help $Help }
+    $k = Read-NavKey
+    $page = (Get-ConsoleLayout -HelpCount $Help.Count).MaxItems
+    switch ($k) {
+      ([ConsoleKey]::Enter)      { return @{ Action = "pick"; Index = $Index } }
+      ([ConsoleKey]::RightArrow) { return @{ Action = "forward"; Index = $Index } }
+      ([ConsoleKey]::LeftArrow)  { return @{ Action = "back"; Index = $Index } }
+      ([ConsoleKey]::Escape)     { throw "Cancelled." }
+      default { $Index = Move-MenuIndex -Index $Index -Count $Lines.Count -KeyCode ([int]$k) -PageSize $page }
     }
-  })
-  $help = @(
-    "ADVISOR model (maps to alias opus/advisor) or OFF. Enter selects. Esc quits.",
-    "Mid-session use /advisor opus or /advisor sonnet (aliases), not raw InferHub ids."
-  )
-  $index = 0
-  while ($true) {
-    Show-Picker -Title "Choose ADVISOR model (IRE Top 20) or OFF." -Lines $lines -Index $index -Help $help
-    $key = Read-MenuKey
-    $page = (Get-ConsoleLayout -HelpCount $help.Count).MaxItems
-    if ($key.VirtualKeyCode -eq 13) { return $choices[$index] }
-    if ($key.VirtualKeyCode -eq 27) { throw "Cancelled." }
-    $index = Move-MenuIndex -Index $index -Count $lines.Count -KeyCode $key.VirtualKeyCode -PageSize $page
   }
 }
 
-function Confirm-Launch {
-  param([string]$Folder)
-  $lines = @(
-    "Yes, launch Claude here",
-    "No, pick a different folder"
-  )
-  $help = @("Up and Down move. Enter confirms. Esc quits.")
+function Format-OldModelLine {
+  param($m, [string]$Star = " ")
+  $tag = $(if ($m.Eligible) { "eligible" } else { "gated" })
+  "{0}{1,2}  {2,-28} {3,-42} {4}  ~{5}/Mtok" -f $Star, $m.Rank, $m.Name, $m.Id, $tag, $m.Cost
+}
+
+function Get-DefaultChain {
+  # Default fallbacks for a seat primary, from shared\ladder (cached). Falls
+  # back to the next Top 20 rows when Python is missing.
+  param([string]$Role, [string]$PrimaryId)
+  $ck = $Role + "|" + $PrimaryId
+  if ($script:ChainCache.ContainsKey($ck)) { return $script:ChainCache[$ck] }
+  $chain = @()
+  $py = Get-LadderPython
+  if ($py) {
+    $tmp = [IO.Path]::Combine([IO.Path]::GetTempPath(), "ccl-chain-" + [guid]::NewGuid().ToString("N") + ".json")
+    $extra = @(); if (-not $env:CCL_IRE_JSON) { $extra = @("--no-ire") }
+    $ErrorActionPreference = "Continue"
+    $null = & $py $LadderCli choose @extra --state $tmp --role $Role ("--primary=" + $PrimaryId) --non-interactive 2>&1
+    try { $chain = @((Get-Content -LiteralPath $tmp -Raw -Encoding UTF8 | ConvertFrom-Json).$Role.fallbacks) } catch {}
+    Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue
+  }
+  if ($chain.Count -eq 0) { $chain = @($Models | Where-Object { $_.Id -ne $PrimaryId -and $_.Eligible } | Select-Object -First 2 | ForEach-Object { $_.Id }) }
+  $script:ChainCache[$ck] = $chain
+  return $chain
+}
+
+function Invoke-ModelStep {
+  # A model step. $Slot: main, main1, main2, adv, adv1, adv2. Writes the pick to $S.
+  param([string]$Slot, $S)
+  $role = $(if ($Slot -like "main*") { "main" } else { "advisor" })
+  $seat = $(if ($role -eq "main") { "MAIN" } else { "ADVISOR" })
+  $help = @("Up/Down move. Enter picks. Left = previous step, Right = next step (keeps the highlighted pick). Esc quits.")
+  if ($Slot -eq "main") {
+    $choices = @($Models)
+    $lines = @(foreach ($m in $choices) { Format-OldModelLine $m $(if ($m.Id -eq $DefaultModelId) { "*" } else { " " }) })
+    $want = $(if ($null -ne $S.main) { $S.main } else { $DefaultModelId })
+    $title = "Step 1: choose MAIN model (IRE Top 20). Default DeepSeek V4.1 Flash."
+    $help += "MAIN executor (maps to alias sonnet/main). gated = ranked but not currently recommendation-eligible."
+  } elseif ($Slot -eq "adv") {
+    $choices = @(@{ Rank = 0; Name = "OFF (no advisor)"; Id = ""; Eligible = $true; Cost = "-" }) + $Models
+    $lines = @(foreach ($m in $choices) {
+      if ($m.Id -eq "") { "   OFF  (disable advisor tool / seat aliases fall back to main)" } else { Format-OldModelLine $m }
+    })
+    $want = $(if ($null -ne $S.adv) { $S.adv } else { "" })
+    $title = "Step 4: choose ADVISOR model (IRE Top 20) or OFF."
+    $help += "Mid-session use /advisor opus or /advisor sonnet (aliases), not raw InferHub ids."
+  } else {
+    $base = $(if ($role -eq "main") { "main" } else { "adv" })
+    $primary = $S[$base]
+    $isSecond = $Slot.EndsWith("1")
+    $taken = @($primary); if (-not $isSecond) { $taken += $S[$base + "1"] }
+    $choices = @($Models | Where-Object { $taken -notcontains $_.Id }) + @(@{ Rank = 0; Name = "none"; Id = ""; Eligible = $true; Cost = "-" })
+    $lines = @(foreach ($m in $choices) {
+      if ($m.Id -eq "") { "   none (no further fallback)" } else { Format-OldModelLine $m }
+    })
+    $chain = @(Get-DefaultChain -Role $role -PrimaryId $primary | Where-Object { $taken -notcontains $_ })
+    $dflt = $(if ($chain.Count -gt 0) { $chain[0] } else { "" })
+    $want = $(if ($null -ne $S[$Slot] -and ($taken -notcontains $S[$Slot] -or $S[$Slot] -eq "")) { $S[$Slot] } else { $dflt })
+    $n = $(if ($isSecond) { "2nd" } else { "3rd" })
+    $step = @{ main1 = 2; main2 = 3; adv1 = 5; adv2 = 6 }[$Slot]
+    $title = "Step " + $step + ": " + $seat + " " + $n + " model (fallback " + $(if ($isSecond) { 1 } else { 2 }) + ") after " + $primary + "   default: " + $(if ($dflt) { $dflt } else { "none" })
+  }
   $index = 0
+  for ($i = 0; $i -lt $choices.Count; $i++) { if ($choices[$i].Id -eq $want) { $index = $i; break } }
+  $r = Select-FromList -Title $title -Lines $lines -Index $index -Help $help
+  if ($r.Action -ne "back") { $S[$Slot] = $choices[$r.Index].Id }
+  $script:NavTrace.Add(("  step {0,-6} {1,-7} -> {2}" -f $Slot, $r.Action, $(if ($r.Action -eq "back") { "(back)" } elseif ($S[$Slot]) { $S[$Slot] } else { "OFF/none" }))) | Out-Null
+  return $r.Action
+}
+
+function Get-StartDir {
+  # Per-PC start folder: $env:CCL_START_DIR, else "start_dir" in
+  # %LOCALAPPDATA%\claude-code-launcher\settings.json, else $Root.
+  $cands = @($env:CCL_START_DIR)
+  $base = $(if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $HOME "AppData\Local" })
+  $settings = Join-Path $base "claude-code-launcher\settings.json"
+  if (Test-Path -LiteralPath $settings) {
+    try { $cands += [string](Get-Content -LiteralPath $settings -Raw -Encoding UTF8 | ConvertFrom-Json).start_dir } catch {}
+  }
+  $cands += @($Root, $SecondaryRoot)
+  foreach ($c in $cands) {
+    if ($c -and (Test-Path -LiteralPath $c -PathType Container)) { return (Resolve-Path -LiteralPath $c).Path }
+  }
+  return ""
+}
+
+function Get-FolderView {
+  # Entries for one level: the drive list when $Path is empty, else the
+  # (non-dot) subfolders of $Path.
+  param([string]$Path)
+  if (-not $Path) {
+    return @(foreach ($d in [IO.DriveInfo]::GetDrives()) {
+      if ($d.IsReady -and ($d.DriveType -eq "Fixed" -or $d.DriveType -eq "Network" -or $d.DriveType -eq "Removable")) {
+        [pscustomobject]@{ Label = $d.Name; FullName = $d.RootDirectory.FullName }
+      }
+    })
+  }
+  return @(foreach ($d in @(Get-ProjectDirs $Path)) {
+    [pscustomobject]@{ Label = ($d.Name + "\"); FullName = $d.FullName }
+  })
+}
+
+function Step-FolderNav {
+  # One key of the folder step. $State = @{ Path; Index }; Path "" = drive list.
+  # Returns @{ Done = $false }, @{ Done = $true; Path = <dir> } for a pick, or
+  # @{ Done = $true; Back = $true } for Left at the drive list.
+  param($State, [ConsoleKey]$Key, [int]$PageSize = 10)
+  $view = @(Get-FolderView -Path $State.Path)
+  switch ($Key) {
+    ([ConsoleKey]::RightArrow) {
+      if ($view.Count -gt 0) { $State.Path = $view[$State.Index].FullName; $State.Index = 0 }
+    }
+    ([ConsoleKey]::LeftArrow) {
+      if (-not $State.Path) { return @{ Done = $true; Back = $true } }
+      $child = $State.Path.TrimEnd('\')
+      if ($child -match '^[A-Za-z]:$') { $parent = "" }          # D:\ -> drive list
+      else { $parent = [IO.Path]::GetDirectoryName($child) }       # D:\development -> D:\
+      $State.Path = $parent
+      $State.Index = 0
+      $up = @(Get-FolderView -Path $parent)
+      for ($i = 0; $i -lt $up.Count; $i++) { if ($up[$i].FullName.TrimEnd('\') -eq $child) { $State.Index = $i; break } }
+    }
+    ([ConsoleKey]::Enter) {
+      if ($view.Count -gt 0) { return @{ Done = $true; Path = $view[$State.Index].FullName } }
+      if ($State.Path) { return @{ Done = $true; Path = $State.Path } }
+    }
+    ([ConsoleKey]::Escape) { throw "Cancelled." }
+    default {
+      # ConsoleKey values are virtual key codes: Up/Down/PgUp/PgDn/Home/End.
+      $State.Index = Move-MenuIndex -Index $State.Index -Count $view.Count -KeyCode ([int]$Key) -PageSize $PageSize
+    }
+  }
+  return @{ Done = $false }
+}
+
+function Invoke-FolderStep {
+  # Folder step. Returns the folder, or $null when Left at the drive list goes back.
+  param($State)
+  $help = @(
+    "Up/Down move. Right opens the highlighted folder, Left goes up (from the drive list: previous step).",
+    "Enter launches Claude in the highlighted folder (in this folder when it has no subfolders). Esc quits."
+  )
   while ($true) {
-    Show-Picker -Title ("Launch Claude Code in " + $Folder + " ?") -Lines $lines -Index $index -Help $help
-    $key = Read-MenuKey
-    if ($key.VirtualKeyCode -eq 13) { return ($index -eq 0) }
-    if ($key.VirtualKeyCode -eq 27) { throw "Cancelled." }
-    $index = Move-MenuIndex -Index $index -Count $lines.Count -KeyCode $key.VirtualKeyCode -PageSize 1
+    $view = @(Get-FolderView -Path $State.Path)
+    $page = (Get-ConsoleLayout -HelpCount $help.Count).MaxItems
+    if ($State.Index -ge $view.Count) { $State.Index = 0 }
+    if (-not $script:NavQuiet) {
+      $title = "Step 7: choose a project folder.   " + $(if ($State.Path) { $State.Path } else { "(drives)" })
+      $lines = @($view | ForEach-Object { $_.Label })
+      if ($lines.Count -eq 0) { $lines = @() }
+      Show-Picker -Title $title -Lines $lines -Index $State.Index -Help $help
+    }
+    $k = Read-NavKey
+    $r = Step-FolderNav -State $State -Key $k -PageSize $page
+    $script:NavTrace.Add(("  folder key={0,-10} at {1}" -f $k, $(if ($State.Path) { $State.Path } else { "(drives)" }))) | Out-Null
+    if ($r.Done) {
+      if ($r.Back) { return $null }
+      return $r.Path
+    }
+  }
+}
+
+function Invoke-LaunchWizard {
+  # Returns @{ Main; Advisor; MainFallbacks; AdvisorFallbacks; Folder }.
+  $S = @{ main = $null; main1 = $null; main2 = $null; adv = $null; adv1 = $null; adv2 = $null }
+  $folderState = @{ Path = (Get-StartDir); Index = 0 }
+  $steps = @("main", "main1", "main2", "adv", "adv1", "adv2", "folder")
+  $i = 0; $dir = 1; $folder = $null
+  while ($i -lt $steps.Count) {
+    if ($i -lt 0) { $i = 0 }
+    $slot = $steps[$i]
+    if (($slot -eq "adv1" -or $slot -eq "adv2") -and -not $S.adv) { $i += $dir; continue }   # advisor OFF
+    if ($slot -eq "main2" -and -not $S.main1) { $S.main2 = ""; $i += $dir; continue }          # no 2nd, no 3rd
+    if ($slot -eq "adv2" -and -not $S.adv1) { $S.adv2 = ""; $i += $dir; continue }
+    if ($slot -eq "folder") {
+      $folder = Invoke-FolderStep -State $folderState
+      if ($folder) { break }
+      $dir = -1; $i--; continue
+    }
+    $action = Invoke-ModelStep -Slot $slot -S $S
+    if ($action -eq "back") { $dir = -1; $i-- } else { $dir = 1; $i++ }
+  }
+  $main = $Models | Where-Object { $_.Id -eq $S.main } | Select-Object -First 1
+  $adv = $(if ($S.adv) { $Models | Where-Object { $_.Id -eq $S.adv } | Select-Object -First 1 } else { @{ Rank = 0; Name = "OFF (no advisor)"; Id = ""; Eligible = $true; Cost = "-" } })
+  return @{
+    Main = $main; Advisor = $adv; Folder = $folder
+    MainFallbacks = @(@($S.main1, $S.main2) | Where-Object { $_ })
+    AdvisorFallbacks = @(@($S.adv1, $S.adv2) | Where-Object { $_ })
   }
 }
 
@@ -266,100 +432,6 @@ function Get-ProjectEntries {
   return $entries
 }
 
-function Get-FolderRoots {
-  # Root list of the folder navigator: $Root (D:\development) then $SecondaryRoot (C:\work).
-  $roots = @()
-  if (Test-Path -LiteralPath $Root) {
-    $full = (Resolve-Path -LiteralPath $Root).Path.TrimEnd('\')
-    $roots += [pscustomobject]@{ Label = ($full + "  (default root)"); FullName = $full }
-  }
-  if ($SecondaryRoot -and (Test-Path -LiteralPath $SecondaryRoot)) {
-    $full = (Resolve-Path -LiteralPath $SecondaryRoot).Path.TrimEnd('\')
-    $roots += [pscustomobject]@{ Label = ("[C:\work] " + $full + "  (secondary root)"); FullName = $full }
-  }
-  return $roots
-}
-
-function Get-FolderView {
-  # Entries for one level: the root list when $Path is empty, else the
-  # (non-dot) subfolders of $Path.
-  param([string]$Path, $Roots)
-  if (-not $Path) { return @($Roots) }
-  return @(foreach ($d in @(Get-ProjectDirs $Path)) {
-    [pscustomobject]@{ Label = ($d.Name + "\"); FullName = $d.FullName }
-  })
-}
-
-function Step-FolderNav {
-  # One key of the folder navigator. $State = @{ Path; Index; Stack; Roots }.
-  # Path "" = root list. Stack holds the parent paths and their pointer rows.
-  # Returns @{ Done = $false } to keep going, @{ Done = $true; Path = <dir> }
-  # for a pick, or @{ Done = $true; Path = $null } for cancel.
-  param($State, [ConsoleKey]$Key, [int]$PageSize = 10)
-  $view = @(Get-FolderView -Path $State.Path -Roots $State.Roots)
-  switch ($Key) {
-    ([ConsoleKey]::RightArrow) {
-      if ($view.Count -gt 0) {
-        $State.Stack.Add(@($State.Path, $State.Index)) | Out-Null
-        $State.Path = $view[$State.Index].FullName
-        $State.Index = 0
-      }
-    }
-    ([ConsoleKey]::LeftArrow) {
-      if ($State.Path) {
-        $last = $State.Stack.Count - 1
-        if ($last -ge 0) {
-          $State.Path = $State.Stack[$last][0]; $State.Index = $State.Stack[$last][1]
-          $State.Stack.RemoveAt($last)
-        } else { $State.Path = ""; $State.Index = 0 }
-      }
-    }
-    ([ConsoleKey]::Enter) {
-      if ($view.Count -gt 0) { return @{ Done = $true; Path = $view[$State.Index].FullName } }
-      if ($State.Path) { return @{ Done = $true; Path = $State.Path } }
-    }
-    ([ConsoleKey]::Escape) {
-      if ($State.Path) { return @{ Done = $true; Path = $State.Path } }
-      return @{ Done = $true; Path = $null }
-    }
-    default {
-      # ConsoleKey values are virtual key codes: Up/Down/PgUp/PgDn/Home/End.
-      $State.Index = Move-MenuIndex -Index $State.Index -Count $view.Count -KeyCode ([int]$Key) -PageSize $PageSize
-    }
-  }
-  return @{ Done = $false }
-}
-
-function Invoke-FolderNav {
-  # Run the navigator over a key sequence (tests) or live keys ($Keys = $null).
-  param($Keys = $null, [switch]$Quiet)
-  $roots = @(Get-FolderRoots)
-  if ($roots.Count -eq 0) { throw "No project folders: neither $Root nor $SecondaryRoot exists" }
-  $state = @{ Path = ""; Index = 0; Stack = (New-Object System.Collections.ArrayList); Roots = $roots }
-  $help = @(
-    "Up/Down move. Right opens. Left goes back. Enter chooses the highlighted folder.",
-    "Esc chooses the folder you are in (quits at the top list). Confirm before launch."
-  )
-  $i = 0
-  while ($true) {
-    $view = @(Get-FolderView -Path $state.Path -Roots $roots)
-    $page = (Get-ConsoleLayout -HelpCount $help.Count).MaxItems
-    if (-not $Quiet) {
-      $title = $(if ($state.Path) { "Choose a project folder: " + $state.Path } else { "Choose a project folder (default root " + $Root + ")" })
-      Show-Picker -Title $title -Lines @($view | ForEach-Object { $_.Label }) -Index $state.Index -Help $help
-    }
-    if ($null -ne $Keys) {
-      if ($i -ge @($Keys).Count) { return $null }
-      $k = [ConsoleKey]@($Keys)[$i]; $i++
-    } else {
-      $k = [Console]::ReadKey($true).Key
-    }
-    $r = Step-FolderNav -State $state -Key $k -PageSize $page
-    if ($Quiet) { Write-Output ("  key={0,-10} path={1} index={2}" -f $k, $(if ($state.Path) { $state.Path } else { "<roots>" }), $state.Index) }
-    if ($r.Done) { return $r.Path }
-  }
-}
-
 function Select-ProjectFolderNumbered {
   # Input is redirected (no console keys): plain numbered list.
   $entries = @(Get-ProjectEntries)
@@ -369,15 +441,6 @@ function Select-ProjectFolderNumbered {
   $n = 0
   if (-not [int]::TryParse($ans, [ref]$n) -or $n -lt 1 -or $n -gt $entries.Count) { throw "Cancelled." }
   return $entries[$n - 1].FullName
-}
-
-function Select-ProjectFolder {
-  if ([Console]::IsInputRedirected) { return Select-ProjectFolderNumbered }
-  while ($true) {
-    $chosen = Invoke-FolderNav
-    if (-not $chosen) { throw "Cancelled." }
-    if (Confirm-Launch -Folder $chosen) { return $chosen }
-  }
 }
 
 function Sync-ModelPicker {
@@ -539,53 +602,18 @@ function Get-LadderPython {
   return $null
 }
 
-function Select-Ladder {
-  # After each seat: Enter on the first row keeps the default fallback chain,
-  # or Enter on up to 3 models (in order) builds your own. Esc quits.
-  param([string]$Role, [string]$PrimaryId)
-  $mode = $(if ($env:CLAUDE_IH_LADDER) { $env:CLAUDE_IH_LADDER } else { "ask" })
-  if ($mode -eq "off") { return }
+function Save-Ladders {
+  # Record the picked 2nd/3rd models as each seat's fallback ladder.
+  param($W)
+  if ($env:CLAUDE_IH_LADDER -eq "off") { return }
   $py = Get-LadderPython
   if (-not $py) { return }
+  Remove-Item -LiteralPath $LadderState -ErrorAction SilentlyContinue
   $ErrorActionPreference = "Continue"   # the helper logs on stderr; that is not a failure
-  $null = & $py $LadderCli choose --state $LadderState --role $Role --primary $PrimaryId --non-interactive 2>&1
-  if (-not $PrimaryId -or $mode -eq "default" -or [Console]::IsInputRedirected) { return }
-  $default = @()
-  try { $default = @((Get-Content -LiteralPath $LadderState -Raw -Encoding UTF8 | ConvertFrom-Json).$Role.fallbacks) } catch {}
-  $choices = @($Models | Where-Object { $_.Id -ne $PrimaryId })
-  $picks = New-Object System.Collections.ArrayList
-  $help = @(
-    "Enter on the first row keeps that chain. Enter on a model adds it as the next fallback (up to 3).",
-    "Up/Down/PgUp/PgDn/Home/End. Esc quits."
-  )
-  $index = 0
-  while ($true) {
-    if ($picks.Count -gt 0) { $top = "   Use my chain: " + $PrimaryId + " > " + ($picks -join " > ") }
-    elseif ($default.Count -gt 0) { $top = "   Default chain: " + $PrimaryId + " > " + ($default -join " > ") }
-    else { $top = "   Default chain: (no fallbacks)" }
-    $lines = @($top) + @(foreach ($m in $choices) {
-      $n = $picks.IndexOf($m.Id)
-      $mark = $(if ($n -ge 0) { "[" + ($n + 1) + "]" } else { "   " })
-      $tag = $(if ($m.Eligible) { "eligible" } else { "gated" })
-      "{0}{1,2}  {2,-28} {3,-42} {4}  ~{5}/Mtok" -f $mark, $m.Rank, $m.Name, $m.Id, $tag, $m.Cost
-    })
-    Show-Picker -Title ("Fallback chain for " + $Role.ToUpper() + " (" + $PrimaryId + ")") -Lines $lines -Index $index -Help $help
-    $key = Read-MenuKey
-    $page = (Get-ConsoleLayout -HelpCount $help.Count).MaxItems
-    if ($key.VirtualKeyCode -eq 27) { throw "Cancelled." }
-    if ($key.VirtualKeyCode -eq 13) {
-      if ($index -eq 0) { break }
-      $id = $choices[$index - 1].Id
-      if ($picks.IndexOf($id) -lt 0) { $picks.Add($id) | Out-Null }
-      if ($picks.Count -ge 3) { break }
-      continue
-    }
-    $index = Move-MenuIndex -Index $index -Count $lines.Count -KeyCode $key.VirtualKeyCode -PageSize $page
-  }
-  if ($picks.Count -gt 0) {
-    $null = & $py $LadderCli choose --state $LadderState --role $Role --primary $PrimaryId --picks ($picks -join ",") 2>&1
-    if ($LASTEXITCODE -ne 0) { Write-Host "warning: those fallbacks were not accepted; the default chain stays" }
-  }
+  $null = & $py $LadderCli choose --state $LadderState --role main ("--primary=" + $W.Main.Id) ("--picks=" + ($W.MainFallbacks -join ",")) 2>&1
+  if ($LASTEXITCODE -ne 0) { Write-Host "warning: main fallbacks not accepted; the stock chains stay" }
+  $null = & $py $LadderCli choose --state $LadderState --role advisor ("--primary=" + $W.Advisor.Id) ("--picks=" + ($W.AdvisorFallbacks -join ",")) 2>&1
+  if ($LASTEXITCODE -ne 0) { Write-Host "warning: advisor fallbacks not accepted; the stock chains stay" }
 }
 
 function Apply-Ladder {
@@ -601,12 +629,20 @@ function Apply-Ladder {
 # ---- interactive flow ----
 if ($env:CCL_LAUNCHER_LIBRARY_ONLY -eq "1") { return }   # tests dot-source the functions only
 Get-IreRecommendations
-Remove-Item -LiteralPath $LadderState -ErrorAction SilentlyContinue
-$main = Select-MainModel
-Select-Ladder -Role main -PrimaryId $main.Id
-$advisor = Select-AdvisorModel
-Select-Ladder -Role advisor -PrimaryId $advisor.Id
-$folder = Select-ProjectFolder
+if ([Console]::IsInputRedirected) {
+  # No console keys: default seats, advisor OFF, default chains, numbered folder list.
+  $w = @{ Main = ($Models | Where-Object { $_.Id -eq $DefaultModelId } | Select-Object -First 1)
+          Advisor = @{ Rank = 0; Name = "OFF (no advisor)"; Id = ""; Eligible = $true; Cost = "-" } }
+  $w.MainFallbacks = @(Get-DefaultChain -Role main -PrimaryId $DefaultModelId | Select-Object -First 2)
+  $w.AdvisorFallbacks = @()
+  $w.Folder = Select-ProjectFolderNumbered
+} else {
+  $w = Invoke-LaunchWizard
+}
+$main = $w.Main
+$advisor = $w.Advisor
+$folder = $w.Folder
+Save-Ladders -W $w
 
 $advisorId = $advisor.Id
 $advisorLabel = $(if ($advisorId) { $advisor.Name + " (" + $advisorId + ")" } else { "OFF" })
