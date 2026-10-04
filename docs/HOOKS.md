@@ -60,6 +60,31 @@ right after each seat is picked, and once more after the last seat apply. See
   `BRAVE_API_KEY` set. Each search logs a timestamped `[web_search]` line in
   `shared/litellm/logs/litellm.out.log`. A `search_tools` list already in
   `config.yaml` wins.
+- **SlopSearX first, paid APIs last (Windows, issue #51).** SlopSearX
+  (https://github.com/magnus919/SlopSearX) is a SearXNG-compatible meta search
+  service that runs locally without Docker. `windows\slopsearx\setup-slopsearx.ps1`
+  clones it next to this checkout, builds its venv with uv, starts it on
+  `127.0.0.1:18080` (`-Port` to change) from a logon scheduled task with no
+  window (`SlopSearX`; start script and logs in `%USERPROFILE%\.slopsearx`),
+  and writes the chain to the proxy's machine-local env file
+  `shared\litellm\.env.local` (gitignored). `start-litellm.ps1` loads that
+  file after the desktop and InferHub env files (`-LocalEnvFile` to point
+  elsewhere). A typical file:
+
+  ```
+  CCL_WEB_SEARCH_CHAIN=searxng,ddgs,tavily,exa
+  SEARXNG_API_BASE=http://127.0.0.1:18080
+  CCL_ENV_ALIASES=TAVILY_API_KEY=<name in the desktop env>,EXA_API_KEY=<name>
+  ```
+
+  `CCL_ENV_ALIASES` copies keys that the desktop env keeps under other names
+  to the names LiteLLM reads, so the secret stays in one file; only names go
+  in `.env.local`. `exa` is short for LiteLLM's `exa_ai`. With this chain a
+  search goes to SlopSearX, then ddgs if SlopSearX is down or empty, then
+  Tavily and Exa (paid) only if both free sources fail. The `[web_search]`
+  log line names the source that answered (`searxng ok: ...`). Run the setup
+  with `-Uninstall` to remove the task; the proxy needs a restart to pick up a
+  changed chain.
 - **Fast seat max_tokens floor.** WebFetch summaries go to the fast seat with a
   small `max_tokens`; reasoning models could spend all of it thinking and send
   back nothing. `shared/litellm/fast_min_tokens.py` raises `max_tokens` to 4096

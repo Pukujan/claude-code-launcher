@@ -60,6 +60,11 @@ exists of the Desktop known folder, `%USERPROFILE%\Desktop` and
 `%OneDrive%\Desktop`, and looks for the IRE `.env` next to this checkout
 before `D:\development`.
 
+Since issue #51 it also loads an optional machine-local `shared\litellm\.env.local`
+(`-LocalEnvFile`, gitignored) after the two env files, forwards it in
+`-Background` mode, and applies `CCL_ENV_ALIASES` (copies an already-loaded
+value to the name LiteLLM reads, printing names only).
+
 `stop-litellm.ps1` was rewritten. The old one stopped every python or litellm
 process whose path looked related and then killed whatever owned port 4000. The
 new one stops only the PID in `litellm.pid`, and only if that process is this
