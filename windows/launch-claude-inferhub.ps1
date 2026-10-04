@@ -283,7 +283,7 @@ function Write-LastPicks {
   $c = Read-LastPicks
   foreach ($k in @($Values.Keys)) { $c[$k] = $Values[$k] }
   $o = [ordered]@{}
-  foreach ($k in @("main", "main1", "main2", "adv", "adv1", "adv2", "start_dir")) { if ($c.ContainsKey($k)) { $o[$k] = $c[$k] } }
+  foreach ($k in @("main", "main1", "main2", "adv", "adv1", "adv2", "start_dir", "launch")) { if ($c.ContainsKey($k)) { $o[$k] = $c[$k] } }
   try { [IO.File]::WriteAllText($p, ($o | ConvertTo-Json), [Text.UTF8Encoding]::new($false)) } catch {}
 }
 
@@ -416,7 +416,7 @@ function Invoke-FolderStep {
   param($State)
   $help = @(
     "Up/Down move. Right opens the highlighted folder. Left goes up a folder. Backspace: back to models. D: set default.",
-    "Enter launches Claude in the highlighted folder (in this folder when it has no subfolders). Esc quits."
+    "Enter picks the highlighted folder (this folder when it has no subfolders). Esc quits."
   )
   while ($true) {
     $view = @(Get-FolderView -Path $State.Path)
@@ -439,13 +439,26 @@ function Invoke-FolderStep {
   }
 }
 
+function Invoke-LaunchStep {
+  # Last step: launch with Claude Code (default) or UltraCode. Returns "claude",
+  # "ultracode", or $null when Left goes back to the folder.
+  param($Last = @{})
+  $ids = @("claude", "ultracode")
+  $index = $(if ($Last["launch"] -eq "ultracode") { 1 } else { 0 })
+  $r = Select-FromList -Title "Step 8: launch with" -Lines @("Claude Code", "UltraCode (UltraCode-Shim in front of the proxy)") -Index $index `
+    -Help @("Up/Down move. Enter launches. Left = back to the folder. Esc quits.")
+  $script:NavTrace.Add(("  step launch  {0,-7} -> {1}" -f $r.Action, $(if ($r.Action -eq "back") { "(back)" } else { $ids[$r.Index] }))) | Out-Null
+  if ($r.Action -eq "back") { return $null }
+  return $ids[$r.Index]
+}
+
 function Invoke-LaunchWizard {
-  # Returns @{ Main; Advisor; MainFallbacks; AdvisorFallbacks; Folder }.
+  # Returns @{ Main; Advisor; MainFallbacks; AdvisorFallbacks; Folder; Launch }.
   $S = @{ main = $null; main1 = $null; main2 = $null; adv = $null; adv1 = $null; adv2 = $null }
   $last = Read-LastPicks
   $folderState = @{ Path = (Get-StartDir); Index = 0; Message = "" }
-  $steps = @("main", "main1", "main2", "adv", "adv1", "adv2", "folder")
-  $i = 0; $dir = 1; $folder = $null
+  $steps = @("main", "main1", "main2", "adv", "adv1", "adv2", "folder", "launch")
+  $i = 0; $dir = 1; $folder = $null; $launch = $null
   while ($i -lt $steps.Count) {
     if ($i -lt 0) { $i = 0 }
     $slot = $steps[$i]
@@ -454,8 +467,13 @@ function Invoke-LaunchWizard {
     if ($slot -eq "adv2" -and -not $S.adv1) { $i += $dir; continue }
     if ($slot -eq "folder") {
       $folder = Invoke-FolderStep -State $folderState
-      if ($folder) { Save-LastPicks -S $S; break }
+      if ($folder) { $dir = 1; $i++; continue }
       $dir = -1; $i--; $folderState = @{ Path = (Get-StartDir); Index = 0; Message = "" }; continue
+    }
+    if ($slot -eq "launch") {
+      $launch = Invoke-LaunchStep -Last $last
+      if ($launch) { Save-LastPicks -S $S; Write-LastPicks @{ launch = $launch }; break }
+      $dir = -1; $i--; continue
     }
     $action = Invoke-ModelStep -Slot $slot -S $S -Last $last
     if ($action -eq "back") { $dir = -1; $i-- } else { $dir = 1; $i++ }
@@ -463,7 +481,7 @@ function Invoke-LaunchWizard {
   $main = $Models | Where-Object { $_.Id -eq $S.main } | Select-Object -First 1
   $adv = $(if ($S.adv) { $Models | Where-Object { $_.Id -eq $S.adv } | Select-Object -First 1 } else { @{ Rank = 0; Name = "OFF (no advisor)"; Id = ""; Eligible = $true; Cost = "-" } })
   return @{
-    Main = $main; Advisor = $adv; Folder = $folder
+    Main = $main; Advisor = $adv; Folder = $folder; Launch = $launch
     MainFallbacks = @($(if ($S.main1) { @($S.main1, $S.main2) }) | Where-Object { $_ })
     AdvisorFallbacks = @($(if ($S.adv -and $S.adv1) { @($S.adv1, $S.adv2) }) | Where-Object { $_ })
   }
@@ -543,6 +561,69 @@ function Sync-ModelPicker {
   } catch {
     Write-Host ("warning: could not sync model picker: " + $_.Exception.Message)
   }
+}
+
+# ---- UltraCode (optional "launch with" target) ----
+# OnlyTerp/UltraCode-Shim (MIT, standard-library Python) runs in front of the
+# proxy. Fetched on demand at a pinned commit into a per-user cache, never
+# vendored here.
+$UltraCodeCommit = "1870e58e2622c8946c9c7cd45483aa47d7bd5867"
+
+function Get-UltraCodeShim {
+  $base = $(if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $HOME "AppData\Local" })
+  $dir = Join-Path $base "claude-code-launcher\ultracode-shim"
+  $stamp = Join-Path $dir ".commit"
+  if ((Test-Path -LiteralPath (Join-Path $dir "proxy.py")) -and (Get-Content -LiteralPath $stamp -ErrorAction SilentlyContinue) -eq $UltraCodeCommit) { return $dir }
+  Write-Host ("Fetching UltraCode-Shim " + $UltraCodeCommit.Substring(0, 7) + " ...")
+  $tmp = Join-Path ([IO.Path]::GetTempPath()) ("ultracode-" + [guid]::NewGuid().ToString("N"))
+  $zip = $tmp + ".zip"
+  Invoke-WebRequest -UseBasicParsing -Uri ("https://github.com/OnlyTerp/UltraCode-Shim/archive/" + $UltraCodeCommit + ".zip") -OutFile $zip
+  Expand-Archive -LiteralPath $zip -DestinationPath $tmp -Force
+  if (Test-Path -LiteralPath $dir) { Remove-Item -LiteralPath $dir -Recurse -Force }
+  New-Item -ItemType Directory -Force -Path (Split-Path $dir) | Out-Null
+  Move-Item -LiteralPath (Join-Path $tmp ("UltraCode-Shim-" + $UltraCodeCommit)) -Destination $dir
+  Set-Content -LiteralPath $stamp -Value $UltraCodeCommit -Encoding ASCII
+  Remove-Item -LiteralPath $zip, $tmp -Recurse -Force -ErrorAction SilentlyContinue
+  return $dir
+}
+
+function Open-UltraCodeShim {
+  # Writes the shim's config.json (claude-main and claude-worker, both passed
+  # through to the keyless proxy as the seat alias), starts proxy.py on a free
+  # port from 4100 (never 4000) and returns @{ Process; Base }.
+  param([string]$Model)
+  $dir = Get-UltraCodeShim
+  $port = 4100
+  $busy = @([Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners() | ForEach-Object { $_.Port })
+  while ($busy -contains $port) { $port++ }
+  $route = [ordered]@{ upstream = $ProxyBase; model = $Model }
+  $conf = [ordered]@{
+    models = @([ordered]@{ id = "claude-main"; display_name = "Main seat ($Model)" }, [ordered]@{ id = "claude-worker"; display_name = "Worker ($Model)" })
+    routes = [ordered]@{ "claude-main" = $route; "claude-worker" = $route }
+  }
+  $cfg = Join-Path $dir "config.json"
+  [IO.File]::WriteAllText($cfg, ($conf | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
+  $env:UC_UPSTREAM = $ProxyBase   # count_tokens and anything unrouted go to the proxy, not api.anthropic.com
+  $env:UC_SELECTOR = "0"
+  $env:UC_CONFIG = $cfg
+  $env:UC_LISTEN_PORT = "$port"
+  $uv = (Get-Command uv -ErrorAction Stop).Source
+  $p = Start-Process -FilePath $uv -ArgumentList @("run", "--no-project", "python", ('"' + (Join-Path $dir "proxy.py") + '"')) `
+    -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $dir "shim.out.log") -RedirectStandardError (Join-Path $dir "shim.err.log")
+  $shimBase = "http://127.0.0.1:$port"
+  for ($t = 0; $t -lt 60; $t++) {
+    if ($p.HasExited) { throw "UltraCode-Shim exited early; see $dir\shim.err.log" }
+    try { if ((Invoke-WebRequest -UseBasicParsing -Uri "$shimBase/healthz" -TimeoutSec 2).StatusCode -eq 200) { return @{ Process = $p; Base = $shimBase } } } catch {}
+    Start-Sleep -Milliseconds 500
+  }
+  Close-UltraCodeShim @{ Process = $p }
+  throw "UltraCode-Shim did not come up on $shimBase; see $dir\shim.err.log"
+}
+
+function Close-UltraCodeShim {
+  # Stops the shim by its own PID (and the python child uv started).
+  param($Shim)
+  if ($Shim -and $Shim.Process -and -not $Shim.Process.HasExited) { & taskkill.exe /PID $Shim.Process.Id /T /F 2>&1 | Out-Null }
 }
 
 function Test-ProxyHealth {
@@ -695,6 +776,7 @@ if ([Console]::IsInputRedirected) {
   $w.MainFallbacks = @(Get-DefaultChain -Role main -PrimaryId $DefaultModelId | Select-Object -First 2)
   $w.AdvisorFallbacks = @()
   $w.Folder = Select-ProjectFolderNumbered
+  $w.Launch = "claude"
 } else {
   $w = Invoke-LaunchWizard
 }
@@ -789,7 +871,15 @@ Write-Host ("main=" + $main.Id + "  (" + $main.Name + ")")
 Write-Host ("advisor=" + $advisorLabel)
 Write-Host "permission=bypassPermissions (auto mode is Anthropic-only)"
 Write-Host "betas=experimental ON (advisor_20260301 via LiteLLM orchestration)"
-Write-Host "Starting Claude Code..."
-& claude --model $seatAlias --permission-mode bypassPermissions
+if ($w.Launch -eq "ultracode") {
+  $shim = Open-UltraCodeShim -Model $seatAlias
+  $env:ANTHROPIC_BASE_URL = $shim.Base
+  Write-Host ("ultracode=" + $shim.Base + " (UltraCode-Shim PID " + $shim.Process.Id + ") -> " + $ProxyBase)
+  Write-Host "Starting Claude Code through UltraCode-Shim..."
+  try { & claude --model claude-main --permission-mode bypassPermissions } finally { Close-UltraCodeShim $shim }
+} else {
+  Write-Host "Starting Claude Code..."
+  & claude --model $seatAlias --permission-mode bypassPermissions
+}
 Write-Host ("claude exited " + $LASTEXITCODE)
 pause

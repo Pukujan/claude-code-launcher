@@ -115,6 +115,7 @@ from it instead of the Top 20.
 | `INFERHUB_TOP20_CSV` | `shared/litellm/config/top20-builtin.csv` | A real IRE Top 20 CSV, if you have one |
 | `CLAUDE_IH_PROJECT`, `CLAUDE_IH_MAIN`, `CLAUDE_IH_ADVISOR` | (ask) | Skip a picker. The old names `ACS_FOLDER`, `ACS_MAIN_ID`, `ACS_ADVISOR_ID` still work. |
 | `CCL_IRE_OFFLINE` | unset | `1` skips GitHub and uses the cached or built-in list |
+| `CLAUDE_IH_LAUNCH` | (ask; `claude` with no terminal) | `claude` or `ultracode` skips the "launch with" picker. UltraCode runs [UltraCode-Shim](https://github.com/OnlyTerp/UltraCode-Shim) (pinned commit, cached in `~/.cache/claude-code-launcher/ultracode-shim`) on a free port from 4100 in front of the proxy. |
 
 ## Stopping the proxy
 
