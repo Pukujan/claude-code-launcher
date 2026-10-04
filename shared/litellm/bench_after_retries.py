@@ -43,10 +43,20 @@ def _status(exc) -> int | None:
     return None
 
 
+# The router's own "every deployment of this group is benched" error. It says nothing
+# new about the upstream, so it never benches anything (issue #53).
+_ROUTER_NO_DEPLOYMENTS = ("No deployments available", "RouterRateLimitError")
+
+
 def should_bench(exc) -> bool:
     """Same rule as LiteLLM's _is_cooldown_required: 429/401/404/408 and 5xx bench,
-    other 4xx (bad request, context window) do not; connection errors never do."""
+    other 4xx (bad request, context window) do not; connection errors never do.
+    Empty replies (request_fixes.py) and the router's own no-deployments error never do."""
     if exc is None or "APIConnectionError" in type(exc).__name__ or "APIConnectionError" in str(exc)[:200]:
+        return False
+    if getattr(exc, "ccl_empty_reply", False) or "empty reply (no text, no tool call)" in str(exc)[:300]:
+        return False
+    if any(m in type(exc).__name__ or m in str(exc)[:300] for m in _ROUTER_NO_DEPLOYMENTS):
         return False
     s = _status(exc)
     if s is None:

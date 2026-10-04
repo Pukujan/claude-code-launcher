@@ -140,7 +140,7 @@ def normalize(raw) -> dict | None:
 
 
 def _without_ckff(raw: dict) -> dict:
-    """CKFF is off (2026-10-04): drop CKFF/Astra routes from an IRE bundle, even an
+    """CKFF is off (2026-10-04): drop CKFF routes (ids with "ckff") from an IRE bundle, even an
     old ire.json passed in, with shared/ire's own filter. Empty ladders fall back
     to the fixed chains below."""
     ire = SHARED / "ire"

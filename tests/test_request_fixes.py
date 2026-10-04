@@ -9,21 +9,31 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "shared" / "litellm"))
 import request_fixes as rf  # noqa: E402
 
-SERVED = {"main", "sonnet", "opus", "claude-sonnet-5", "claude-opus-5-5", "small-fast", "claude-sonnet-4-5"}
+SERVED = {"sonnet", "opus", "haiku", "fable", "claude-sonnet-5", "claude-opus-5-5", "claude-fable-5",
+          "claude-haiku-4-5-20251001", "small-fast", "main"}
 
 
-def test_unknown_claude_ids_go_to_main():
-    assert rf.catchall_model("claude-opus-4-8", SERVED) == "main"
-    assert rf.catchall_model("claude-sonnet-4-6", SERVED) == "main"
-    assert rf.catchall_model("claude-sonnet-5[1m]", SERVED) == "main"
-    assert rf.catchall_model("sonnet[1m]", SERVED) == "main"
+def test_unknown_claude_ids_go_to_their_own_slot():
+    assert rf.catchall_model("claude-opus-4-8", SERVED) == "opus"
+    assert rf.catchall_model("claude-sonnet-4-6", SERVED) == "sonnet"
+    assert rf.catchall_model("claude-sonnet-5[1m]", SERVED) == "claude-sonnet-5"
+    assert rf.catchall_model("sonnet[1m]", SERVED) == "sonnet"
+    assert rf.catchall_model("claude-haiku-4-5", SERVED) == "haiku"
+    assert rf.catchall_model("claude-3-5-haiku-20241022", SERVED) == "haiku"
+    assert rf.catchall_model("claude-fable-5-2", SERVED) == "fable"
+    assert rf.catchall_model("claude-opus-5[1m]", SERVED) == "opus"
+
+
+def test_a_claude_name_with_no_family_goes_to_sonnet_loudly():
+    assert rf.map_model("claude-ih-main", SERVED) == ("sonnet", True)
+    assert rf.map_model("claude-opus-4-8", SERVED) == ("opus", False)
 
 
 def test_known_and_other_names_are_left_alone():
     for name in SERVED:
         assert rf.catchall_model(name, SERVED) is None
     assert rf.catchall_model("gpt-5", SERVED) is None
-    assert rf.catchall_model("claude-opus-4-8", {"opus"}) is None  # no main seat to send it to
+    assert rf.catchall_model("claude-ih-main", {"opus"}) is None  # no sonnet slot to send it to
 
 
 def _tool_use(i):
@@ -70,13 +80,37 @@ def test_empty_reply_detection():
     assert not rf.is_empty_reply({"data": []})  # not a chat reply
 
 
-def test_hooks_rewrite_and_raise_retryable():
+def test_hooks_rewrite_and_raise_retryable(capsys):
     litellm = pytest.importorskip("litellm")
     logger = rf.make_logger(served=lambda: SERVED)
     data = {"model": "claude-opus-4-8", "messages": [{"role": "assistant", "content": [_tool_use("a")]}]}
     out = asyncio.run(logger.async_pre_call_hook(None, None, data, "anthropic_messages"))
-    assert out["model"] == "main" and out["messages"][-1]["content"][0]["tool_use_id"] == "a"
+    assert out["model"] == "opus" and out["messages"][-1]["content"][0]["tool_use_id"] == "a"
+    out = asyncio.run(logger.async_pre_call_hook(None, None, {"model": "claude-ih-main"}, "anthropic_messages"))
+    assert out["model"] == "sonnet" and "WARNING: unmapped model 'claude-ih-main'" in capsys.readouterr().out
     empty = {"type": "message", "content": []}
+    req = {"model": "openai/cb/deepseek-v4.1-flash", "litellm_call_id": "call-1"}
+    # first empty reply: retried on the same model (a retryable 500 type), marked so it never benches
+    with pytest.raises(litellm.InternalServerError) as e1:
+        asyncio.run(logger.async_post_call_success_deployment_hook(dict(req), empty, None))
+    assert rf.is_empty_reply_error(e1.value)
+    # second empty reply for the same request and model: a non-retried error, so the chain moves on
+    with pytest.raises(litellm.BadRequestError) as e2:
+        asyncio.run(logger.async_post_call_success_deployment_hook(dict(req), empty, None))
+    assert rf.is_empty_reply_error(e2.value) and not isinstance(e2.value, litellm.InternalServerError)
+    # the next model in the chain gets its own retry
     with pytest.raises(litellm.InternalServerError):
-        asyncio.run(logger.async_post_call_success_deployment_hook({"model": "main"}, empty, None))
-    assert asyncio.run(logger.async_post_call_success_deployment_hook({"model": "main", "stream": True}, empty, None)) is None
+        asyncio.run(logger.async_post_call_success_deployment_hook(dict(req, model="openai/ali/qwen3.8-flash"), empty, None))
+    assert asyncio.run(logger.async_post_call_success_deployment_hook({"model": "x", "stream": True}, empty, None)) is None
+
+
+def test_empty_replies_never_bench():
+    pytest.importorskip("litellm")
+    import bench_after_retries as bar
+    from litellm.router_utils import cooldown_handlers as ch
+
+    rf._no_cooldown_for_empty_replies()
+    err = rf.empty_reply_error({"model": "m", "litellm_call_id": "bench-1"})
+    assert bar.should_bench(err) is False
+    assert ch._set_cooldown_deployments(litellm_router_instance=None, original_exception=err,
+                                         exception_status=500, deployment="x") is False

@@ -41,7 +41,7 @@ check "rank 20 id" "$(model_field 20 3)" "ali/kimi-k2.7-code"
 check "resolve by number" "$(resolve_model 10)" "10"
 check "resolve by id" "$(resolve_model cbcn/minimax-m3)" "10"
 if resolve_model 21 >/dev/null; then bad "rejects 21"; else ok "rejects 21"; fi
-check "small-fast alias" "$SMALL_FAST_MODEL" "small-fast"
+check "auto-compact window" "$AUTO_COMPACT_WINDOW" "272000"
 
 echo "== live IRE table =="
 IRE_TABLE="$SCRATCH/table.txt"

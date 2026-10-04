@@ -233,6 +233,7 @@ def test_top20_eligible_flag(tmp_path):
     assert [r["eligible"] for r in uc.read_top20(p)] == [True, False, True]
 
 
-def test_astra_routes_count_as_ckff():
-    assert uc.is_ckff("claude-gpt-6-astra") and uc.is_ckff("ckff_astra")
+def test_only_ckff_ids_count_as_ckff():
+    assert uc.is_ckff("ckff_astra") and uc.is_ckff("claude-ckff-astra")
+    assert not uc.is_ckff("claude-gpt-6-astra")  # InferHub's Astra (issue #53)
     assert not uc.is_ckff("claude-ih-main")

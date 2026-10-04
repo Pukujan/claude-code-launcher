@@ -320,7 +320,7 @@ import os as _os
 from pathlib import Path as _Path
 
 _RELOAD_PATH = "/workbench/reload_runtime"
-_WB_SEAT_ALIASES = ("sonnet", "opus", "haiku", "claude-haiku-4-5", "main", "advisor", "claude-sonnet-5", "claude-opus-5-5", "claude-fable-5", "claude-fable-5-1")
+_WB_SEAT_ALIASES = ("sonnet", "opus", "haiku", "fable", "claude-sonnet-5", "claude-opus-5-5", "claude-haiku-4-5-20251001", "claude-haiku-4-5", "claude-fable-5")
 _REPO_ROOT = _Path(__file__).resolve().parent
 
 
@@ -484,10 +484,11 @@ def _wb_reload_all(llm_router, path: _Path) -> dict:
         import yaml as _yaml
 
         _doc = _yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        _fb = (_doc.get("router_settings") or {}).get("fallbacks")
-        if isinstance(_fb, list):
-            llm_router.update_settings(fallbacks=_fb)
-            print(f"[sitecustomize] reload_runtime fallbacks={len(_fb)}", flush=True)
+        for _key in ("fallbacks", "context_window_fallbacks", "content_policy_fallbacks"):
+            _fb = (_doc.get("router_settings") or {}).get(_key)
+            if isinstance(_fb, list):
+                llm_router.update_settings(**{_key: _fb})
+                print(f"[sitecustomize] reload_runtime {_key}={len(_fb)}", flush=True)
         _rp = (_doc.get("router_settings") or {}).get("model_group_retry_policy")
         if isinstance(_rp, dict):
             from litellm.types.router import RetryPolicy as _RP

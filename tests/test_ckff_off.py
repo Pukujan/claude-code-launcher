@@ -1,5 +1,5 @@
 """CKFF is off everywhere (Alex, 2026-10-04): no CKFF models, keys or routes,
-Astra / ckff_astra included. Port of litellm-ckff-ops PR #44 plus the launcher side."""
+ckff_astra included; InferHub's own Astra routes (cb/gpt-6-astra) are not CKFF (issue #53). Port of litellm-ckff-ops PR #44 plus the launcher side."""
 import json
 import os
 import shutil
@@ -55,17 +55,19 @@ def test_runtime_has_no_ckff_when_off(tmp_path):
     assert "ckff=off:0" in out
     assert not [m for m in doc["model_list"] if provider_switch.is_ckff_deployment(m)]
     flat = json.dumps(doc).lower()
-    assert "ckff" not in flat and "astra" not in flat
+    assert "ckff" not in flat
+    # Astra on InferHub is not CKFF: it is the opus slot's first model
+    assert {m["model_name"]: m["litellm_params"]["model"] for m in doc["model_list"]}["opus"] == "openai/cb/gpt-6-astra"
     served = {m["model_name"] for m in doc["model_list"]}
     for key in ("fallbacks", "context_window_fallbacks", "content_policy_fallbacks"):
         for d in doc.get("router_settings", {}).get(key) or []:
             for src, targets in d.items():
                 assert src in served and set(targets) <= served
     names = {m["model_name"]: m["litellm_params"]["model"] for m in doc["model_list"]}
-    # our pins stay: haiku and claude-haiku-4-5 both go to the fast seat
+    # our pins stay: haiku and claude-haiku-4-5 both go to the haiku slot
     assert names["claude-haiku-4-5"] == names["haiku"] == names["claude-haiku-4-5-20251001"] == "openai/cb/deepseek-v4.1-flash"
     fb = {k: v for d in doc["router_settings"]["fallbacks"] for k, v in d.items()}
-    assert fb["claude-haiku-4-5"] == ["ih/cbcn/deepseek-v4-flash", "ih/ali/qwen3.8-flash"]
+    assert fb["claude-haiku-4-5"] == ["ccl-haiku-2", "ccl-haiku-3"]
 
 
 def test_runtime_has_ckff_again_only_when_switched_on(tmp_path):
@@ -79,7 +81,7 @@ def test_ckff_astra_key_counts_as_ckff():
     assert not provider_switch.is_ckff_deployment({"litellm_params": {"api_key": "os.environ/INFERHUB_API_KEY"}})
 
 
-def test_ladder_inputs_drop_astra_from_an_old_ire_json(tmp_path):
+def test_ladder_inputs_drop_ckff_but_keep_inferhub_astra(tmp_path):
     raw = json.loads((REPO / "shared" / "ire" / "defaults.json").read_text(encoding="utf-8"))
     raw["source"] = "cache"
     raw["frontier"] = [{"rank": 1, "route": "cb/gpt-6-astra", "name": "GPT 6 Astra", "eligible": True}]
@@ -87,10 +89,10 @@ def test_ladder_inputs_drop_astra_from_an_old_ire_json(tmp_path):
     p = tmp_path / "ire.json"
     p.write_text(json.dumps(raw), encoding="utf-8")
     b = I.load_inputs(p)
-    assert b["frontier"] == []
-    assert b["ladders"]["main"] == I.FIXED_LADDERS["main"]
+    assert [r["route"] for r in b["frontier"]] == ["cb/gpt-6-astra"]
+    assert b["ladders"]["main"]["primary"] == "cx/gpt-6-astra"
     assert b["ladders"]["advisor"] == {"primary": "cbcn/glm-5.3-flash", "fallbacks": []}
-    assert "astra" not in json.dumps(b).lower() and "ckff" not in json.dumps(b).lower()
+    assert "ckff" not in json.dumps(b).lower()
 
 
 def test_launchers_pass_and_load_no_ckff_keys():
@@ -110,16 +112,19 @@ $env:CCL_LAUNCHER_LIBRARY_ONLY = "1"
 foreach ($d in "C", "D") { if (-not (Get-PSDrive $d -ErrorAction SilentlyContinue)) { $null = New-PSDrive -Name $d -PSProvider FileSystem -Root $env:HOME -Scope Global } }
 . (Join-Path $env:CCL_REPO "windows/launch-claude-inferhub.ps1")
 $last = Read-LastPicks
-$pick = Get-StartPick -S @{} -Last $last -Slot "main" -Choices $Models -Default $DefaultModelId
-@{ pick = $pick; keys = @($last.Keys | Sort-Object); adv = $last["adv"] } | ConvertTo-Json -Compress
+$slots = Read-SlotPicks
+$choices = @(Get-SlotChoices | ForEach-Object { $_.Id })
+@{ keys = @($last.Keys | Sort-Object); opus = @($slots.opus); sonnet = @($slots.sonnet);
+   astra_offered = ($choices -contains "cb/gpt-6-astra"); ckff_offered = @($choices | Where-Object { $_ -match "ckff" }).Count } | ConvertTo-Json -Compress
 """
 
 
 @pytest.mark.skipif(not shutil.which("pwsh"), reason="needs pwsh")
 def test_windows_saved_ckff_pick_falls_back_to_default(tmp_path):
     picks = tmp_path / "last-picks.json"
-    picks.write_text(json.dumps({"main": "ckff_astra", "main1": "cx/gpt-6-astra", "adv": "cbcn/glm-5.3-flash",
-                                 "uc_orch": "claude-ckff-luna", "launch": "claude"}))
+    picks.write_text(json.dumps({"uc_orch": "claude-ckff-luna", "launch": "claude", "version": 2,
+                                 "slots": {"sonnet": ["ckff_astra"], "opus": ["cb/gpt-6-astra", "ckff/gpt-6-astra"],
+                                           "fable": [], "haiku": [], "haiku_same": True}}))
     drv = tmp_path / "d.ps1"
     drv.write_text(LAST_PICKS_DRIVER)
     env = {"PATH": os.environ["PATH"], "HOME": str(tmp_path), "USERPROFILE": str(tmp_path),
@@ -127,8 +132,10 @@ def test_windows_saved_ckff_pick_falls_back_to_default(tmp_path):
     r = subprocess.run(["pwsh", "-NoProfile", "-File", str(drv)], env=env, capture_output=True, text=True, timeout=120)
     assert r.returncode == 0, r.stderr + r.stdout
     out = json.loads(r.stdout.strip().splitlines()[-1])
-    assert out["pick"] == "cb/deepseek-v4.1-flash"
-    assert out["keys"] == ["adv", "launch"] and out["adv"] == "cbcn/glm-5.3-flash"
+    assert "uc_orch" not in out["keys"] and "launch" in out["keys"]
+    assert out["sonnet"] == ["cb/deepseek-v4.1-flash", "ali/qwen3.8-flash", "cbcn/glm-5.3-flash"]  # CKFF pick -> default
+    assert out["opus"] == ["cb/gpt-6-astra"]                  # InferHub Astra kept, CKFF Astra dropped
+    assert out["astra_offered"] is True and out["ckff_offered"] == 0
 
 
 def test_mac_saved_ckff_pick_reads_as_empty(tmp_path):
