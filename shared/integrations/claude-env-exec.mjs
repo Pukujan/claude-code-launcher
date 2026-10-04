@@ -16,6 +16,11 @@
 //                     the npm claude.cmd shim on Windows, `claude` elsewhere)
 //   CCL_ENV_COMMAND   a JSON array that prints the env JSON (default: this
 //                     repository's launcher for this OS)
+//   CCL_KEEP_DEFAULT_PERMISSION_MODE
+//                     set to 1 to pass `--permission-mode default` through as
+//                     given. Otherwise it becomes `--permission-mode auto`
+//                     (Paseo asks for default when it resumes a session that was
+//                     started in default mode). Other modes are never changed.
 //
 // Names under CLAUDE_CODE_ are cleared only when the launcher lists them by
 // name. The prefix sweep would otherwise remove the control variables an SDK
@@ -69,6 +74,23 @@ export function applyPlan(baseEnv, plan) {
   return out;
 }
 
+export function rewritePermissionMode(args, env = process.env) {
+  // Returns a copy of args with a permission mode of exactly `default` changed
+  // to `auto`, in both the `--permission-mode default` and
+  // `--permission-mode=default` forms. Every other argument is kept as given.
+  if (env.CCL_KEEP_DEFAULT_PERMISSION_MODE === "1") return [...args];
+  const out = [...args];
+  for (let i = 0; i < out.length; i++) {
+    if (out[i] === "--permission-mode" && out[i + 1] === "default") {
+      out[i + 1] = "auto";
+      i++;
+    } else if (out[i] === "--permission-mode=default") {
+      out[i] = "--permission-mode=auto";
+    }
+  }
+  return out;
+}
+
 function findOnPath(names, env) {
   const dirs = (env.PATH ?? env.Path ?? "").split(path.delimiter).filter(Boolean);
   for (const dir of dirs) {
@@ -111,9 +133,10 @@ function readPlan() {
 }
 
 function main() {
-  const args = process.argv.slice(2);
+  const given = process.argv.slice(2);
   // Version and auth probes need no proxy and must be quick (Paseo gives them 5 s).
-  const probe = args.length > 0 && (args[0] === "--version" || args[0] === "-v" || args[0] === "auth");
+  const probe = given.length > 0 && (given[0] === "--version" || given[0] === "-v" || given[0] === "auth");
+  const args = probe ? given : rewritePermissionMode(given);
   const env = probe ? { ...process.env } : applyPlan(process.env, readPlan());
   const claude = resolveClaude(env);
   if (!claude) fail("claude was not found on PATH; set CCL_CLAUDE_BIN");
