@@ -72,17 +72,22 @@ right after each seat is picked, and once more after the last seat apply. See
   elsewhere). A typical file:
 
   ```
-  CCL_WEB_SEARCH_CHAIN=searxng,ddgs,tavily,exa
+  CCL_WEB_SEARCH_CHAIN=searxng,tinyfish,ddgs,you_com,tavily,exa
   SEARXNG_API_BASE=http://127.0.0.1:18080
-  CCL_ENV_ALIASES=TAVILY_API_KEY=<name in the desktop env>,EXA_API_KEY=<name>
+  CCL_ENV_ALIASES=TINYFISH_API_KEY=<name in the desktop env>,TAVILY_API_KEY=<name>,EXA_API_KEY=<name>
   ```
 
   `CCL_ENV_ALIASES` copies keys that the desktop env keeps under other names
   to the names LiteLLM reads, so the secret stays in one file; only names go
-  in `.env.local`. `exa` is short for LiteLLM's `exa_ai`. With this chain a
-  search goes to SlopSearX, then ddgs if SlopSearX is down or empty, then
-  Tavily and Exa (paid) only if both free sources fail. The `[web_search]`
-  log line names the source that answered (`searxng ok: ...`). Run the setup
+  in `.env.local`. `exa` is short for LiteLLM's `exa_ai`; `you` and `youcom`
+  mean `you_com`. With this chain a search goes to SlopSearX, then TinyFish
+  Search (LiteLLM's `tinyfish`, free key, 30 requests/min), then ddgs, then
+  You.com (LiteLLM's `you_com`; with `YOUCOM_API_KEY` unset it uses You.com's
+  keyless free tier, 100 queries/day per IP), and Tavily and Exa (paid) only
+  if every free source fails (issue #56). A provider without its key just
+  fails and the chain moves on. The `[web_search]` log line names the source
+  that answered (`searxng ok: ...`), and a source that answers with nothing
+  usable logs `<source> gave 0 usable results ...`. Run the setup
   with `-Uninstall` to remove the task; the proxy needs a restart to pick up a
   changed chain.
 - **Fast seat max_tokens floor.** WebFetch summaries go to the fast seat with a

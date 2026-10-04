@@ -14,8 +14,10 @@ returns results with a URL:
   ddgs      keyless scraping through the ddgs package. Several engines, tried
             one by one (CCL_DDGS_BACKENDS), then once more after a back-off.
   <other>   any LiteLLM search provider, e.g. searxng (SEARXNG_API_BASE),
-            brave (BRAVE_API_KEY), tavily, serper, exa_ai. LiteLLM reads their
-            own keys and base URLs from the environment.
+            tinyfish (TINYFISH_API_KEY), you_com (keyless free tier when
+            YOUCOM_API_KEY is unset), brave (BRAVE_API_KEY), tavily, serper,
+            exa_ai. LiteLLM reads their own keys and base URLs from the
+            environment; nothing is passed from here.
 Scraped engines refuse requests now and then (rate limits), so a single engine
 is never trusted. Results are cached for a few minutes. When every backend
 fails, this raises instead of returning an empty list, so Claude Code sees
@@ -60,7 +62,7 @@ def clean_query(q):
 
 
 # Short names for LiteLLM search providers, so CCL_WEB_SEARCH_CHAIN can say `exa`.
-PROVIDER_ALIASES = {"exa": "exa_ai"}
+PROVIDER_ALIASES = {"exa": "exa_ai", "youcom": "you_com", "you": "you_com"}
 
 
 def chain_from_env(env=None):
@@ -167,14 +169,16 @@ async def search_one(q, max_results, *, chain, orig=None, ddgs=None, kwargs=None
                 errors.append(f"{provider}: {type(e).__name__}: {e}")
                 _log(f"{provider} failed for {q!r}: {type(e).__name__}: {e}")
                 continue
+            raw = getattr(resp, "results", None) or []
             hits = [{"title": getattr(r, "title", "") or getattr(r, "url", ""), "url": getattr(r, "url", "") or "",
                      "snippet": getattr(r, "snippet", "") or ""}
-                    for r in (getattr(resp, "results", None) or [])]
+                    for r in raw]
             hits = [h for h in hits if h["url"].startswith(("http://", "https://"))]
             if hits:
                 _log(f"{provider} ok: {len(hits)} results in {time.monotonic() - t:.1f}s for {q!r}")
             else:
                 errors.append(f"{provider}: no results")
+                _log(f"{provider} gave 0 usable results ({len(raw)} returned) in {time.monotonic() - t:.1f}s for {q!r}")
         if hits:
             _cache_put(key, hits, time.monotonic())
             return hits
