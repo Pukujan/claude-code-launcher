@@ -155,6 +155,39 @@ if printf '%s\n' "$menu" | grep -q "typed  (recent)"; then ok "recent folder lis
 check "q quick pick" "$(printf 'q\n1\ny\n' | pick)" "$(cd "$HOME" && pwd -P)"
 check "x quits" "$(printf 'x\n' | pick)" ""
 
+echo "== ultracode (orchestrator/worker picks) =="
+if command -v uv >/dev/null 2>&1; then
+  UC_DIR="$SCRATCH/ucshim"; UC_STATE_DIR="$SCRATCH/ucstate"; UC_PORT=$((4100 + 4241))
+  mkdir -p "$UC_DIR/bin"
+  : > "$UC_DIR/proxy.py"; printf '%s\n' "$UC_COMMIT" > "$UC_DIR/.commit"
+  cp "$REPO/tests/fixtures/ultracode/config.example.json" "$UC_DIR/"
+  # shellcheck disable=SC2016  # the fake ultracode expands these itself
+  printf '#!/bin/bash\necho "ran UC_SELECTOR=$UC_SELECTOR $*"\n' > "$UC_DIR/bin/ultracode"; chmod +x "$UC_DIR/bin/ultracode"
+  MAIN_NAME="DeepSeek V4.1 Flash"; ADVISOR_NAME=""; LAUNCH=ultracode
+  CLAUDE_IH_UC_ORCH=claude-ih-fast CLAUDE_IH_UC_WORKER="" pick_ultracode 2>/dev/null
+  check "orchestrator from CLAUDE_IH_UC_ORCH" "$UC_ORCH" "claude-ih-fast"
+  check "worker empty = same" "$UC_WORKER" ""
+  check "last picks keep launch" "$(last_pick launch)" "ultracode"
+  check "last picks keep the orchestrator" "$(last_pick uc_orch)" "claude-ih-fast"
+  check "first choice is the main seat" "$(head -1 "$UC_LIST" | cut -f1)" "claude-ih-main"
+  check "no CKFF choice" "$(grep -ci ckff "$UC_LIST")" "0"
+  check "Top 20 listed" "$(grep -c '^claude-ih-cb-deepseek-v4-1-flash	' "$UC_LIST")" "1"
+  check "shim port" "$(grep -c "\"listen_port\": $UC_PORT" "$UC_DIR/config.json")" "1"
+  unset UC_ORCH UC_WORKER
+  uc_pick orch < <(printf '\033[B\n') >/dev/null 2>&1
+  check "arrow pick: Down from last time's orchestrator" "$UC_PICK" "claude-ih-cb-deepseek-v4-1-flash"
+  uc_pick worker < <(printf '\n') >/dev/null 2>&1
+  check "worker highlights last time's pick (same)" "$UC_PICK" ""
+  if uc_pick worker < <(printf '\033[D') >/dev/null 2>&1; then bad "Left goes back"; else ok "Left goes back"; fi
+  UC_ORCH=claude-ih-main UC_WORKER=claude-ih-fast
+  out="$( ( run_ultracode ) 2>/dev/null )"
+  check "runs the cached bin/ultracode with the shim picker off" "$out" "ran UC_SELECTOR=0 --model claude-ih-main --permission-mode bypassPermissions"
+  check "selection.json preselects both tiers" "$(tr -d ' \n' < "$UC_STATE_DIR/selection.json")" '{"orch":"claude-ih-main","worker":"claude-ih-fast","worker_explicit":true}'
+  unset UC_ORCH UC_WORKER LAUNCH
+else
+  echo "  skip (uv not installed)"
+fi
+
 echo "== stop-litellm.sh =="
 mkdir -p "$SCRATCH/repo/mac" "$SCRATCH/repo/shared/litellm/logs"
 cp "$MAC/stop-litellm.sh" "$SCRATCH/repo/mac/"

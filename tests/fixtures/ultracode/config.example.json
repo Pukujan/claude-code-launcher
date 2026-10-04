@@ -1,0 +1,35 @@
+{
+  "_README": "Trimmed copy of UltraCode-Shim's config.example.json (1870e58) plus CKFF routes, for tests.",
+  "proxy": {"listen_port": 8141, "anthropic_upstream": "https://api.anthropic.com", "max_tokens_floor": 64000},
+  "models": [
+    {"id": "claude-auto", "display_name": "Auto (smart routing)"},
+    {"id": "claude-opus", "display_name": "Claude Opus 4.8 (real)"},
+    {"id": "claude-gpt-5.5-codex", "display_name": "GPT-5.5 (Codex OAuth)"},
+    {"id": "claude-minimax-m3", "display_name": "MiniMax-M3"},
+    {"id": "claude-requesty", "display_name": "GPT-4o mini (Requesty)"},
+    {"id": "claude-local", "display_name": "Local model"},
+    {"id": "claude-composer", "display_name": "Composer 2.5 (Cursor, experimental)"},
+    {"id": "claude-ckff-luna", "display_name": "CKFF Luna"},
+    {"id": "claude-sneaky", "display_name": "Sneaky (CKFF host)"}
+  ],
+  "routes": {
+    "claude-auto": {"type": "auto"},
+    "claude-opus": {"model": "claude-opus-4-8"},
+    "claude-gpt-5.5-codex": {"type": "codex_oauth", "model": "gpt-5.5"},
+    "claude-minimax-m3": {"type": "openai_compat", "upstream": "https://api.minimax.io/v1", "model": "MiniMax-M3", "auth": "Bearer REPLACE_WITH_YOUR_MINIMAX_KEY"},
+    "claude-requesty": {"type": "openai_compat", "upstream": "https://router.requesty.ai/v1", "model": "openai/gpt-4o-mini", "auth": "Bearer ${REQUESTY_API_KEY}"},
+    "claude-local": {"type": "openai_compat", "upstream": "http://127.0.0.1:9", "model": "x", "auth": "Bearer local"},
+    "claude-composer": {"type": "cursor_agent", "model": "composer-2.5"},
+    "claude-ckff-luna": {"type": "openai_compat", "upstream": "https://example.invalid/v1", "model": "gpt-5.6-luna", "auth": "Bearer ${CKFF_TEST_KEY}"},
+    "claude-sneaky": {"type": "openai_compat", "upstream": "https://ckff.dev/v1", "model": "kimi", "auth": "Bearer ${CKFF_TEST_KEY}"}
+  },
+  "router": {
+    "enabled": true, "id": "claude-auto", "classifier": "claude-minimax-m3", "default": "claude-minimax-m3", "threshold": 0.7,
+    "candidates": [
+      {"id": "claude-minimax-m3", "cost": 0.3},
+      {"id": "claude-ckff-luna", "cost": 0.5},
+      {"id": "claude-requesty", "cost": 1.0},
+      {"id": "claude-gpt-5.5-codex", "cost": 5.0}
+    ]
+  }
+}

@@ -115,7 +115,9 @@ from it instead of the Top 20.
 | `INFERHUB_TOP20_CSV` | `shared/litellm/config/top20-builtin.csv` | A real IRE Top 20 CSV, if you have one |
 | `CLAUDE_IH_PROJECT`, `CLAUDE_IH_MAIN`, `CLAUDE_IH_ADVISOR` | (ask) | Skip a picker. The old names `ACS_FOLDER`, `ACS_MAIN_ID`, `ACS_ADVISOR_ID` still work. |
 | `CCL_IRE_OFFLINE` | unset | `1` skips GitHub and uses the cached or built-in list |
-| `CLAUDE_IH_LAUNCH` | (ask; `claude` with no terminal) | `claude` or `ultracode` skips the "launch with" picker. UltraCode runs the real `ultracode` command from [UltraCode-Shim](https://github.com/OnlyTerp/UltraCode-Shim) (pinned commit, cached in `~/.cache/claude-code-launcher/ultracode-shim`, installed once with its `install.sh` as `~/.local/bin/ultracode`), pointed at the proxy with the seat alias as the model. |
+| `CLAUDE_IH_LAUNCH` | (ask; `claude` with no terminal) | `claude` or `ultracode` skips the "launch with" picker. UltraCode runs [UltraCode-Shim](https://github.com/OnlyTerp/UltraCode-Shim) (pinned commit, cached in `~/.cache/claude-code-launcher/ultracode-shim`, never installed globally) on port proxy port + 4241, with the InferHub seats, the Top 20 and the shim's own usable routes (CKFF routes excluded) as options. You pick an orchestrator and a worker next; the launcher preselects them in the shim. |
+| `CLAUDE_IH_UC_ORCH` | (ask; last pick, else `claude-ih-main`) | UltraCode orchestrator model id (handles planning and questions). |
+| `CLAUDE_IH_UC_WORKER` | (ask; last pick, else same as orchestrator) | UltraCode worker model id (sub-agents and background calls). Empty means same as the orchestrator. |
 
 ## Stopping the proxy
 
