@@ -33,6 +33,52 @@ Claude Code with `claude --model sonnet --permission-mode bypassPermissions`.
 The model list is the IRE Top 20, fetched at start-up by `shared/ire/` (see
 below).
 
+## Non-interactive mode (for other tools)
+
+Some tools start Claude Code themselves, for example
+[Paseo](https://github.com/getpaseo/paseo) on a phone. They can still go through
+the local LiteLLM with the same seats, aliases and fallback chains. Non-interactive
+mode shows no menus and never prompts. It also never starts, restarts or reloads
+the proxy: the proxy keeps the seat from the last interactive launch, and if the
+proxy is down the command stops with exit code 3.
+
+```powershell
+# Windows: print the variables, or run claude with them
+.\windows\launch-claude-inferhub.ps1 -NonInteractive -PrintEnv json
+.\windows\launch-claude-inferhub.ps1 -NonInteractive -Folder D:\development\app -- -p "hello"
+```
+
+```bash
+# Mac
+"mac/Launch Claude InferHub.command" --non-interactive --print-env dotenv
+"mac/Launch Claude InferHub.command" --non-interactive -- -p "hello"
+```
+
+Both launchers accept `--non-interactive`, `--print-env json|dotenv` and
+`--folder DIR`. Windows also takes the `-NonInteractive`, `-PrintEnv` and
+`-Folder` spellings. The `CCL_NONINTERACTIVE=1` and `CCL_PRINT_ENV=json`
+environment variables do the same thing. Launcher options go first, and `--`
+ends them. The JSON output has four parts:
+
+- `set`: the variables Claude Code gets, the same ones an interactive launch
+  sets (base URL, auth, `sonnet` seat, `small-fast`, the four tier pins and
+  `CLAUDE_CODE_WORKFLOWS`)
+- `unset`: names to clear first
+- `unset_prefixes`: prefixes whose leftover variables should be cleared too
+- `info`: the seat, where it was read from, whether the proxy is healthy and
+  which auth is used
+
+`last-picks.json` is only reported. To change the seat, run the launcher
+interactively.
+
+Passing arguments that contain double quotes (JSON) through Windows PowerShell
+5.1 loses the quotes. For tools that do that, use
+`node shared/integrations/claude-env-exec.mjs [claude args...]`. It reads the
+JSON, applies it and starts claude with the arguments exactly as given. It keeps
+the `CLAUDE_CODE_*` control variables an SDK host sets, skips the launcher for
+`--version` and `auth` probes, and passes claude's exit code back. Set
+`CCL_CLAUDE_BIN` to choose the claude executable.
+
 ## Keys
 
 Copy `.env.example` to `.env` in the repository root and fill in
@@ -92,6 +138,7 @@ routes ask for.
 | `mac/` | The Mac launcher, `setup.sh` (installs it and the `claude-acs` command), `stop-litellm.sh`, the folder navigation in `lib/`, and its tests |
 | `shared/litellm/` | Proxy config, seat and merge scripts, fallback chains, pinned requirements |
 | `shared/ire/` | The IRE fetch, its cache rules and its built-in defaults |
+| `shared/integrations/` | `claude-env-exec.mjs`, which runs claude with the non-interactive launcher env for other tools |
 | `docs/` | [PARITY.md](docs/PARITY.md) compares the two launchers; [HOOKS.md](docs/HOOKS.md) lists where planned features plug in |
 | `history/` | Older launcher versions, kept as a record |
 | `SOURCES.md` | Where every copied file came from, with commit and hash |
