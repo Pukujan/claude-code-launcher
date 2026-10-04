@@ -46,7 +46,7 @@ gets the script, and the installer fetches the source through `gh` when it's log
 | `-StartPort` | int | `4000` | First port tried for the proxy. |
 | `-Uninstall` | switch | off | Remove the install (see Uninstall). |
 | `-ChangeKey` | switch | off | Replace the stored key only, then restart the proxy if it runs. |
-| `-SkipPrereqs` | switch | off | Only check uv, git, Node, pnpm and Claude Code; never install them. |
+| `-SkipPrereqs` | switch | off | Only check uv, git, Node, pnpm and Claude Code and warn about missing ones; never install them. |
 | `-SkipVenv` | switch | off | Don't build the LiteLLM venv (tests). |
 | `-NoTask` | switch | off | Don't register the logon task. |
 | `-NoPath` | switch | off | Don't add `bin\` to the user PATH. |
@@ -227,6 +227,24 @@ line or any file except `secrets\inferhub.env`. The proxy reads it from that fil
 
 uv, git, Node, pnpm and Claude Code stay. Install, then uninstall, then install gives the same
 state as a fresh install, except for a new `instance_id`.
+
+### PowerShell functions (library mode)
+
+With `CCL_INSTALL_LIBRARY_ONLY=1`, dot-sourcing `install.ps1` defines these and does nothing else:
+
+| Function | Contract |
+|---|---|
+| `Test-CclKeyShape -Key <string>` | `$true` when the trimmed key is valid (rules above). |
+| `Resolve-CclInferHubKey -Flag <string> -Environment <IDictionary> -StoredPath <path> -Prompt <scriptblock> [-NonInteractive]` | Returns the key by the precedence above. Throws `CCL_NO_KEY` (non-interactive, nothing found) or `CCL_BAD_KEY`. |
+| `Write-CclSecret -Path <path> -Key <string>` / `Read-CclSecret -Path <path>` | Write or read `secrets\inferhub.env`. |
+| `New-CclInstanceId` | 32 lowercase hex characters. |
+| `Read-CclInstallState -InstallDir <path>` / `Write-CclInstallState -InstallDir <path> -State <hashtable>` | `install.json`, exactly the schema keys. |
+| `Get-CclPortState -Port <int> -InstanceId <string>` | `free`, `ours` or `foreign`. |
+| `Select-CclPort -Start <int> -Saved <int> -Probe <scriptblock> [-Count <int>]` | As described under Port choice. |
+| `Get-CclPrereqPlan -Have <IDictionary>` | The tools to install, in order (`uv`, `git`, `node`, `pnpm`, `claude`), for the ones whose value is false. |
+| `Get-CclShimText -InstallDir <path>` | The text of `bin\claude-inferhub.cmd`. |
+| `Get-CclTaskArguments -InstallDir <path> -Port <int>` | The logon task's argument string. Never contains the key. |
+| `Invoke-CclInstall` / `Invoke-CclUninstall` | The install and uninstall flows. Take the script's parameters and return an exit code. |
 
 ### Exit codes
 

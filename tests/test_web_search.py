@@ -158,7 +158,7 @@ def test_one_failed_query_of_several_keeps_the_others():
 
 
 def test_env_parsing():
-    assert ws.chain_from_env({}) == ["ddgs"]
+    assert ws.chain_from_env({}) == ["ddgs", "you_com"]   # issue #61 default
     assert ws.chain_from_env({"CCL_WEB_SEARCH_CHAIN": "searxng, ddgs ,brave"}) == ["searxng", "ddgs", "brave"]
     assert ws.chain_from_env({"CCL_WEB_SEARCH_CHAIN": "duckduckgo"}) == ["ddgs"]
     assert ws.chain_from_env({"CCL_WEB_SEARCH_CHAIN": "searxng,ddgs,tavily,exa"}) == ["searxng", "ddgs", "tavily", "exa_ai"]
