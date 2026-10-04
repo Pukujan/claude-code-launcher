@@ -428,7 +428,7 @@ model_field() {  # model_field INDEX(1-based) FIELD(1-5)
 }
 
 print_models() {  # print_models with_off
-  local rank name id elig cost tag star
+  local rank name id elig cost tag star over
   if [ "$1" = "1" ]; then
     printf '   0  OFF  (disable advisor tool / seat aliases fall back to main)\n' >&2
   fi
@@ -436,7 +436,8 @@ print_models() {  # print_models with_off
     if [ "$elig" = "true" ]; then tag="eligible"; else tag="gated"; fi
     star=" "
     if [ "$1" != "1" ] && [ "$id" = "$DEFAULT_MODEL_ID" ]; then star="*"; fi
-    printf '%s%3d  %-28s %-42s %-8s  ~%s/Mtok\n' "$star" "$rank" "$name" "$id" "$tag" "$cost" >&2
+    over=""; awk -v c="$cost" 'BEGIN { exit !(c + 0 >= 0.10) }' && over="OVER \$0.10"
+    printf '%s%3d  %-28s %-42s %-8s  ~%s/1M %s\n' "$star" "$rank" "$name" "$id" "$tag" "$cost" "$over" >&2
   done <<EOF
 $MODELS
 EOF
@@ -467,9 +468,9 @@ pick_main() {
     log "Choose MAIN model (IRE Top 20). Default DeepSeek V4.1 Flash."
     log "MAIN executor (maps to alias sonnet/main). gated = ranked but not currently recommendation-eligible."
     print_models 0
-    ask "Main model number [Enter = 1, q = quit]: " || die "Cancelled."
+    ask "Main model number [Enter = 1, f = IRE frontier list, q = quit]: " || die "Cancelled."
     REPLY="$(trim "$REPLY")"
-    case "$REPLY" in q|Q) die "Cancelled." ;; '') REPLY=1 ;; esac
+    case "$REPLY" in q|Q) die "Cancelled." ;; '') REPLY=1 ;; f|F) pick_frontier main && return 0; continue ;; esac
     if idx="$(resolve_model "$REPLY")"; then
       MAIN_ID="$(model_field "$idx" 3)"; MAIN_NAME="$(model_field "$idx" 2)"; return 0
     fi
@@ -489,10 +490,11 @@ pick_advisor() {
     log "Choose ADVISOR model (IRE Top 20) or OFF."
     log "ADVISOR maps to alias opus/advisor. Mid-session use /advisor opus or /advisor sonnet (aliases), not raw InferHub ids."
     print_models 1
-    ask "Advisor number [Enter = 0 OFF, q = quit]: " || die "Cancelled."
+    ask "Advisor number [Enter = 0 OFF, f = IRE frontier list, q = quit]: " || die "Cancelled."
     REPLY="$(trim "$REPLY")"
     case "$REPLY" in
       q|Q) die "Cancelled." ;;
+      f|F) pick_frontier advisor && return 0; continue ;;
       ''|0|off|OFF) ADVISOR_ID=""; ADVISOR_NAME=""; return 0 ;;
     esac
     if idx="$(resolve_model "$REPLY")"; then
@@ -589,6 +591,17 @@ pick_ladder() {
   if [ "$mode" = "default" ] || [ ! -t 0 ]; then extra=(--non-interactive); fi
   "$VENV_PY" "$LADDER_CLI" choose --state "$LADDER_STATE" --role "$role" --primary "$primary" ${extra[@]+"${extra[@]}"} \
     || log "warning: ladder picker failed for $role; the stock chains stay"
+}
+
+# Seat primary from the IRE frontier list (or back to the Top 20) via the
+# shared picker; sets MAIN_ID/MAIN_NAME or ADVISOR_ID/ADVISOR_NAME.
+pick_frontier() {
+  local role="$1" out="$STATE_DIR/primary-pick.txt" id name off=()
+  [ "$role" = "advisor" ] && off=(--allow-off)
+  rm -f "$out"
+  "$VENV_PY" "$LADDER_CLI" primary --role "$role" --out "$out" ${off[@]+"${off[@]}"} || return 1
+  IFS="$(printf '\t')" read -r id name < "$out" || return 1
+  if [ "$role" = "main" ]; then MAIN_ID="$id"; MAIN_NAME="$name"; else ADVISOR_ID="$id"; ADVISOR_NAME="$name"; fi
 }
 
 apply_ladder() {

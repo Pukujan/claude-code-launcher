@@ -181,51 +181,91 @@ function Get-ProjectDirs([string]$Path) {
     Sort-Object Name)
 }
 
-function Select-MainModel {
-  $lines = @(foreach ($m in $Models) {
-    $tag = $(if ($m.Eligible) { "eligible" } else { "gated" })
-    $star = $(if ($m.Id -eq $DefaultModelId) { "*" } else { " " })
-    "{0}{1,2}  {2,-28} {3,-42} {4}  ~{5}/Mtok" -f $star, $m.Rank, $m.Name, $m.Id, $tag, $m.Cost
+# ---- seat model pickers: IRE Top 20 or IRE frontier list (Tab switches) ----
+function Get-PriceCap {
+  $cap = 0.10
+  if ($env:CCL_IRE_JSON -and (Test-Path -LiteralPath $env:CCL_IRE_JSON)) {
+    try {
+      $j = Get-Content -LiteralPath $env:CCL_IRE_JSON -Raw -Encoding UTF8 | ConvertFrom-Json
+      if ($j.price_policy.free_below_per_mtok) { $cap = [double]$j.price_policy.free_below_per_mtok }
+    } catch {}
+  }
+  return $cap
+}
+
+function Get-FrontierModels {
+  # HOOK(ire-frontier): rows from the "frontier" key that shared\ire\ire_fetch.py
+  # writes (one per route). Empty when IRE has no frontier list.
+  if (-not ($env:CCL_IRE_JSON -and (Test-Path -LiteralPath $env:CCL_IRE_JSON))) { return @() }
+  try {
+    $j = Get-Content -LiteralPath $env:CCL_IRE_JSON -Raw -Encoding UTF8 | ConvertFrom-Json
+  } catch { return @() }
+  return @(foreach ($r in @($j.frontier)) {
+    if (-not $r.route) { continue }
+    $cost = $(if ($null -ne $r.cost_per_mtok) { "{0:0.000}" -f [double]$r.cost_per_mtok } else { "?" })
+    @{ Rank = $r.rank; Name = [string]$r.name; Id = [string]$r.route; Eligible = [bool]$r.eligible; Cost = $cost
+       In = $r.price_in; Out = $r.price_out }
   })
-  $help = @(
-    "MAIN executor (maps to alias sonnet/main). Up/Down/PgUp/PgDn/Home/End. Enter. Esc quits.",
-    "gated = ranked but not currently recommendation-eligible."
-  )
+}
+
+function Format-ModelLine {
+  param($m, [double]$Cap, [string]$Star = " ")
+  $tag = $(if ($m.Eligible) { "eligible" } else { "gated" })
+  $c = 0.0
+  $over = -not [double]::TryParse([string]$m.Cost, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$c) -or $c -ge $Cap
+  $mark = $(if ($over) { "OVER `${0:0.00}" -f $Cap } else { "" })
+  $io = $(if ($null -ne $m.Out) { "  in/out " + $m.In + "/" + $m.Out } else { "" })
+  $cx = $(if ($m.Id -like "cx/*") { "  [cx: Responses mode]" } else { "" })
+  "{0}{1,2}  {2,-28} {3,-40} {4,-8} ~{5}/1M {6,-10}{7}{8}" -f $Star, $m.Rank, $m.Name, $m.Id, $tag, $m.Cost, $mark, $io, $cx
+}
+
+function Select-SeatModel {
+  param([string]$Role)
+  $cap = Get-PriceCap
+  $frontier = @(Get-FrontierModels)
+  $list = "top20"
   $index = 0
   while ($true) {
-    Show-Picker -Title "Choose MAIN model (IRE Top 20). Default DeepSeek V4.1 Flash." -Lines $lines -Index $index -Help $help
+    if ($list -eq "top20") { $choices = @($Models); $label = "IRE Top 20" }
+    else { $choices = @($frontier); $label = "IRE frontier list" }
+    if ($Role -eq "advisor") {
+      $choices = @(@{ Rank = 0; Name = "OFF (no advisor)"; Id = ""; Eligible = $true; Cost = "-" }) + $choices
+    }
+    $lines = @(foreach ($m in $choices) {
+      if ($m.Id -eq "") { "   OFF  (disable advisor tool / seat aliases fall back to main)" }
+      else {
+        $star = $(if ($Role -eq "main" -and $m.Id -eq $DefaultModelId) { "*" } else { " " })
+        Format-ModelLine -m $m -Cap $cap -Star $star
+      }
+    })
+    if ($list -eq "frontier" -and $frontier.Count -eq 0) { $lines += "   (IRE has no frontier list on this machine yet; Tab goes back)" }
+    if ($Role -eq "main") {
+      $title = "Choose MAIN model ($label). Default DeepSeek V4.1 Flash."
+      $help = @("MAIN executor (maps to alias sonnet/main). Tab switches Top 20 / frontier list. Enter. Esc quits.")
+    } else {
+      $title = "Choose ADVISOR model ($label) or OFF."
+      $help = @("ADVISOR model (maps to alias opus/advisor) or OFF. Tab switches Top 20 / frontier list. Enter. Esc quits.",
+                "Mid-session use /advisor opus or /advisor sonnet (aliases), not raw InferHub ids.")
+    }
+    $help += ("Price per 1M tokens. OVER `${0:0.00} = above the free price policy. gated = not recommendation-eligible." -f $cap)
+    Show-Picker -Title $title -Lines $lines -Index $index -Help $help
     $key = Read-MenuKey
     $page = (Get-ConsoleLayout -HelpCount $help.Count).MaxItems
-    if ($key.VirtualKeyCode -eq 13) { return $Models[$index] }
+    if ($key.VirtualKeyCode -eq 9) {
+      $list = $(if ($list -eq "top20") { "frontier" } else { "top20" }); $index = 0; continue
+    }
+    if ($key.VirtualKeyCode -eq 13) {
+      if ($index -lt $choices.Count) { return $choices[$index] }
+      continue
+    }
     if ($key.VirtualKeyCode -eq 27) { throw "Cancelled." }
     $index = Move-MenuIndex -Index $index -Count $lines.Count -KeyCode $key.VirtualKeyCode -PageSize $page
   }
 }
 
-function Select-AdvisorModel {
-  $off = @{ Rank = 0; Name = "OFF (no advisor)"; Id = ""; Eligible = $true; Cost = "-" }
-  $choices = @($off) + $Models
-  $lines = @(foreach ($m in $choices) {
-    if ($m.Id -eq "") { "   OFF  (disable advisor tool / seat aliases fall back to main)" }
-    else {
-      $tag = $(if ($m.Eligible) { "eligible" } else { "gated" })
-      "{0,2}  {1,-28} {2,-42} {3}  ~{4}/Mtok" -f $m.Rank, $m.Name, $m.Id, $tag, $m.Cost
-    }
-  })
-  $help = @(
-    "ADVISOR model (maps to alias opus/advisor) or OFF. Enter selects. Esc quits.",
-    "Mid-session use /advisor opus or /advisor sonnet (aliases), not raw InferHub ids."
-  )
-  $index = 0
-  while ($true) {
-    Show-Picker -Title "Choose ADVISOR model (IRE Top 20) or OFF." -Lines $lines -Index $index -Help $help
-    $key = Read-MenuKey
-    $page = (Get-ConsoleLayout -HelpCount $help.Count).MaxItems
-    if ($key.VirtualKeyCode -eq 13) { return $choices[$index] }
-    if ($key.VirtualKeyCode -eq 27) { throw "Cancelled." }
-    $index = Move-MenuIndex -Index $index -Count $lines.Count -KeyCode $key.VirtualKeyCode -PageSize $page
-  }
-}
+function Select-MainModel { Select-SeatModel -Role main }
+
+function Select-AdvisorModel { Select-SeatModel -Role advisor }
 
 function Confirm-Launch {
   param([string]$Folder)

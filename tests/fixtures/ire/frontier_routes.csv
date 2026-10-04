@@ -1,0 +1,4 @@
+frontier_rank,model_family,route,is_best_route,enabled,health_status,min_ask_in,min_ask_out,system_prompt_handling,preferred_endpoint,context_window
+5,GPT 6.1 Sol,cx/gpt-6.1-sol,true,true,healthy,0.016,0.08,developer_message,/v1/responses,272000
+2,Claude Fable 5.1,cc/claude-fable-5-1,true,true,healthy,1.0,5.0,upstream_note,,
+9,Retired Thing,xx/retired,true,false,healthy,0.01,0.05,,,

@@ -134,13 +134,107 @@ class Picker(unittest.TestCase):
 
         res = self.run_picker([
             "1 2 3 4",                     # too many
-            n("ali/glm-5.2"),              # over the price cap
-            n("ag/gemini-3.8-flash-high"),  # gated
-            n("cbcn/minimax-m3"),          # blocked vendor
             "x",                           # junk
+            "99",                          # out of range
+            "zz/not-a-route",              # unknown route
+            "cx/gpt-6.1-sol",              # opt-in extra, not opted in
             n("ali/qwen3.8-flash"),
-        ], blocked=("cbcn",))
+        ])
         self.assertEqual(res["fallbacks"], ["ali/qwen3.8-flash"])
+
+    def test_hand_picks_over_cap_or_gated_are_kept_with_a_warning(self):
+        ids = self.ids()
+        out = io.StringIO()
+        it = iter([f"{ids.index('ali/glm-5.2') + 1} {ids.index('ag/gemini-3.8-flash-high') + 1}"])
+        res = L.prompt_ladder(self.b, "main", "cb/deepseek-v4.1-flash", (), inp=lambda _: next(it), out=out)
+        self.assertEqual(res, {"fallbacks": ["ali/glm-5.2", "ag/gemini-3.8-flash-high"], "source": "picked"})
+        self.assertIn("warning: ali/glm-5.2 costs over $0.10 per 1M", out.getvalue())
+        self.assertIn("warning: ag/gemini-3.8-flash-high is gated", out.getvalue())
+
+    def test_hand_picks_sharing_a_vendor_are_honored(self):
+        ids = self.ids()
+        out = io.StringIO()
+        it = iter([str(ids.index("cbcn/minimax-m3") + 1)])
+        res = L.prompt_ladder(self.b, "main", "cb/deepseek-v4.1-flash", ("cbcn",),
+                              inp=lambda _: next(it), out=out)
+        self.assertEqual(res, {"fallbacks": ["cbcn/minimax-m3"], "source": "picked"})
+        warn = [ln for ln in out.getvalue().splitlines() if "shares vendor" in ln]
+        self.assertEqual(len(warn), 1)
+        # the default still keeps the vendors apart
+        self.assertNotIn("cbcn/deepseek-v4-flash", L.default_ladder(self.b, "main", "cb/deepseek-v4.1-flash", ("cbcn",)))
+
+    def test_frontier_toggle_and_marks(self):
+        b = dict(self.b, frontier=FRONTIER)
+        out = io.StringIO()
+        it = iter(["f", "1 2"])
+        res = L.prompt_ladder(b, "main", "cb/deepseek-v4.1-flash", (), inp=lambda _: next(it), out=out)
+        self.assertEqual(res["fallbacks"], ["cx/gpt-6.1-sol", "cc/claude-fable-5-1"])
+        text = out.getvalue()
+        self.assertIn("IRE frontier list", text)
+        fable = next(ln for ln in text.splitlines() if "cc/claude-fable-5-1" in ln and "~" in ln)
+        sol = next(ln for ln in text.splitlines() if "cx/gpt-6.1-sol" in ln and "~" in ln)
+        self.assertIn("OVER $0.10", fable)
+        self.assertNotIn("OVER", sol)
+        self.assertIn(" 0.016/1M", sol)
+
+    def test_frontier_empty_says_so(self):
+        out = io.StringIO()
+        it = iter(["f", ""])
+        res = L.prompt_ladder(self.b, "main", "cb/deepseek-v4.1-flash", (), inp=lambda _: next(it), out=out)
+        self.assertEqual(res["source"], "default")
+        self.assertIn("IRE has no frontier list", out.getvalue())
+
+    def test_prompt_primary_from_either_list(self):
+        b = dict(self.b, frontier=FRONTIER)
+        it = iter(["1"])
+        row = L.prompt_primary(b, "main", inp=lambda _: next(it), out=io.StringIO())
+        self.assertEqual(row["id"], "cx/gpt-6.1-sol")
+        it = iter(["t", "7"])
+        row = L.prompt_primary(b, "main", inp=lambda _: next(it), out=io.StringIO())
+        self.assertEqual(row["id"], "ali/qwen3.8-flash")
+        it = iter(["o"])
+        self.assertEqual(L.prompt_primary(b, "advisor", allow_off=True, inp=lambda _: next(it),
+                                          out=io.StringIO())["id"], "")
+        it = iter(["q"])
+        self.assertIsNone(L.prompt_primary(b, "main", inp=lambda _: next(it), out=io.StringIO()))
+
+
+FRONTIER = [
+    {"rank": 5, "name": "GPT 6.1 Sol", "vendor": "OpenAI", "route": "cx/gpt-6.1-sol", "best_route": True,
+     "eligible": True, "health": "healthy", "cost_per_mtok": 0.016, "price_in": 0.016, "price_out": 0.08,
+     "preferred_endpoint": "/v1/responses", "system_prompt_handling": "developer_message", "context_window": 272000},
+    {"rank": 2, "name": "Claude Fable 5.1", "vendor": "Anthropic", "route": "cc/claude-fable-5-1", "best_route": True,
+     "eligible": True, "health": "healthy", "cost_per_mtok": 1.0, "price_in": 1.0, "price_out": 5.0,
+     "preferred_endpoint": None, "system_prompt_handling": "upstream_note", "context_window": None},
+]
+
+
+class HandPickedSharedVendors(unittest.TestCase):
+    """End to end through ladder_cli choose: hand-picked ladders survive the other seat."""
+
+    def test_cli_keeps_hand_picked_shared_vendor_rungs(self):
+        import subprocess
+        import tempfile
+        cli = ROOT / "shared" / "ladder" / "ladder_cli.py"
+        with tempfile.TemporaryDirectory() as t:
+            st = Path(t) / "state.json"
+            env = dict(os.environ, CCL_IRE_JSON=str(Path(t) / "missing.json"))
+            env.pop("CCL_OPT_IN_MODELS", None)
+
+            def choose(role, primary, answer):
+                return subprocess.run([sys.executable, str(cli), "choose", "--state", str(st), "--role", role,
+                                       "--primary", primary, "--no-ire"], input=answer + "\n",
+                                      capture_output=True, text=True, env=env, check=True)
+
+            cat = [c["id"] for c in L.catalog(I.builtin_inputs()) if c["id"] != "cb/deepseek-v4.1-flash"]
+            # main hand-picks a cbcn rung; advisor then picks a cbcn primary and a cb rung by hand
+            choose("main", "cb/deepseek-v4.1-flash", str(cat.index("cbcn/deepseek-v4-flash") + 1))
+            cat_a = [c["id"] for c in L.catalog(I.builtin_inputs()) if c["id"] != "cbcn/glm-5.3-flash"]
+            r = choose("advisor", "cbcn/glm-5.3-flash", str(cat_a.index("cb/hy4-preview") + 1))
+            state = json.loads(st.read_text())
+        self.assertEqual(state["main"]["fallbacks"], ["cbcn/deepseek-v4-flash"])
+        self.assertEqual(state["advisor"]["fallbacks"], ["cb/hy4-preview"])
+        self.assertIn("shares vendor 'cb/'", r.stderr)
 
 
 class CxOptIn(unittest.TestCase):
@@ -162,6 +256,15 @@ class CxOptIn(unittest.TestCase):
         self.assertTrue(cat["cx/gpt-6.1-sol"]["eligible"])
         self.assertTrue(L.rung_ok(self.b, "cx/gpt-6.1-sol"))
         self.assertNotIn("cx/gpt-6.1-sol", L.default_ladder(self.b, "main", "ali/qwen3.8-flash"))
+
+    def test_price_cap_hook_applies_when_listed_in_frontier(self):
+        b = dict(self.b, frontier=FRONTIER)
+        os.environ["CCL_CX_SOL_MAX_PRICE"] = "0.05"
+        self.assertFalse(L.rung_ok(b, "cx/gpt-6.1-sol"))
+        self.assertTrue(L.validate_picks(b, "x/y", ["cx/gpt-6.1-sol"]))
+        os.environ.pop("CCL_CX_SOL_MAX_PRICE")
+        self.assertTrue(L.rung_ok(b, "cx/gpt-6.1-sol"))  # listed by IRE: no opt-in needed
+        self.assertEqual(L.validate_picks(b, "x/y", ["cx/gpt-6.1-sol"]), [])
 
     def test_price_cap_hook(self):
         os.environ["CCL_OPT_IN_MODELS"] = "cx/gpt-6.1-sol"

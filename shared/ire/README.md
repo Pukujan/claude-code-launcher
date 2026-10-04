@@ -16,6 +16,7 @@ the repo.
 | Top 20 list | `operational/telemetry/gravebuster/pipeline/ihub/lists/research_model_top20_recommendations.csv` |
 | Price policy | the "below **$0.10 USDC per 1 million tokens** ... effectively free" line in `docs/INFERHUB-API-SETUP.md` |
 | Fallback picks (optional) | `operational/recommendations/claude-code-fallbacks.v1.json` |
+| Frontier list (optional) | `operational/telemetry/gravebuster/pipeline/ihub/lists/research_model_frontier_recommendations.json`, or `research_model_frontier_routes.csv` in the same folder if the JSON is missing |
 
 IRE doesn't publish fallback picks yet. I searched `main` at `9a8fba0` on 2026-10-03 and
 found none. Until that file exists, the ladders come from `defaults.json`. When it does
@@ -85,8 +86,9 @@ helper fails. The pickers still use their built-in tables for now. The ladder pi
 
 ## Output schema
 
-Exactly these six top-level keys. The ladder picker (#5) depends on them, so don't add,
-rename or drop any without changing that picker too.
+These six top-level keys, plus the optional `frontier` key described below. The ladder
+picker (#5) depends on them, so don't add, rename or drop any without changing that
+picker too.
 
 ```jsonc
 {
@@ -115,6 +117,18 @@ rename or drop any without changing that picker too.
   "cooldown_s": 180            // seconds a failed rung sits out
 }
 ```
+
+`frontier` holds IRE's frontier list, one row per enabled route, sorted by frontier rank
+with the best route of each family first. It's always present and is `[]` when IRE has no
+frontier list (or the copy is unreadable), when running from the built-in defaults, or
+when the cache predates the key. It's cached along with everything else. A row looks like
+`{"rank": 5, "name": "GPT 6.1 Sol", "vendor": "OpenAI", "route": "cx/gpt-6.1-sol",
+"best_route": true, "eligible": true, "health": "healthy", "cost_per_mtok": 0.016,
+"price_in": 0.016, "price_out": 0.08, "preferred_endpoint": "/v1/responses",
+"system_prompt_handling": "developer_message", "context_window": 272000}`. Here
+`cost_per_mtok` is the cheapest input ask, which is the basis IRE uses for its price policy.
+In the routes CSV fallback, `eligible` means the route is healthy, because that file has
+no eligibility column.
 
 The ladder ids are bare InferHub ids, without the `ih/` prefix that LiteLLM deployments
 use. Provenance (fetch time and IRE SHA) isn't in the output. It's in the stderr line and

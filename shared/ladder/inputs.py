@@ -97,7 +97,8 @@ def normalize(raw) -> dict | None:
     detail = src if isinstance(src, str) else (src or {}).get("kind", "?")
     out = {"source": {"kind": "ire", "detail": str(detail)},
            "price_policy": {"max_cost_per_mtok": cap},
-           "top20": raw["top20"], "ladders": lad, "retry": retry}
+           "top20": raw["top20"], "frontier": list(raw.get("frontier") or []),
+           "ladders": lad, "retry": retry}
     return out if _usable(out) else None
 
 

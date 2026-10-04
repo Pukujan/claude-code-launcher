@@ -1,0 +1,124 @@
+{
+ "schema": "ihub-frontier-recommendations/v1",
+ "generated_at": "2026-10-04T00:02:28Z",
+ "models": [
+  {
+   "frontier_rank": 1,
+   "model_family": "GPT 6 Astra",
+   "vendor": "OpenAI",
+   "recommendation_eligible": true,
+   "best_route": "cb/gpt-6-astra"
+  },
+  {
+   "frontier_rank": 2,
+   "model_family": "Claude Fable 5.1",
+   "vendor": "Anthropic",
+   "recommendation_eligible": true,
+   "best_route": "cc/claude-fable-5-1"
+  },
+  {
+   "frontier_rank": 5,
+   "model_family": "GPT 6.1 Sol",
+   "vendor": "OpenAI",
+   "recommendation_eligible": true,
+   "best_route": "cx/gpt-6.1-sol"
+  }
+ ],
+ "routes": [
+  {
+   "route": "cb/gpt-6-astra",
+   "model_family": "GPT 6 Astra",
+   "model_label": "GPT 6 Astra",
+   "vendor": "OpenAI",
+   "enabled": true,
+   "frontier_rank": 1,
+   "is_best_route": true,
+   "price": {
+    "min_ask_in": 0.05,
+    "min_ask_out": 0.25
+   },
+   "health": {
+    "status": "healthy"
+   },
+   "context_window": 272000,
+   "system_prompt_handling": "upstream_note",
+   "preferred_endpoint": null
+  },
+  {
+   "route": "cx/gpt-6-astra",
+   "model_family": "GPT 6 Astra",
+   "model_label": "GPT 6 Astra",
+   "vendor": "OpenAI",
+   "enabled": true,
+   "frontier_rank": 1,
+   "is_best_route": false,
+   "price": {
+    "min_ask_in": 0.05,
+    "min_ask_out": 0.25
+   },
+   "health": {
+    "status": "healthy"
+   },
+   "context_window": 272000,
+   "system_prompt_handling": "developer_message",
+   "preferred_endpoint": "/v1/responses"
+  },
+  {
+   "route": "cc/claude-fable-5-1",
+   "model_family": "Claude Fable 5.1",
+   "model_label": "Claude Fable 5.1",
+   "vendor": "Anthropic",
+   "enabled": true,
+   "frontier_rank": 2,
+   "is_best_route": true,
+   "price": {
+    "min_ask_in": 1.0,
+    "min_ask_out": 5.0
+   },
+   "health": {
+    "status": "healthy"
+   },
+   "context_window": null,
+   "system_prompt_handling": "upstream_note",
+   "preferred_endpoint": null
+  },
+  {
+   "route": "cx/gpt-6.1-sol",
+   "model_family": "GPT 6.1 Sol",
+   "model_label": "GPT 6.1 Sol",
+   "vendor": "OpenAI",
+   "enabled": true,
+   "frontier_rank": 5,
+   "is_best_route": true,
+   "price": {
+    "min_ask_in": 0.016,
+    "min_ask_out": 0.08
+   },
+   "health": {
+    "status": "healthy"
+   },
+   "context_window": 272000,
+   "system_prompt_handling": "developer_message",
+   "preferred_endpoint": "/v1/responses"
+  },
+  {
+   "route": "xx/disabled-route",
+   "model_family": "GPT 6 Astra",
+   "model_label": "GPT 6 Astra",
+   "vendor": "OpenAI",
+   "enabled": false,
+   "frontier_rank": 1,
+   "is_best_route": true,
+   "price": {
+    "min_ask_in": 0.05,
+    "min_ask_out": 0.25
+   },
+   "health": {
+    "status": "healthy"
+   },
+   "context_window": 272000,
+   "system_prompt_handling": "upstream_note",
+   "preferred_endpoint": null
+  }
+ ]
+}
