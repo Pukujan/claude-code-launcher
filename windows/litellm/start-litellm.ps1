@@ -81,6 +81,12 @@ $envMap = @{
 }
 # LITELLM_MASTER_KEY is optional (keyless proxy). If an env file set it, it is
 # already in this process and LiteLLM picks it up from os.environ.
+# Without a key, newer LiteLLM (1.104+) refuses to start unless this flag is set.
+# The pinned 1.103.0 starts keyless without it; the flag is set anyway, only in
+# this process (and so only for the proxy it starts), never machine-wide.
+if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable('LITELLM_MASTER_KEY', 'Process'))) {
+    [Environment]::SetEnvironmentVariable('LITELLM_DANGEROUSLY_PERMIT_WEAK_OR_UNSET_MASTER_KEY', 'true', 'Process')
+}
 
 foreach ($secretName in $envMap.Keys) {
     $envKey = $envMap[$secretName]

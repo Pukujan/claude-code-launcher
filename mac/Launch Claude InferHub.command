@@ -5,13 +5,22 @@
 # Ported from ACS inferhub-litellm-macos v0.1.0 (agent-custom-setup PR #65).
 # Mac counterpart of windows/launch-claude-inferhub.ps1.
 #
-# Double-click in Finder. First run installs what is missing (no sudo):
-#   uv, a uv-managed Python, the venv with pinned LiteLLM under
-#   shared/litellm/.litellm-venv, and Claude Code. Then it asks once for the
-#   InferHub key, starts LiteLLM on 127.0.0.1:4000 from this repository's
-#   shared/litellm folder (no other checkout needed), shows a folder picker and
-#   the Windows model picker, seats the models and runs claude.
-# Later runs skip everything already installed.
+# This is the one Mac launcher. It also has the parts of the old macos/ shim
+# (PR #7): mac/setup.sh installs everything plus a `claude-acs` command, the
+# folder picker has terminal navigation (mac/lib/nav.sh), and the model table
+# comes live from IRE through shared/ire/ire_fetch.py.
+#
+# Double-click in Finder, or run `claude-acs` after mac/setup.sh. First run
+# installs what is missing (no sudo): uv, a uv-managed Python, the venv with
+# pinned LiteLLM under shared/litellm/.litellm-venv, and Claude Code. Then it
+# asks once for the InferHub key, fetches the IRE picks (live, else the last
+# good copy, else built-in), starts LiteLLM on 127.0.0.1:4000 from this
+# repository's shared/litellm folder, shows the folder picker and the model
+# picker, seats the models and runs claude. Later runs skip what is installed.
+#
+# CLAUDE_IH_SETUP_ONLY=1 stops after the installs and the IRE fetch (setup.sh
+# uses this). CLAUDE_IH_PROJECT, CLAUDE_IH_MAIN and CLAUDE_IH_ADVISOR skip the
+# pickers; the macos/ names ACS_FOLDER, ACS_MAIN_ID and ACS_ADVISOR_ID still work.
 #
 # The proxy is keyless and bound to 127.0.0.1 only. A LITELLM_MASTER_KEY is
 # optional and passed through when set; otherwise claude gets the dummy key
@@ -28,7 +37,7 @@ LITELLM_PORT="${LITELLM_PORT:-4000}"
 PROXY_BASE="http://127.0.0.1:${LITELLM_PORT}"
 WORK_ROOT="${CLAUDE_IH_WORK_ROOT:-$HOME/work}"
 # This file lives in <repo>/mac/; the proxy files live in <repo>/shared/litellm.
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LITELLM_DIR="$REPO_ROOT/shared/litellm"
 IH_ENV_FILE="${INFERHUB_ENV_FILE:-$HOME/.config/inferhub/.env}"
 HEALTH_TIMEOUT="${LITELLM_HEALTH_TIMEOUT:-300}"
@@ -39,7 +48,9 @@ CLAUDE_INSTALLER_URL="${CLAUDE_INSTALLER_URL:-https://claude.ai/install.sh}"
 
 DEFAULT_MODEL_ID="cb/deepseek-v4.1-flash"
 SEAT_ALIAS="sonnet"
-SMALL_FAST_MODEL="ih/ali/qwen3.8-flash"
+# small-fast is the fast seat alias from apply_inferhub_seat.py (ali/qwen3.8-flash
+# unless the seat file says otherwise), the same name Windows uses.
+SMALL_FAST_MODEL="small-fast"
 
 OS_NAME="$(uname -s)"
 if [ "$OS_NAME" = "Darwin" ]; then
@@ -62,9 +73,10 @@ OVR_FILE="$LITELLM_DIR/requirements-overrides.txt"
 REQUIREMENTS="$(cat "$REQ_FILE" 2>/dev/null)"
 OVERRIDES="$(cat "$OVR_FILE" 2>/dev/null)"
 
-# HOOK(ire-models): the picker table, the same IRE Top 20 as the Windows
-# launcher: rank|name|id|eligible|cost. It matches
-# shared/litellm/config/top20-builtin.csv (tests/test_top20_tables.py checks).
+# HOOK(ire-models): the built-in picker table, rank|name|id|eligible|cost.
+# load_ire_table replaces it with the live IRE Top 20 when shared/ire answers.
+# This copy is the last resort; it matches shared/litellm/config/top20-builtin.csv,
+# the Windows table and shared/ire/defaults.json (tests check all of them).
 MODELS='1|DeepSeek V4.1 Flash|cb/deepseek-v4.1-flash|true|0.022
 2|GLM 5.3 Flash|cbcn/glm-5.3-flash|true|0.033
 3|Gemini 3.8 Flash|ag/gemini-3.8-flash-high|false|0.066
@@ -85,6 +97,17 @@ MODELS='1|DeepSeek V4.1 Flash|cb/deepseek-v4.1-flash|true|0.022
 18|Qwen 3.8 Max|ali/qwen3.8-max|true|0.170
 19|GLM 5.3|cbcn/glm-5.3|true|0.267
 20|Kimi K2.7 Code|ali/kimi-k2.7-code|true|0.156'
+
+MODEL_COUNT="$(printf '%s\n' "$MODELS" | grep -c '|')"
+
+# Old macos/ shim variable names, kept so existing scripts keep working.
+[ -z "${CLAUDE_IH_PROJECT:-}" ] && [ -n "${ACS_FOLDER:-}" ] && CLAUDE_IH_PROJECT="$ACS_FOLDER"
+[ -z "${CLAUDE_IH_MAIN:-}" ] && [ -n "${ACS_MAIN_ID:-}" ] && CLAUDE_IH_MAIN="$ACS_MAIN_ID"
+[ -z "${CLAUDE_IH_ADVISOR+set}" ] && [ -n "${ACS_ADVISOR_ID+set}" ] && CLAUDE_IH_ADVISOR="$ACS_ADVISOR_ID"
+
+# Terminal folder navigation (browse, quick picks, recents, new folder).
+# shellcheck source=SCRIPTDIR/lib/nav.sh
+. "$REPO_ROOT/mac/lib/nav.sh"
 
 # Env names handed to the LiteLLM process (values never logged).
 PROXY_ENV_NAMES="INFERHUB_API_KEY INFERHUB_API_URL LITELLM_MASTER_KEY CKFF_DEFAULT_KEY CKFF_GROK_KEY CKFF_KIRO_KEY CKFF_KIMI_KEY CKFF_GEMINI_CLI_KEY CKFF_CODEX_CC_KEY CKFF_CODEX_PLUS_KEY CKFF_CODEX_PRO_KEY CKFF_IMAGEGEN_KEY CKFF_EMBED_KEY"
@@ -327,12 +350,20 @@ export_proxy_env() {
 }
 
 fetch_ire() {
-  # HOOK(ire): shared/ire/ire_fetch.py pulls IRE's Top 20, price policy and any
-  # fallback picks from GitHub (5 s budget), then falls back to the last good
-  # copy and then built-in defaults. Never fatal. The JSON lands in
-  # $IRE_JSON for the ladder picker; its schema is in shared/ire/README.md.
+  # HOOK(ire): shared/ire/ire_fetch.py pulls IRE's Top 20, price policy, any
+  # fallback picks and the optional frontier list from GitHub (5 s budget, auth
+  # from GH_TOKEN/GITHUB_TOKEN or `gh auth token`; IRE is private), then falls
+  # back to the last good copy and then built-in defaults. Never fatal.
+  # Writes:
+  #   $STATE_DIR/ire.json           the bundle for the ladder picker (CCL_IRE_JSON)
+  #   $STATE_DIR/ire-frontier.json  the frontier list, empty if IRE has none
+  #                                 (CCL_IRE_FRONTIER_JSON)
+  #   $STATE_DIR/ire-table.txt      rank|name|id|eligible|cost for the picker
+  #   shared/litellm/config/top20.csv  the Top 20 for sync_inferhub_top20.py
   local py line
   IRE_JSON="$STATE_DIR/ire.json"
+  IRE_FRONTIER_JSON="$STATE_DIR/ire-frontier.json"
+  IRE_TABLE="$STATE_DIR/ire-table.txt"
   py="$VENV_PY"; [ -x "$py" ] || py="$(command -v python3 || true)"
   if [ -z "$py" ] || ! mkdir -p "$STATE_DIR" 2>/dev/null; then
     log "IRE: no Python or state folder; using the built-in model table"
@@ -340,14 +371,34 @@ fetch_ire() {
   fi
   while IFS= read -r line; do
     [ -n "$line" ] && log "IRE: ${line#\[ire\] }"
-  done < <("$py" "$REPO_ROOT/shared/ire/ire_fetch.py" --out "$IRE_JSON" 2>&1 >/dev/null)
+  done < <("$py" "$REPO_ROOT/shared/ire/ire_fetch.py" --out "$IRE_JSON" \
+             --frontier-out "$IRE_FRONTIER_JSON" --table-out "$IRE_TABLE" \
+             --top20-csv "$LITELLM_DIR/config/top20.csv" 2>&1 >/dev/null)
   [ -f "$IRE_JSON" ] && export CCL_IRE_JSON="$IRE_JSON"
+  [ -f "$IRE_FRONTIER_JSON" ] && export CCL_IRE_FRONTIER_JSON="$IRE_FRONTIER_JSON"
+  load_ire_table
   return 0
 }
 
+# Use the table ire_fetch.py wrote, if every line looks right. Otherwise keep
+# the built-in MODELS.
+load_ire_table() {
+  local table n
+  [ -n "${IRE_TABLE:-}" ] && [ -s "$IRE_TABLE" ] || return 0
+  table="$(cat "$IRE_TABLE")"
+  n="$(printf '%s\n' "$table" | grep -c '|')"
+  if [ "$n" -lt 1 ] || printf '%s\n' "$table" \
+      | grep -vqE '^[0-9]+\|[^|]+\|[a-z0-9]+(/[A-Za-z0-9._-]+)+\|(true|false)\|[0-9.]*$'; then
+    log "IRE: the fetched model table looks wrong; using the built-in one"
+    return 0
+  fi
+  MODELS="$table"
+  MODEL_COUNT="$n"
+}
+
 ensure_top20() {
-  local out="$LITELLM_DIR/config/inferhub_top20.yaml" csv
-  [ -f "$out" ] && return 0
+  local out="$LITELLM_DIR/config/inferhub_top20.yaml" csv stamp sum
+  stamp="$LITELLM_DIR/config/.inferhub_top20.source"
   # HOOK(ire): INFERHUB_TOP20_CSV wins, then shared/litellm/config/top20.csv
   # (written by an IRE fetch when one exists), then the IRE CSV in
   # ~/.config/inferhub, then shared/litellm/config/top20-builtin.csv.
@@ -371,9 +422,21 @@ ensure_top20() {
       printf '%s\n' "$MODELS" | awk -F'|' '{printf "%s,%s,%s,%s,%s\n", $1, $2, $4, $5, $3}'
     } > "$csv"
   fi
+  # Regenerate only when the source CSV or the API base changed.
+  sum="$(cksum < "$csv" 2>/dev/null) $IH_URL"
+  if [ -f "$out" ] && [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$sum" ]; then
+    return 0
+  fi
   log "Writing InferHub Top 20 deployments from $(basename "$csv") ..."
   quiet "$VENV_PY" "$LITELLM_DIR/scripts/sync_inferhub_top20.py" --csv "$csv" --api-base "$IH_URL" \
     || die "sync_inferhub_top20.py failed (see log)"
+  printf '%s\n' "$sum" > "$stamp" 2>/dev/null
+}
+
+# The seat script, with the proxy env (an optional LITELLM_MASTER_KEY decides
+# whether runtime.yaml gets a master_key at all).
+seat_script() {
+  ( export_proxy_env; "$VENV_PY" "$LITELLM_DIR/scripts/apply_inferhub_seat.py" "$@" )
 }
 
 ensure_proxy() {
@@ -388,10 +451,10 @@ ensure_proxy() {
   # Seat + merged runtime.yaml must exist before the proxy boots (same as
   # start-litellm.ps1: default seat, apply aliases, merge, no reload).
   if [ -f "$seat" ]; then
-    quiet "$VENV_PY" "$LITELLM_DIR/scripts/apply_inferhub_seat.py" --api-base "$IH_URL" --no-reload \
+    quiet seat_script --api-base "$IH_URL" --no-reload \
       || die "apply_inferhub_seat.py failed (see log)"
   else
-    quiet "$VENV_PY" "$LITELLM_DIR/scripts/apply_inferhub_seat.py" --api-base "$IH_URL" \
+    quiet seat_script --api-base "$IH_URL" \
       --main "$DEFAULT_MODEL_ID" --advisor "" --no-reload \
       || die "apply_inferhub_seat.py failed (see log)"
   fi
@@ -401,6 +464,12 @@ ensure_proxy() {
     cd "$LITELLM_DIR" || exit 1
     export_proxy_env
     export PYTHONUTF8=1 LITELLM_LOCAL_MODEL_COST_MAP=True
+    # Keyless on 127.0.0.1: LiteLLM 1.104+ refuses to start without a master
+    # key unless this is set. The pinned 1.103.0 doesn't need it. It is set in
+    # this subshell only, so only the proxy process sees it.
+    if [ -z "${LITELLM_MASTER_KEY:-}" ]; then
+      export LITELLM_DANGEROUSLY_PERMIT_WEAK_OR_UNSET_MASTER_KEY=true
+    fi
     export PYTHONPATH="$LITELLM_DIR${PYTHONPATH:+:$PYTHONPATH}"
     exec nohup "$VENV/bin/litellm" --config "$LITELLM_DIR/config/runtime.yaml" \
       --host 127.0.0.1 --port "$LITELLM_PORT" < /dev/null \
@@ -446,9 +515,9 @@ resolve_model() {  # resolve_model "<number or id>" -> index, or fail
   local want="$1" i=1 id
   case "$want" in
     ''|*[!0-9]*) ;;
-    *) if [ "$want" -ge 1 ] && [ "$want" -le 20 ]; then printf '%s' "$want"; return 0; fi; return 1 ;;
+    *) if [ "$want" -ge 1 ] && [ "$want" -le "$MODEL_COUNT" ]; then printf '%s' "$want"; return 0; fi; return 1 ;;
   esac
-  while [ "$i" -le 20 ]; do
+  while [ "$i" -le "$MODEL_COUNT" ]; do
     id="$(model_field "$i" 3)"
     [ "$id" = "$want" ] && { printf '%s' "$i"; return 0; }
     i=$((i + 1))
@@ -459,7 +528,7 @@ resolve_model() {  # resolve_model "<number or id>" -> index, or fail
 pick_main() {
   local idx
   if [ -n "${CLAUDE_IH_MAIN:-}" ]; then
-    idx="$(resolve_model "$CLAUDE_IH_MAIN")" || die "CLAUDE_IH_MAIN=$CLAUDE_IH_MAIN is not in the Top 20 list"
+    idx="$(resolve_model "$CLAUDE_IH_MAIN")" || die "CLAUDE_IH_MAIN=$CLAUDE_IH_MAIN is not in the model table"
     MAIN_ID="$(model_field "$idx" 3)"; MAIN_NAME="$(model_field "$idx" 2)"; return 0
   fi
   while :; do
@@ -473,7 +542,7 @@ pick_main() {
     if idx="$(resolve_model "$REPLY")"; then
       MAIN_ID="$(model_field "$idx" 3)"; MAIN_NAME="$(model_field "$idx" 2)"; return 0
     fi
-    log "Please type a number from 1 to 20."
+    log "Please type a number from 1 to $MODEL_COUNT."
   done
 }
 
@@ -481,7 +550,7 @@ pick_advisor() {
   local idx
   if [ -n "${CLAUDE_IH_ADVISOR+set}" ]; then
     case "$CLAUDE_IH_ADVISOR" in ''|0|off|OFF) ADVISOR_ID=""; ADVISOR_NAME=""; return 0 ;; esac
-    idx="$(resolve_model "$CLAUDE_IH_ADVISOR")" || die "CLAUDE_IH_ADVISOR=$CLAUDE_IH_ADVISOR is not in the Top 20 list"
+    idx="$(resolve_model "$CLAUDE_IH_ADVISOR")" || die "CLAUDE_IH_ADVISOR=$CLAUDE_IH_ADVISOR is not in the model table"
     ADVISOR_ID="$(model_field "$idx" 3)"; ADVISOR_NAME="$(model_field "$idx" 2)"; return 0
   fi
   while :; do
@@ -498,16 +567,8 @@ pick_advisor() {
     if idx="$(resolve_model "$REPLY")"; then
       ADVISOR_ID="$(model_field "$idx" 3)"; ADVISOR_NAME="$(model_field "$idx" 2)"; return 0
     fi
-    log "Please type 0 for OFF or a number from 1 to 20."
+    log "Please type 0 for OFF or a number from 1 to $MODEL_COUNT."
   done
-}
-
-browse_folder() {
-  if ! command -v osascript >/dev/null 2>&1; then
-    log "Finder browsing only works on macOS."
-    return 1
-  fi
-  osascript -e "POSIX path of (choose folder with prompt \"Choose a project folder for Claude Code\" default location (POSIX file \"$WORK_ROOT\"))" 2>/dev/null
 }
 
 confirm_folder() {
@@ -516,15 +577,25 @@ confirm_folder() {
   return 0
 }
 
+# Folder picker. Numbered so it works from a pipe (the dry run) and in a
+# terminal alike; b, q, t and n add the terminal navigation from the old
+# macos/ shim (mac/lib/nav.sh). No Finder dialog.
+#   1..      the default root, its subfolders, then recent folders
+#   b        browse the filesystem with the arrow keys (needs a terminal)
+#   q        quick picks: home, Desktop, Documents, code folders
+#   t        type a path (~ is expanded)
+#   n        make a new folder
+#   q! / x   quit
 pick_folder() {
-  local dirs d n i chosen
+  local dirs d n i chosen recents quick name parent
   if [ -n "${CLAUDE_IH_PROJECT:-}" ]; then
     [ -d "$CLAUDE_IH_PROJECT" ] || die "CLAUDE_IH_PROJECT=$CLAUDE_IH_PROJECT is not a folder"
     PROJECT_DIR="$(cd "$CLAUDE_IH_PROJECT" && pwd)"; return 0
   fi
   mkdir -p "$WORK_ROOT" 2>/dev/null
   while :; do
-    # Default root first (the root itself), then its non-hidden subfolders.
+    # Default root first (the root itself), then its non-hidden subfolders,
+    # then recent folders that aren't already listed.
     dirs="$WORK_ROOT"
     for d in "$WORK_ROOT"/*/; do
       [ -d "$d" ] || continue
@@ -532,41 +603,86 @@ pick_folder() {
       dirs="$dirs
 $d"
     done
+    recents=""
+    while IFS= read -r d; do
+      [ -n "$d" ] || continue
+      case "
+$dirs
+" in *"
+$d
+"*) continue ;; esac
+      recents="$recents$d
+"
+    done < <(nav_recents_list)
     log ""
     log "Choose a project folder (default root $WORK_ROOT)"
     n=0
     while IFS= read -r d; do
       n=$((n + 1))
       if [ "$n" -eq 1 ]; then
-        printf '%4d  %s  (default root)\n' "$n" "$d" >&2
+        printf '%4d  %s  (default root)\n' "$n" "$(nav_tilde "$d")" >&2
       else
-        printf '%4d  %s\n' "$n" "$d" >&2
+        printf '%4d  %s\n' "$n" "$(nav_tilde "$d")" >&2
       fi
     done <<EOF
 $dirs
 EOF
-    printf '   b  Browse... (choose a folder in Finder)\n' >&2
-    ask "Folder number [Enter = 1, b = browse, q = quit]: " || die "Cancelled."
+    while IFS= read -r d; do
+      [ -n "$d" ] || continue
+      n=$((n + 1))
+      printf '%4d  %s  (recent)\n' "$n" "$(nav_tilde "$d")" >&2
+      dirs="$dirs
+$d"
+    done <<EOF
+$recents
+EOF
+    printf '   b  Browse folders in this terminal\n' >&2
+    printf '   q  Quick picks (home, Desktop, Documents, code folders)\n' >&2
+    printf '   t  Type a path\n' >&2
+    printf '   n  New folder\n' >&2
+    ask "Folder [Enter = 1, b/q/t/n, x = quit]: " || die "Cancelled."
     REPLY="$(trim "$REPLY")"
     chosen=""
     case "$REPLY" in
-      q|Q) die "Cancelled." ;;
-      b|B) chosen="$(browse_folder)" || { log "No folder chosen."; continue; }
-           chosen="${chosen%/}" ;;
-      '') chosen="$WORK_ROOT" ;;
-      *[!0-9]*) log "Please type a number, b or q."; continue ;;
-      *) i=0
-         while IFS= read -r d; do
-           i=$((i + 1))
-           [ "$i" -eq "$REPLY" ] && chosen="$d"
-         done <<EOF
-$dirs
+      x|X|q!|Q!) die "Cancelled." ;;
+      b|B)
+        chosen="$(nav_browse "$WORK_ROOT")" || { log "No folder chosen."; continue; } ;;
+      q|Q)
+        quick="$(nav_quick_list)"
+        i=0
+        while IFS= read -r d; do
+          [ -n "$d" ] || continue
+          i=$((i + 1)); printf '%4d  %s\n' "$i" "$(nav_tilde "$d")" >&2
+        done <<EOF
+$quick
 EOF
+        ask "Quick pick number [Enter = back]: " || die "Cancelled."
+        REPLY="$(trim "$REPLY")"
+        case "$REPLY" in ''|*[!0-9]*) continue ;; esac
+        chosen="$(printf '%s\n' "$quick" | sed -n "${REPLY}p")"
+        [ -n "$chosen" ] || { log "No quick pick number $REPLY."; continue; } ;;
+      t|T)
+        ask "Folder path: " || die "Cancelled."
+        chosen="$(trim "$REPLY")"
+        chosen="$(nav_expand "$chosen")"
+        [ -n "$chosen" ] || continue ;;
+      n|N)
+        ask "Make it inside [Enter = $(nav_tilde "$WORK_ROOT")]: " || die "Cancelled."
+        parent="$(trim "$REPLY")"
+        [ -n "$parent" ] || parent="$WORK_ROOT"
+        parent="$(nav_expand "$parent")"
+        ask "New folder name: " || die "Cancelled."
+        name="$(trim "$REPLY")"
+        chosen="$(nav_make_folder "$parent" "$name")" || { log "Could not make that folder."; continue; } ;;
+      '') chosen="$WORK_ROOT" ;;
+      *[!0-9]*) log "Please type a number, b, q, t, n or x."; continue ;;
+      *) chosen="$(printf '%s\n' "$dirs" | sed -n "${REPLY}p")"
          [ -n "$chosen" ] || { log "No folder number $REPLY."; continue; } ;;
     esac
     [ -d "$chosen" ] || { log "Not a folder: $chosen"; continue; }
     if confirm_folder "$chosen"; then
       PROJECT_DIR="$(cd "$chosen" && pwd)"
+      nav_remember "$PROJECT_DIR"
       return 0
     fi
   done
@@ -639,7 +755,7 @@ clear_claude_env() {
 
 # ---- main -------------------------------------------------------------------
 main() {
-  log "=== Launch Claude InferHub (macOS) $(date '+%Y-%m-%d %H:%M:%S %Z') ==="
+  log "=== Launch Claude InferHub (macOS) $(date '+%Y-%m-%d %H:%M:%S %Z') (bash $BASH_VERSION) ==="
   need_curl
   ensure_workbench
   ensure_uv
@@ -649,6 +765,10 @@ main() {
   IH_URL="$(inferhub_url)"
   fetch_ire
   ensure_top20
+  if [ "${CLAUDE_IH_SETUP_ONLY:-}" = "1" ]; then
+    log "Setup finished. The proxy starts on the first launch."
+    return 0
+  fi
   ensure_proxy
 
   pick_folder
@@ -690,4 +810,7 @@ main() {
   exec claude --model "$SEAT_ALIAS" --permission-mode bypassPermissions
 }
 
-main "$@"
+# Sourcing this file (the tests do) defines everything and launches nothing.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  main "$@"
+fi

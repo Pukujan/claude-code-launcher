@@ -12,6 +12,15 @@ Aliases (InferHub seats; include Claude Code API ids so local Claude works):
   advisor / opus / claude-opus-5-5 / claude-fable-5 / claude-fable-5-1 /
     ih-advisor / ih-opus / inferhub-opus -> advisor seat
   (if advisor OFF, advisor aliases also point at main so /advisor opus still resolves)
+  haiku / claude-haiku-5 / small-fast / ih-haiku / ih-small-fast / inferhub-haiku
+    -> fast seat (Claude Code background/small-fast calls). Default fast seat is
+    ali/qwen3.8-flash; set "fast_inferhub_id" in the seat file or pass --fast
+    (empty string = use the main seat). claude-haiku-4-5 is NOT aliased here
+    because CKFF already serves that name.
+
+Opt-in seats (never the default): cx/gpt-6.1-sol may be picked as main or
+advisor with --main/--advisor or in the seat file. cx routes go over chat
+completions and send the system prompt as a "developer" message.
 
 These Claude Code ids (claude-sonnet-5, claude-opus-5-5, claude-fable-*) are distinct
 from CKFF catalog names (e.g. claude-sonnet-4-5) and must be InferHub seat aliases.
@@ -36,6 +45,13 @@ DEFAULT_OUT = ROOT / "config" / "inferhub_aliases.yaml"
 DEFAULT_API_BASE = "https://api.inferhub.dev/v1"
 
 MAIN_ALIASES = ["main", "sonnet", "claude-sonnet-5", "ih-main", "ih-sonnet", "inferhub-sonnet"]
+FAST_ALIASES = ["haiku", "claude-haiku-5", "small-fast", "ih-haiku", "ih-small-fast", "inferhub-haiku"]
+DEFAULT_FAST_ID = "ali/qwen3.8-flash"
+# Seats that are allowed but never chosen by default. Any other id is passed
+# through as-is (Top 20 ids are the normal choice).
+OPT_IN_SEAT_IDS = {
+    "cx/gpt-6.1-sol": "cx route: chat completions; system prompt is sent as a developer message",
+}
 ADVISOR_ALIASES = [
     "advisor",
     "opus",
@@ -80,6 +96,8 @@ def main() -> int:
     ap.add_argument("--api-base", default=DEFAULT_API_BASE)
     ap.add_argument("--main", default=None, help="Override main InferHub model id")
     ap.add_argument("--advisor", default=None, help="Override advisor id; empty string = OFF")
+    ap.add_argument("--fast", default=None,
+                    help=f"Override fast/haiku seat id (default {DEFAULT_FAST_ID}); empty string = use main seat")
     ap.add_argument("--merge", dest="merge", action="store_true", default=True,
                     help="Also merge into config/runtime.yaml (default)")
     ap.add_argument("--no-merge", dest="merge", action="store_false",
@@ -93,7 +111,8 @@ def main() -> int:
 
     seat = {}
     if args.seat.is_file():
-        seat = json.loads(args.seat.read_text(encoding="utf-8"))
+        # utf-8-sig: Windows PowerShell 5.1 Set-Content -Encoding UTF8 writes a BOM
+        seat = json.loads(args.seat.read_text(encoding="utf-8-sig"))
     main_id = args.main if args.main is not None else seat.get("main_inferhub_id")
     if args.advisor is not None:
         advisor_id = args.advisor.strip() or None
@@ -104,6 +123,18 @@ def main() -> int:
         print("ERROR: main_inferhub_id required (seat file or --main)", file=sys.stderr)
         return 1
 
+    if args.fast is not None:
+        fast_id = args.fast.strip() or None
+    elif "fast_inferhub_id" in seat:
+        fast_id = seat.get("fast_inferhub_id") or None
+    else:
+        fast_id = DEFAULT_FAST_ID
+    fast_effective = fast_id or main_id
+
+    for role, mid in (("main", main_id), ("advisor", advisor_id), ("fast", fast_id)):
+        if mid in OPT_IN_SEAT_IDS:
+            print(f"note: opt-in {role} seat {mid} ({OPT_IN_SEAT_IDS[mid]})")
+
     advisor_effective = advisor_id or main_id
     advisor_role = "advisor" if advisor_id else "advisor-OFF-fallback-main"
 
@@ -113,6 +144,7 @@ def main() -> int:
         f"# Generated: {now}",
         f"# main -> {main_id}",
         f"# advisor -> {advisor_effective} ({'ON' if advisor_id else 'OFF'})",
+        f"# fast/haiku -> {fast_effective}",
         "# Claude Code expands sonnet/opus to claude-sonnet-5 / claude-opus-5-5 / fable ids; map those to InferHub seats (not CKFF).",
         "model_list:",
     ]
@@ -120,10 +152,13 @@ def main() -> int:
         lines.extend(entry(a, main_id, args.api_base.rstrip("/"), "main"))
     for a in ADVISOR_ALIASES:
         lines.extend(entry(a, advisor_effective, args.api_base.rstrip("/"), advisor_role))
+    for a in FAST_ALIASES:
+        lines.extend(entry(a, fast_effective, args.api_base.rstrip("/"), "fast" if fast_id else "fast-fallback-main"))
 
     out_seat = {
         "main_inferhub_id": main_id,
         "advisor_inferhub_id": advisor_id,
+        "fast_inferhub_id": fast_id,
         "updated_at": now,
     }
     args.seat.parent.mkdir(parents=True, exist_ok=True)
@@ -132,7 +167,7 @@ def main() -> int:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
     print(f"Wrote aliases to {args.out}")
-    print(f"Seat: main={main_id} advisor={advisor_id or 'OFF'}")
+    print(f"Seat: main={main_id} advisor={advisor_id or 'OFF'} fast={fast_effective}")
 
     if args.merge:
         # merge itself may reload; pass --no-reload here and reload once below

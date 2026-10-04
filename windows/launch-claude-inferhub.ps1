@@ -500,7 +500,8 @@ Get-ChildItem Env: | Where-Object {
 $env:ANTHROPIC_API_KEY = $master
 $env:ANTHROPIC_BASE_URL = $ProxyBase   # always http://127.0.0.1:4000
 $env:ANTHROPIC_MODEL = $seatAlias      # sonnet seat -> InferHub main
-$env:ANTHROPIC_SMALL_FAST_MODEL = "ih/ali/qwen3.8-flash"
+# small-fast is the fast seat alias (ali/qwen3.8-flash unless the seat file says otherwise).
+$env:ANTHROPIC_SMALL_FAST_MODEL = "small-fast"
 # Do NOT set ANTHROPIC_AUTH_TOKEN (would win over API_KEY and risk CKFF).
 # Keep experimental betas ON - do not set CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS
 
@@ -509,7 +510,7 @@ Set-Location -LiteralPath $folder
 Clear-Host
 Write-Host ("cwd=" + (Get-Location))
 Write-Host ("proxy=" + $env:ANTHROPIC_BASE_URL + "  (unified CKFF+InferHub LiteLLM)")
-Write-Host ("small_fast=" + $env:ANTHROPIC_SMALL_FAST_MODEL + "  (InferHub cheap side model for search/hooks)")
+Write-Host ("small_fast=" + $env:ANTHROPIC_SMALL_FAST_MODEL + "  (fast seat alias, InferHub cheap side model for search/hooks)")
 Write-Host ("seat_alias=" + $seatAlias + "  behavesAs=claude-sonnet-5")
 Write-Host ("main=" + $main.Id + "  (" + $main.Name + ")")
 Write-Host ("advisor=" + $advisorLabel)

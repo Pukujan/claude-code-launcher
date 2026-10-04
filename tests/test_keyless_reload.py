@@ -57,18 +57,25 @@ starlette = pytest.importorskip("starlette")
 import sitecustomize  # noqa: E402  (needs starlette, installed from the pinned overrides)
 
 
-@pytest.mark.parametrize("host,ok", [("127.0.0.1", True), ("::1", True), ("192.168.1.5", False), ("0.0.0.0", False)])
+@pytest.mark.parametrize("host,ok", [("127.0.0.1", True), ("::1", True), ("::ffff:127.0.0.1", True),
+                                     ("192.168.1.5", False), ("0.0.0.0", False)])
 def test_keyless_endpoint_accepts_loopback_only(host, ok):
-    assert sitecustomize._wb_authorized(None, None, {"client": (host, 5555)}) is ok
-    assert sitecustomize._wb_authorized(None, "local", {"client": (host, 5555)}) is ok
+    for token in (None, "local"):
+        denied = sitecustomize._wb_authorize(None, token, sitecustomize._wb_client_host({"client": (host, 5555)}))
+        assert (denied is None) is ok
+        if not ok:
+            assert denied[0] == 403
 
 
 def test_keyless_endpoint_rejects_missing_client():
-    assert sitecustomize._wb_authorized(None, None, {}) is False
+    assert sitecustomize._wb_authorize(None, None, sitecustomize._wb_client_host({}))[0] == 403
 
 
 def test_with_master_key_token_must_match():
-    scope = {"client": ("127.0.0.1", 1)}
-    assert sitecustomize._wb_authorized("sk-x", "sk-x", scope) is True
-    assert sitecustomize._wb_authorized("sk-x", "local", scope) is False
-    assert sitecustomize._wb_authorized("sk-x", None, scope) is False
+    assert sitecustomize._wb_authorize("sk-x", "sk-x", "127.0.0.1") is None
+    assert sitecustomize._wb_authorize("sk-x", "local", "127.0.0.1") == (401, "unauthorized")
+    assert sitecustomize._wb_authorize("sk-x", None, "127.0.0.1") == (401, "unauthorized")
+
+
+def test_seat_aliases_reported_after_reload_include_haiku():
+    assert "haiku" in sitecustomize._WB_SEAT_ALIASES

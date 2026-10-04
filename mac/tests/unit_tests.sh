@@ -1,0 +1,152 @@
+#!/bin/bash
+# shellcheck disable=SC2034,SC2088  # vars are read by the sourced launcher; literal ~ is under test
+# Offline unit tests for the Mac launcher, its folder navigation and the stop
+# script. No network, no proxy, no key. Runs under bash 3.2 and bash 5:
+#
+#   mac/tests/unit_tests.sh [bash-binary]
+#
+# Folds in the old macos/ tests (tests/run-tests.sh and tests/nav-tests.sh).
+if [ -n "${1:-}" ] && [ -z "${CCL_UNIT_REEXEC:-}" ]; then
+  CCL_UNIT_REEXEC=1 exec "$1" "$0"
+fi
+MAC="$(cd "$(dirname "$0")/.." && pwd)"
+REPO="$(cd "$MAC/.." && pwd)"
+SCRATCH="$(mktemp -d)"
+trap 'rm -rf "$SCRATCH"' EXIT
+export HOME="$SCRATCH/home"
+mkdir -p "$HOME"
+export CLAUDE_IH_WORK_ROOT="$HOME/work" CLAUDE_IH_STATE_DIR="$SCRATCH/state" CLAUDE_IH_LOG_DIR="$SCRATCH/logs"
+ACS_HAVE_TTY=1   # no terminal: every read comes from stdin
+
+pass=0; fail=0
+ok()  { pass=$((pass + 1)); printf '  ok   %s\n' "$1"; }
+bad() { fail=$((fail + 1)); printf '  FAIL %s\n' "$1"; }
+check() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 (expected [$3] got [$2])"; fi; }
+
+echo "bash $BASH_VERSION"
+
+echo "== syntax =="
+for f in "$MAC/Launch Claude InferHub.command" "$MAC/setup.sh" "$MAC/stop-litellm.sh" "$MAC/lib/nav.sh" "$MAC"/tests/*.sh; do
+  if "$BASH" -n "$f" 2>/dev/null; then ok "parses: ${f#"$REPO"/}"; else bad "parses: ${f#"$REPO"/}"; fi
+done
+
+# The launcher (mac/Launch Claude InferHub.command) is linted on its own.
+# shellcheck source=/dev/null
+. "$MAC/Launch Claude InferHub.command"
+
+echo "== model table =="
+check "20 built-in models" "$MODEL_COUNT" "20"
+check "rank 1 id" "$(model_field 1 3)" "cb/deepseek-v4.1-flash"
+check "rank 20 id" "$(model_field 20 3)" "ali/kimi-k2.7-code"
+check "resolve by number" "$(resolve_model 10)" "10"
+check "resolve by id" "$(resolve_model cbcn/minimax-m3)" "10"
+if resolve_model 21 >/dev/null; then bad "rejects 21"; else ok "rejects 21"; fi
+check "small-fast alias" "$SMALL_FAST_MODEL" "small-fast"
+
+echo "== live IRE table =="
+IRE_TABLE="$SCRATCH/table.txt"
+printf '1|Model A|cb/model-a|true|0.010\n2|Model B|ali/model-b|false|\n' > "$IRE_TABLE"
+saved="$MODELS"
+load_ire_table
+check "live table replaces the built-in one" "$MODEL_COUNT" "2"
+check "live row 2" "$(model_field 2 3)" "ali/model-b"
+MODELS="$saved"; MODEL_COUNT=20
+printf '1|broken row\n' > "$IRE_TABLE"
+load_ire_table 2>/dev/null
+check "malformed table ignored" "$MODEL_COUNT" "20"
+py="$(command -v python3)"
+if [ -n "$py" ]; then
+  "$py" "$REPO/shared/ire/ire_fetch.py" --offline --cache-dir "$SCRATCH/ire-cache" \
+    --out "$SCRATCH/ire.json" --table-out "$IRE_TABLE" 2>/dev/null
+  load_ire_table
+  check "ire_fetch.py table loads" "$MODEL_COUNT" "20"
+  check "ire_fetch.py table equals the built-in one" "$MODELS" "$saved"
+fi
+MODELS="$saved"; MODEL_COUNT=20
+
+echo "== menu keys =="
+check "up"         "$(move_index 5 20 UP 10)" "4"
+check "down"       "$(move_index 5 20 DOWN 10)" "6"
+check "up clamp"   "$(move_index 0 20 UP 10)" "0"
+check "down clamp" "$(move_index 19 20 DOWN 10)" "19"
+check "home"       "$(move_index 7 20 HOME 10)" "0"
+check "end"        "$(move_index 7 20 END 10)" "19"
+check "empty list" "$(move_index 0 0 UP 10)" "0"
+check "enter" "$(printf '\n' | read_menu_key)" "ENTER"
+check "up key" "$(printf '\033[A' | read_menu_key)" "UP"
+check "down key" "$(printf '\033[B' | read_menu_key)" "DOWN"
+check "left key" "$(printf '\033[D' | read_menu_key)" "LEFT"
+check "pgdn key" "$(printf '\033[6~' | read_menu_key)" "PGDN"
+check "letter key" "$(printf 'S' | read_menu_key)" "s"
+check "clip_line short" "$(clip_line visible 40)" "visible"
+check "clip_line long" "$(clip_line abcdefghij 6)" "abc..."
+
+echo "== env scrubbing =="
+export ANTHROPIC_BASE_URL=http://elsewhere:1 ANTHROPIC_API_KEY=x ANTHROPIC_AUTH_TOKEN=x \
+  CKFF_API_KEY=x ckff_api_url=x CLAUDE_CODE_OAUTH_TOKEN=x SHIM_KEEP_ME=keep
+clear_claude_env
+check "base url cleared" "${ANTHROPIC_BASE_URL:-}" ""
+check "auth token cleared" "${ANTHROPIC_AUTH_TOKEN:-}" ""
+check "ckff cleared" "${CKFF_API_KEY:-}${ckff_api_url:-}" ""
+check "oauth cleared" "${CLAUDE_CODE_OAUTH_TOKEN:-}" ""
+check "unrelated kept" "${SHIM_KEEP_ME:-}" "keep"
+
+echo "== folder helpers =="
+NAVDIR="$SCRATCH/nav"; NAVRECENTS="$NAVDIR/recent-folders"
+base="$SCRATCH/f"; mkdir -p "$base"
+check "make folder" "$(nav_make_folder "$base" newproj)" "$base/newproj"
+nav_make_folder "$base" a/b/c >/dev/null
+check "nested make" "$([ -d "$base/a/b/c" ] && echo yes)" "yes"
+for name in ../escape "" . .. /abs "~/x"; do
+  if nav_make_folder "$base" "$name" >/dev/null 2>&1; then bad "refuses [$name]"; else ok "refuses [$name]"; fi
+done
+if nav_make_folder "$base/missing" c >/dev/null 2>&1; then bad "refuses a missing parent"; else ok "refuses a missing parent"; fi
+r1="$base/alpha"; r2="$base/beta"; mkdir -p "$r1" "$r2"
+nav_remember "$r1"; nav_remember "$r2"
+check "newest recent first" "$(nav_recents_list 2>/dev/null | head -1)" "$(cd "$r2" && pwd -P)"
+nav_remember "$r1"
+check "recents de-duplicated" "$(nav_recents_list | wc -l | tr -d ' ')" "2"
+ln -s "$r1" "$base/link"; nav_remember "$base/link"
+check "symlink collapsed" "$(nav_recents_list | grep -c link)" "0"
+nav_remember "$base/nope"
+check "missing dir ignored" "$(nav_recents_list | grep -c nope)" "0"
+ql="$(nav_quick_list)"
+check "quick picks list home" "$(printf '%s\n' "$ql" | grep -cx "$(cd "$HOME" && pwd -P)")" "1"
+check "quick picks unique" "$(printf '%s\n' "$ql" | sort -u | wc -l | tr -d ' ')" "$(printf '%s\n' "$ql" | wc -l | tr -d ' ')"
+mkdir -p "$base/visible" "$base/.hidden"
+check "hidden folders skipped" "$(get_project_dirs "$base" | grep -c '\.hidden')" "0"
+check "nav_expand ~" "$(nav_expand '~/x')" "$HOME/x"
+check "nav_tilde" "$(nav_tilde "$HOME/x")" "~/x"
+nav_browse "$base" >/dev/null 2>&1; rc=$?
+check "browse without a terminal returns 2" "$rc" "2"
+code="$(grep -hv '^[[:space:]]*#' "$MAC/Launch Claude InferHub.command" "$MAC/lib/nav.sh")"
+if printf '%s\n' "$code" | grep -qE 'osascript|choose folder'; then bad "no Finder dialog"; else ok "no Finder dialog"; fi
+
+echo "== folder picker (piped answers) =="
+mkdir -p "$CLAUDE_IH_WORK_ROOT/one" "$CLAUDE_IH_WORK_ROOT/two" "$SCRATCH/typed"
+pick() { ( pick_folder >/dev/null 2>&1 && printf '%s' "$PROJECT_DIR" ); }
+check "number picks a subfolder" "$(printf '3\ny\n' | pick)" "$CLAUDE_IH_WORK_ROOT/two"
+check "Enter picks the root" "$(printf '\n\n' | pick)" "$CLAUDE_IH_WORK_ROOT"
+check "t types a path" "$(printf 't\n%s\ny\n' "$SCRATCH/typed" | pick)" "$SCRATCH/typed"
+check "n makes a folder" "$(printf 'n\n\nfresh\ny\n' | pick)" "$CLAUDE_IH_WORK_ROOT/fresh"
+check "no then yes" "$(printf '2\nn\n3\ny\n' | pick)" "$CLAUDE_IH_WORK_ROOT/one"
+printf 't\n%s\ny\n' "$SCRATCH/typed" | pick >/dev/null
+menu="$(printf 'x\n' | ( pick_folder ) 2>&1)"
+if printf '%s\n' "$menu" | grep -q "typed  (recent)"; then ok "recent folder listed"; else bad "recent folder listed"; fi
+check "q quick pick" "$(printf 'q\n1\ny\n' | pick)" "$(cd "$HOME" && pwd -P)"
+check "x quits" "$(printf 'x\n' | pick)" ""
+
+echo "== stop-litellm.sh =="
+mkdir -p "$SCRATCH/repo/mac" "$SCRATCH/repo/shared/litellm/logs"
+cp "$MAC/stop-litellm.sh" "$SCRATCH/repo/mac/"
+sleep 30 & other=$!
+printf '%s\n' "$other" > "$SCRATCH/repo/shared/litellm/logs/litellm.pid"
+"$BASH" "$SCRATCH/repo/mac/stop-litellm.sh" >/dev/null 2>&1; rc=$?
+check "refuses a PID that isn't its LiteLLM" "$rc" "1"
+check "that process is left alone" "$(kill -0 "$other" 2>/dev/null && echo alive)" "alive"
+kill "$other" 2>/dev/null; wait "$other" 2>/dev/null
+"$BASH" "$SCRATCH/repo/mac/stop-litellm.sh" >/dev/null 2>&1
+check "stale PID file removed" "$([ -f "$SCRATCH/repo/shared/litellm/logs/litellm.pid" ] && echo left)" ""
+
+printf '\npassed=%s failed=%s\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]

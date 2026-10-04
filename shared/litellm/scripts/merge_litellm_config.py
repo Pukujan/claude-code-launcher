@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -23,6 +24,21 @@ except ImportError:
     raise SystemExit(1)
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def apply_master_key_setting(general_settings: dict | None, env: dict | None = None) -> dict:
+    """Keep master_key only when LITELLM_MASTER_KEY is set.
+
+    With no key the proxy runs keyless (start-litellm.ps1 then binds 127.0.0.1
+    only), so runtime.yaml must not point at an empty environment variable.
+    """
+    env = os.environ if env is None else env
+    gs = dict(general_settings or {})
+    if (env.get("LITELLM_MASTER_KEY") or "").strip():
+        gs.setdefault("master_key", "os.environ/LITELLM_MASTER_KEY")
+    else:
+        gs.pop("master_key", None)
+    return gs
 
 
 def load_models(path: Path) -> list:
@@ -157,9 +173,9 @@ def main() -> int:
                         mi["allowed_fails_policy"] = dict(cd["allowed_fails_policy"])
                     m["model_info"] = mi
 
-    gs = dict(merged.get("general_settings") or {})
-    gs.setdefault("master_key", "os.environ/LITELLM_MASTER_KEY")
-    merged["general_settings"] = gs
+    merged["general_settings"] = apply_master_key_setting(merged.get("general_settings"))
+    if "master_key" not in merged["general_settings"]:
+        print("note: LITELLM_MASTER_KEY not set; runtime.yaml has no master_key (keyless, 127.0.0.1 only)")
 
     now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     header = (

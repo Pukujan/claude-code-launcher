@@ -6,3 +6,4 @@ config/inferhub_top20.yaml
 config/inferhub_aliases.yaml
 config/inferhub_seat.json
 config/top20.csv
+config/.inferhub_top20.source
