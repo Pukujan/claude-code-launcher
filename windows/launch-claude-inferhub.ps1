@@ -852,8 +852,187 @@ function Apply-Ladder {
   if ($LASTEXITCODE -ne 0) { Write-Host "warning: could not apply the fallback ladders; the stock chains stay" }
 }
 
+# ---- Claude Code environment ----
+# One place for the variables the launcher hands to Claude Code, used by the
+# interactive flow and by the non-interactive mode below.
+# Clear conflicting Anthropic / OAuth / CKFF / cortex tokens so the Claude
+# child process cannot inherit User/Process CKFF BASE_URL or keys.
+# Claude Code prefers ANTHROPIC_AUTH_TOKEN over ANTHROPIC_API_KEY when both exist.
+$ClaudeEnvClearNames = @(
+  "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_MODEL",
+  "ANTHROPIC_SMALL_FAST_MODEL",
+  "ANTHROPIC_DEFAULT_SONNET_MODEL",
+  "ANTHROPIC_DEFAULT_OPUS_MODEL",
+  "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+  "ANTHROPIC_DEFAULT_FABLE_MODEL",
+  "CLAUDE_CODE_OAUTH_TOKEN",
+  "CLAUDE_CODE_API_KEY_HELPER_TTL_MS",
+  "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS",
+  "CKFF_KIMI_KEY",
+  "CKFF_API_KEY",
+  "CKFF_DEFAULT_KEY",
+  "ckff_access_token",
+  "ckff_api_url",
+  "ckff_alternate_api_url",
+  "ckff_nonstream_api_url",
+  "ckff_cortex_kimi_token_",
+  "ckff_cortex_kimi_token_model",
+  "ckff_cortex_embedder_rerank"
+)
+# Any remaining ANTHROPIC_* / CLAUDE_CODE_* / ckff* leftovers are swept too.
+$ClaudeEnvSweepPrefixes = @("ANTHROPIC_", "CLAUDE_CODE_", "CKFF_", "ckff_")
+$ClaudeEnvSweepPattern = '^(ANTHROPIC_|CLAUDE_CODE_|CKFF_|ckff_)'
+
+function Initialize-ClaudeLaunchEnv {
+  # Clears the inherited Anthropic/CKFF variables in this process and sets the
+  # ones Claude Code needs for the local LiteLLM. Returns the auth line.
+  param([string]$master, [string]$SeatAlias)
+  foreach ($n in $ClaudeEnvClearNames) {
+    Remove-Item ("Env:" + $n) -ErrorAction SilentlyContinue
+  }
+  Get-ChildItem Env: | Where-Object {
+    $_.Name -match $ClaudeEnvSweepPattern
+  } | ForEach-Object {
+    Remove-Item ("Env:" + $_.Name) -ErrorAction SilentlyContinue
+  }
+
+  # Force InferHub-via-local-LiteLLM for this Claude child only.
+  $env:ANTHROPIC_BASE_URL = $ProxyBase   # always http://127.0.0.1:4000
+  # Key = optional LiteLLM master key, else the dummy "local" (keyless proxy). NEVER CKFF.
+  # Any key (ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN or apiKeyHelper) outranks the
+  # claude.ai login, and Artifacts refuse to run without that login. So with a
+  # keyless proxy and a claude.ai login, set no key: model traffic still goes to
+  # ANTHROPIC_BASE_URL and the login rides along as the bearer the proxy ignores.
+  if ($master -eq "local" -and (Test-ClaudeAiLogin)) {
+    $authLine = "auth=claude.ai login (no API key, so Artifacts work)"
+  } else {
+    $env:ANTHROPIC_API_KEY = $master
+    $authLine = $(if ($master -eq "local") { "auth=dummy API key (run /login with your claude.ai account to use Artifacts)" } else { "auth=LiteLLM master key (Artifacts need a keyless proxy)" })
+  }
+  $env:ANTHROPIC_MODEL = $SeatAlias      # sonnet seat -> InferHub main
+  # small-fast is the fast seat alias (cb/deepseek-v4.1-flash unless the seat file says otherwise).
+  $env:ANTHROPIC_SMALL_FAST_MODEL = "small-fast"
+  # Pin every model tier to a name the proxy serves. Without these, a subagent or
+  # skill with "model: haiku" asks for Claude Code's built-in haiku id
+  # (claude-haiku-4-5-20251001), which the proxy does not have, and gets a 400.
+  # The pins also keep sonnet/opus working when a Claude Code update renames them.
+  $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "claude-sonnet-5"   # main seat
+  $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "claude-opus-5-5"     # advisor seat (main when advisor is OFF)
+  $env:ANTHROPIC_DEFAULT_FABLE_MODEL = "claude-fable-5"     # advisor seat
+  $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "claude-haiku-4-5-20251001"  # fast seat (an id Claude Code knows, so no "unrecognized model" warning)
+  $env:CLAUDE_CODE_WORKFLOWS = "1"
+  # Do NOT set ANTHROPIC_AUTH_TOKEN (would win over API_KEY and risk CKFF).
+  # Keep experimental betas ON - do not set CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS
+  return $authLine
+}
+
+# ---- non-interactive mode (issue: see README "Non-interactive mode") ----
+# For tools that start Claude Code themselves (Paseo, scripts). No menus, no
+# prompts, and the proxy is never started, restarted or reloaded: the seat the
+# running proxy already has stays as it is. Turn it on with -NonInteractive /
+# --non-interactive or CCL_NONINTERACTIVE=1. Then either
+#   -PrintEnv json|dotenv (or CCL_PRINT_ENV)  prints the variables and exits, or
+#   anything else                               runs claude with the remaining args.
+# -Folder <dir> runs claude there (default: the current folder). Launcher options
+# come first; "--" ends them. Exit codes: 2 bad option, 3 proxy not healthy.
+
+function Read-LauncherOptions {
+  param([string[]]$ArgList)
+  $o = @{ NonInteractive = ($env:CCL_NONINTERACTIVE -eq "1"); PrintEnv = ""; Folder = ""; Rest = @(); Error = "" }
+  if ($env:CCL_PRINT_ENV) { $o.NonInteractive = $true; $o.PrintEnv = $env:CCL_PRINT_ENV }
+  if (-not $ArgList) { $ArgList = @() }
+  $i = 0
+  while ($i -lt $ArgList.Count) {
+    $a = $ArgList[$i]
+    if ($a -eq "-NonInteractive" -or $a -eq "--non-interactive") { $o.NonInteractive = $true; $i++; continue }
+    if ($a -eq "-PrintEnv" -or $a -eq "--print-env") {
+      if ($i + 1 -ge $ArgList.Count) { $o.Error = "$a needs json or dotenv"; break }
+      $o.NonInteractive = $true; $o.PrintEnv = $ArgList[$i + 1]; $i += 2; continue
+    }
+    if ($a -eq "-Folder" -or $a -eq "--folder") {
+      if ($i + 1 -ge $ArgList.Count) { $o.Error = "$a needs a folder"; break }
+      $o.Folder = $ArgList[$i + 1]; $i += 2; continue
+    }
+    if ($a -eq "--") { $i++ }
+    break
+  }
+  if ($i -lt $ArgList.Count) { $o.Rest = @($ArgList[$i..($ArgList.Count - 1)]) }
+  if ($o.PrintEnv -and @("json", "dotenv") -notcontains $o.PrintEnv) { $o.Error = "print format must be json or dotenv, not '" + $o.PrintEnv + "'" }
+  return $o
+}
+
+function Get-SeatInfo {
+  # What the running proxy is seated with (shared\litellm\config\inferhub_seat.json,
+  # written by the last interactive launch) and the cached picks. Read only.
+  $seatPath = $(if ($env:CCL_SEAT_FILE) { $env:CCL_SEAT_FILE } else { Join-Path $LiteLLMRoot "config\inferhub_seat.json" })
+  $seat = $null
+  if (Test-Path -LiteralPath $seatPath) { try { $seat = Get-Content -LiteralPath $seatPath -Raw -Encoding UTF8 | ConvertFrom-Json } catch {} }
+  $picks = Read-LastPicks
+  $info = [ordered]@{
+    main = $(if ($seat -and $seat.main_inferhub_id) { [string]$seat.main_inferhub_id } elseif ($picks["main"]) { $picks["main"] } else { "" })
+    advisor = $(if ($seat) { [string]$seat.advisor_inferhub_id } elseif ($picks["adv"]) { $picks["adv"] } else { "" })
+    seat_source = $(if ($seat) { "seat file" } elseif ($picks.Count -gt 0) { "last picks" } else { "none" })
+    picks_main = $(if ($picks["main"]) { $picks["main"] } else { "" })
+    picks_advisor = $(if ($picks["adv"]) { $picks["adv"] } else { "" })
+  }
+  return $info
+}
+
+function Format-ClaudeEnv {
+  # The Claude Code variables now in this process, as json or dotenv text.
+  param([string]$Format, $Info)
+  $set = [ordered]@{}
+  foreach ($e in @(Get-ChildItem Env: | Where-Object { $_.Name -match $ClaudeEnvSweepPattern } | Sort-Object Name)) { $set[$e.Name] = $e.Value }
+  if ($Format -eq "dotenv") {
+    $lines = @("# claude-code-launcher non-interactive env. Unset these first: " + ($ClaudeEnvClearNames -join " "),
+               "# and every other name starting with " + ($ClaudeEnvSweepPrefixes -join ", "))
+    foreach ($k in $Info.Keys) { $lines += ("# " + $k + "=" + $Info[$k]) }
+    foreach ($k in $set.Keys) { $lines += ($k + "=" + $set[$k]) }
+    return ($lines -join "`n")
+  }
+  $doc = [ordered]@{ set = $set; unset = @($ClaudeEnvClearNames); unset_prefixes = @($ClaudeEnvSweepPrefixes); info = $Info }
+  return ($doc | ConvertTo-Json -Depth 5 -Compress)
+}
+
+function Invoke-NonInteractive {
+  # Returns an exit code, or "exec" when claude should run with $Options.Rest.
+  param($Options)
+  $ProgressPreference = "SilentlyContinue"
+  if ($Options.Error) { [Console]::Error.WriteLine("launch-claude-inferhub: " + $Options.Error); return 2 }
+  if ($env:CCL_PROXY_PORT) { $script:ProxyPort = [int]$env:CCL_PROXY_PORT; $script:ProxyBase = "http://127.0.0.1:" + $script:ProxyPort }
+  $healthy = Test-ProxyHealth
+  if (-not $healthy -and $env:CCL_ALLOW_PROXY_DOWN -ne "1") {
+    [Console]::Error.WriteLine("launch-claude-inferhub: the LiteLLM proxy at " + $ProxyBase + " is not answering. Non-interactive mode never starts it; run the launcher once or start it with windows\litellm\start-litellm.ps1.")
+    return 3
+  }
+  $info = Get-SeatInfo
+  if ($info.picks_main -and $info.seat_source -eq "seat file" -and $info.picks_main -ne $info.main) {
+    [Console]::Error.WriteLine("launch-claude-inferhub: note: last-picks.json says main=" + $info.picks_main + " but the proxy is seated with " + $info.main + ". Non-interactive mode keeps the proxy's seat; run the launcher interactively to change it.")
+  }
+  $authLine = Initialize-ClaudeLaunchEnv -Master (Read-LiteLLMMasterKey) -SeatAlias "sonnet"
+  $info["proxy_healthy"] = [bool]$healthy
+  $info["auth"] = $authLine
+  if ($Options.PrintEnv) {
+    [Console]::Out.WriteLine((Format-ClaudeEnv -Format $Options.PrintEnv -Info $info))
+    return 0
+  }
+  if ($Options.Folder) { Set-Location -LiteralPath $Options.Folder }
+  return "exec"   # the caller runs claude at script level, so its console stays attached
+}
+
 # ---- interactive flow ----
 if ($env:CCL_LAUNCHER_LIBRARY_ONLY -eq "1") { return }   # tests dot-source the functions only
+$LauncherOptions = Read-LauncherOptions -ArgList $args
+if ($LauncherOptions.NonInteractive -or $LauncherOptions.Error) {
+  $niResult = Invoke-NonInteractive -Options $LauncherOptions
+  if ($niResult -ne "exec") { exit $niResult }
+  $claudeArgs = @($LauncherOptions.Rest)
+  & claude @claudeArgs
+  exit $LASTEXITCODE
+}
 Get-IreRecommendations
 if ([Console]::IsInputRedirected) {
   # No console keys: default seats, advisor OFF, default chains, numbered folder list.
@@ -889,70 +1068,7 @@ $seatAlias = "sonnet"
 Sync-ModelPicker -MainId $main.Id -SeatAlias $seatAlias
 $master = Read-LiteLLMMasterKey
 
-# Clear conflicting Anthropic / OAuth / CKFF / cortex tokens so the Claude
-# child process cannot inherit User/Process CKFF BASE_URL or keys.
-# Claude Code prefers ANTHROPIC_AUTH_TOKEN over ANTHROPIC_API_KEY when both exist.
-$clearExact = @(
-  "ANTHROPIC_AUTH_TOKEN",
-  "ANTHROPIC_API_KEY",
-  "ANTHROPIC_BASE_URL",
-  "ANTHROPIC_MODEL",
-  "ANTHROPIC_SMALL_FAST_MODEL",
-  "ANTHROPIC_DEFAULT_SONNET_MODEL",
-  "ANTHROPIC_DEFAULT_OPUS_MODEL",
-  "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-  "ANTHROPIC_DEFAULT_FABLE_MODEL",
-  "CLAUDE_CODE_OAUTH_TOKEN",
-  "CLAUDE_CODE_API_KEY_HELPER_TTL_MS",
-  "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS",
-  "CKFF_KIMI_KEY",
-  "CKFF_API_KEY",
-  "CKFF_DEFAULT_KEY",
-  "ckff_access_token",
-  "ckff_api_url",
-  "ckff_alternate_api_url",
-  "ckff_nonstream_api_url",
-  "ckff_cortex_kimi_token_",
-  "ckff_cortex_kimi_token_model",
-  "ckff_cortex_embedder_rerank"
-)
-foreach ($n in $clearExact) {
-  Remove-Item ("Env:" + $n) -ErrorAction SilentlyContinue
-}
-# Sweep any remaining ANTHROPIC_* / CLAUDE_CODE_* / ckff* leftovers
-Get-ChildItem Env: | Where-Object {
-  $_.Name -match '^(ANTHROPIC_|CLAUDE_CODE_|CKFF_|ckff_)'
-} | ForEach-Object {
-  Remove-Item ("Env:" + $_.Name) -ErrorAction SilentlyContinue
-}
-
-# Force InferHub-via-local-LiteLLM for this Claude child only.
-$env:ANTHROPIC_BASE_URL = $ProxyBase   # always http://127.0.0.1:4000
-# Key = optional LiteLLM master key, else the dummy "local" (keyless proxy). NEVER CKFF.
-# Any key (ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN or apiKeyHelper) outranks the
-# claude.ai login, and Artifacts refuse to run without that login. So with a
-# keyless proxy and a claude.ai login, set no key: model traffic still goes to
-# ANTHROPIC_BASE_URL and the login rides along as the bearer the proxy ignores.
-if ($master -eq "local" -and (Test-ClaudeAiLogin)) {
-  $authLine = "auth=claude.ai login (no API key, so Artifacts work)"
-} else {
-  $env:ANTHROPIC_API_KEY = $master
-  $authLine = $(if ($master -eq "local") { "auth=dummy API key (run /login with your claude.ai account to use Artifacts)" } else { "auth=LiteLLM master key (Artifacts need a keyless proxy)" })
-}
-$env:ANTHROPIC_MODEL = $seatAlias      # sonnet seat -> InferHub main
-# small-fast is the fast seat alias (cb/deepseek-v4.1-flash unless the seat file says otherwise).
-$env:ANTHROPIC_SMALL_FAST_MODEL = "small-fast"
-# Pin every model tier to a name the proxy serves. Without these, a subagent or
-# skill with "model: haiku" asks for Claude Code's built-in haiku id
-# (claude-haiku-4-5-20251001), which the proxy does not have, and gets a 400.
-# The pins also keep sonnet/opus working when a Claude Code update renames them.
-$env:ANTHROPIC_DEFAULT_SONNET_MODEL = "claude-sonnet-5"   # main seat
-$env:ANTHROPIC_DEFAULT_OPUS_MODEL = "claude-opus-5-5"     # advisor seat (main when advisor is OFF)
-$env:ANTHROPIC_DEFAULT_FABLE_MODEL = "claude-fable-5"     # advisor seat
-$env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "claude-haiku-4-5-20251001"  # fast seat (an id Claude Code knows, so no "unrecognized model" warning)
-$env:CLAUDE_CODE_WORKFLOWS = "1"
-# Do NOT set ANTHROPIC_AUTH_TOKEN (would win over API_KEY and risk CKFF).
-# Keep experimental betas ON - do not set CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS
+$authLine = Initialize-ClaudeLaunchEnv -Master $master -SeatAlias $seatAlias
 
 Set-Location -LiteralPath $folder
 

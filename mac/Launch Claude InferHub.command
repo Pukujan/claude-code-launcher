@@ -970,8 +970,164 @@ claude_ai_logged_in() {
     printf '%s' "$st" | grep -q '"authMethod": *"claude\.ai"'
 }
 
+# set_claude_env MASTER: clears the inherited Anthropic/CKFF variables and
+# exports the ones claude needs for the local LiteLLM. Sets AUTH_LINE. Used by
+# main and by the non-interactive mode.
+set_claude_env() {
+  local master="$1"
+  clear_claude_env
+  # InferHub through the local LiteLLM for this claude only. The key is the
+  # optional LiteLLM master key or "local", never a CKFF key. Do NOT set ANTHROPIC_AUTH_TOKEN.
+  # Experimental betas stay ON (CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS unset).
+  export ANTHROPIC_BASE_URL="$PROXY_BASE"
+  # Any key (ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN or apiKeyHelper) outranks the
+  # claude.ai login, and Artifacts refuse to run without that login. So with a
+  # keyless proxy and a claude.ai login, set no key: model traffic still goes to
+  # ANTHROPIC_BASE_URL and the login rides along as the bearer the proxy ignores.
+  if [ "$master" = "local" ] && claude_ai_logged_in; then
+    AUTH_LINE="auth=claude.ai login (no API key, so Artifacts work)"
+  else
+    export ANTHROPIC_API_KEY="$master"
+    if [ "$master" = "local" ]; then
+      AUTH_LINE="auth=dummy API key (run /login with your claude.ai account to use Artifacts)"
+    else
+      AUTH_LINE="auth=LiteLLM master key (Artifacts need a keyless proxy)"
+    fi
+  fi
+  export ANTHROPIC_MODEL="$SEAT_ALIAS"
+  export ANTHROPIC_SMALL_FAST_MODEL="$SMALL_FAST_MODEL"
+  # Pin every model tier to a name the proxy serves. Without these, a subagent or
+  # skill with "model: haiku" asks for Claude Code's built-in haiku id
+  # (claude-haiku-4-5-20251001), which the proxy does not have, and gets a 400.
+  export ANTHROPIC_DEFAULT_SONNET_MODEL="claude-sonnet-5"   # main seat
+  export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-opus-5-5"     # advisor seat (main when advisor is OFF)
+  export ANTHROPIC_DEFAULT_FABLE_MODEL="claude-fable-5"     # advisor seat
+  export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-haiku-4-5-20251001"  # fast seat (an id Claude Code knows, so no "unrecognized model" warning)
+  export CLAUDE_CODE_WORKFLOWS=1
+}
+
+# ---- non-interactive mode (see README "Non-interactive mode") ---------------
+# For tools that start Claude Code themselves (Paseo, scripts). No pickers, no
+# installs, no prompts, and the proxy is never started, restarted or reloaded:
+# the seat the running proxy already has stays. Turn it on with
+# --non-interactive or CCL_NONINTERACTIVE=1. Then --print-env json|dotenv (or
+# CCL_PRINT_ENV) prints the variables and exits; otherwise claude runs with the
+# remaining arguments. --folder DIR runs it there. Launcher options come first;
+# "--" ends them. Exit codes: 2 bad option, 3 proxy not healthy.
+parse_launcher_args() {
+  CCL_NI=""; CCL_PRINT=""; CCL_FOLDER=""; CCL_REST=()
+  [ "${CCL_NONINTERACTIVE:-}" = "1" ] && CCL_NI=1
+  if [ -n "${CCL_PRINT_ENV:-}" ]; then CCL_NI=1; CCL_PRINT="$CCL_PRINT_ENV"; fi
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --non-interactive|-NonInteractive) CCL_NI=1; shift ;;
+      --print-env|-PrintEnv)
+        [ $# -ge 2 ] || { printf 'launch-claude-inferhub: %s needs json or dotenv\n' "$1" >&2; return 2; }
+        CCL_NI=1; CCL_PRINT="$2"; shift 2 ;;
+      --folder|-Folder)
+        [ $# -ge 2 ] || { printf 'launch-claude-inferhub: %s needs a folder\n' "$1" >&2; return 2; }
+        CCL_FOLDER="$2"; shift 2 ;;
+      --) shift; break ;;
+      *) break ;;
+    esac
+  done
+  CCL_REST=("$@")
+  case "$CCL_PRINT" in
+    ''|json|dotenv) ;;
+    *) printf "launch-claude-inferhub: print format must be json or dotenv, not '%s'\n" "$CCL_PRINT" >&2; return 2 ;;
+  esac
+  return 0
+}
+
+json_str() {  # json_str VALUE -> a JSON string literal
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  printf '"%s"' "$s"
+}
+
+# The variables set_claude_env left in this shell (it cleared every other one).
+claude_env_names() {
+  env | awk -F= '/^(ANTHROPIC_|CLAUDE_CODE_|CKFF_|ckff_)[A-Za-z0-9_]*=/ {print $1}' | LC_ALL=C sort
+}
+
+CLAUDE_ENV_CLEAR_NAMES="ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_BASE_URL ANTHROPIC_MODEL ANTHROPIC_SMALL_FAST_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_FABLE_MODEL CLAUDE_CODE_OAUTH_TOKEN CLAUDE_CODE_API_KEY_HELPER_TTL_MS CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS CKFF_KIMI_KEY CKFF_API_KEY CKFF_DEFAULT_KEY ckff_access_token ckff_api_url ckff_alternate_api_url ckff_nonstream_api_url ckff_cortex_kimi_token_ ckff_cortex_kimi_token_model ckff_cortex_embedder_rerank"
+CLAUDE_ENV_SWEEP_PREFIXES="ANTHROPIC_ CLAUDE_CODE_ CKFF_ ckff_"
+
+# print_claude_env FORMAT HEALTHY MAIN ADVISOR SOURCE
+print_claude_env() {
+  local fmt="$1" healthy="$2" main_id="$3" adv_id="$4" source="$5" n v first
+  if [ "$fmt" = "dotenv" ]; then
+    printf '# claude-code-launcher non-interactive env. Unset these first: %s\n' "$CLAUDE_ENV_CLEAR_NAMES"
+    printf '# and every other name starting with %s\n' "$CLAUDE_ENV_SWEEP_PREFIXES"
+    printf '# main=%s\n# advisor=%s\n# seat_source=%s\n# proxy_healthy=%s\n# auth=%s\n' \
+      "$main_id" "$adv_id" "$source" "$healthy" "$AUTH_LINE"
+    for n in $(claude_env_names); do
+      eval "v=\"\${$n}\""
+      printf '%s=%s\n' "$n" "$v"
+    done
+    return 0
+  fi
+  printf '{"set":{'
+  first=1
+  for n in $(claude_env_names); do
+    eval "v=\"\${$n}\""
+    [ -n "$first" ] || printf ','
+    first=""
+    printf '%s:%s' "$(json_str "$n")" "$(json_str "$v")"
+  done
+  printf '},"unset":['
+  first=1
+  for n in $CLAUDE_ENV_CLEAR_NAMES; do
+    [ -n "$first" ] || printf ','
+    first=""
+    json_str "$n"
+  done
+  printf '],"unset_prefixes":["ANTHROPIC_","CLAUDE_CODE_","CKFF_","ckff_"]'
+  printf ',"info":{"main":%s,"advisor":%s,"seat_source":%s,"picks_main":"","picks_advisor":"","proxy_healthy":%s,"auth":%s}}\n' \
+    "$(json_str "$main_id")" "$(json_str "$adv_id")" "$(json_str "$source")" "$healthy" "$(json_str "$AUTH_LINE")"
+}
+
+run_noninteractive() {
+  local healthy=true master seat_file main_id="" adv_id="" source="none"
+  if [ -n "${CCL_PROXY_PORT:-}" ]; then
+    LITELLM_PORT="$CCL_PROXY_PORT"
+    PROXY_BASE="http://127.0.0.1:${LITELLM_PORT}"
+  fi
+  if ! proxy_healthy; then
+    healthy=false
+    if [ "${CCL_ALLOW_PROXY_DOWN:-}" != "1" ]; then
+      printf 'launch-claude-inferhub: the LiteLLM proxy at %s is not answering. Non-interactive mode never starts it; run the launcher once to start it.\n' "$PROXY_BASE" >&2
+      return 3
+    fi
+  fi
+  # The seat the running proxy has (written by the last interactive launch). Read only.
+  seat_file="${CCL_SEAT_FILE:-$LITELLM_DIR/config/inferhub_seat.json}"
+  if [ -f "$seat_file" ]; then
+    source="seat file"
+    main_id="$(sed -n 's/.*"main_inferhub_id": *"\([^"]*\)".*/\1/p' "$seat_file" | head -1)"
+    adv_id="$(sed -n 's/.*"advisor_inferhub_id": *"\([^"]*\)".*/\1/p' "$seat_file" | head -1)"
+  fi
+  master="$(secret LITELLM_MASTER_KEY)" || master="local"
+  set_claude_env "$master"
+  master=""
+  if [ -n "$CCL_PRINT" ]; then
+    print_claude_env "$CCL_PRINT" "$healthy" "$main_id" "$adv_id" "$source"
+    return 0
+  fi
+  if [ -n "$CCL_FOLDER" ]; then
+    cd "$CCL_FOLDER" || { printf 'launch-claude-inferhub: cannot cd to %s\n' "$CCL_FOLDER" >&2; return 2; }
+  fi
+  exec claude "${CCL_REST[@]}"
+}
+
 # ---- main -------------------------------------------------------------------
 main() {
+  parse_launcher_args "$@" || exit 2
+  if [ "$CCL_NI" = "1" ]; then
+    run_noninteractive
+    exit $?
+  fi
   log "=== Launch Claude InferHub (macOS) $(date '+%Y-%m-%d %H:%M:%S %Z') (bash $BASH_VERSION) ==="
   need_curl
   ensure_workbench
@@ -1009,36 +1165,7 @@ main() {
   # LITELLM_MASTER_KEY is set.
   master="$(secret LITELLM_MASTER_KEY)" || master="local"
 
-  clear_claude_env
-  # InferHub through the local LiteLLM for this claude only. The key is the
-  # optional LiteLLM master key or "local", never a CKFF key. Do NOT set ANTHROPIC_AUTH_TOKEN.
-  # Experimental betas stay ON (CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS unset).
-  export ANTHROPIC_BASE_URL="$PROXY_BASE"
-  # Any key (ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN or apiKeyHelper) outranks the
-  # claude.ai login, and Artifacts refuse to run without that login. So with a
-  # keyless proxy and a claude.ai login, set no key: model traffic still goes to
-  # ANTHROPIC_BASE_URL and the login rides along as the bearer the proxy ignores.
-  local auth_line
-  if [ "$master" = "local" ] && claude_ai_logged_in; then
-    auth_line="auth=claude.ai login (no API key, so Artifacts work)"
-  else
-    export ANTHROPIC_API_KEY="$master"
-    if [ "$master" = "local" ]; then
-      auth_line="auth=dummy API key (run /login with your claude.ai account to use Artifacts)"
-    else
-      auth_line="auth=LiteLLM master key (Artifacts need a keyless proxy)"
-    fi
-  fi
-  export ANTHROPIC_MODEL="$SEAT_ALIAS"
-  export ANTHROPIC_SMALL_FAST_MODEL="$SMALL_FAST_MODEL"
-  # Pin every model tier to a name the proxy serves. Without these, a subagent or
-  # skill with "model: haiku" asks for Claude Code's built-in haiku id
-  # (claude-haiku-4-5-20251001), which the proxy does not have, and gets a 400.
-  export ANTHROPIC_DEFAULT_SONNET_MODEL="claude-sonnet-5"   # main seat
-  export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-opus-5-5"     # advisor seat (main when advisor is OFF)
-  export ANTHROPIC_DEFAULT_FABLE_MODEL="claude-fable-5"     # advisor seat
-  export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-haiku-4-5-20251001"  # fast seat (an id Claude Code knows, so no "unrecognized model" warning)
-  export CLAUDE_CODE_WORKFLOWS=1
+  set_claude_env "$master"
   master=""
 
   cd "$PROJECT_DIR" || die "cannot cd to $PROJECT_DIR"
@@ -1050,7 +1177,7 @@ main() {
   log "tiers=sonnet:claude-sonnet-5 opus:claude-opus-5-5 fable:claude-fable-5 haiku:claude-haiku-4-5-20251001 (all proxy seat aliases)"
   log "main=$MAIN_ID  ($MAIN_NAME)"
   if [ -n "$ADVISOR_ID" ]; then log "advisor=$ADVISOR_NAME ($ADVISOR_ID)"; else log "advisor=OFF"; fi
-  log "$auth_line"
+  log "$AUTH_LINE"
   log "permission=bypassPermissions (auto mode is Anthropic-only)"
   log "betas=experimental ON (advisor_20260301 via LiteLLM orchestration)"
   if [ "$LAUNCH" = "ultracode" ]; then
