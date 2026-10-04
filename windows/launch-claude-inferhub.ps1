@@ -1,9 +1,11 @@
 ﻿$ErrorActionPreference = "Stop"
 
-# InferHub Claude Code launcher via the UNIFIED local LiteLLM proxy
-# (CKFF + InferHub groups), run from this repository's shared\litellm folder.
-# Picks main + advisor from IRE Top 20, seats aliases (sonnet/opus), points
-# Claude at 127.0.0.1:4000. The proxy is keyless and bound to 127.0.0.1 only.
+# InferHub Claude Code launcher via the local LiteLLM proxy (InferHub only;
+# CKFF is off), run from this repository's shared\litellm folder. Claude Code's
+# own model slots (sonnet, opus, fable, haiku) each get a chain of InferHub
+# routes in the proxy (issue #53); the picks are saved and reused, so the picker
+# only shows when you choose to change them. Points Claude at 127.0.0.1:4000.
+# The proxy is keyless and bound to 127.0.0.1 only.
 # Never sets CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1.
 # Source of truth: Pukujan/claude-code-launcher windows\ (see SOURCES.md).
 
@@ -62,6 +64,31 @@ $Models = @(
   @{ Rank = 19; Name = "GLM 5.3";                    Id = "cbcn/glm-5.3";                        Eligible = $true;  Cost = "0.267" }
   @{ Rank = 20; Name = "Kimi K2.7 Code";             Id = "ali/kimi-k2.7-code";                  Eligible = $true;  Cost = "0.156" }
 )
+# Frontier picks (IRE frontier list, InferHub routes, not CKFF) offered under the
+# Top 20 in the slot steps. Cost is the input price per 1M tokens.
+$FrontierModels = @(
+  @{ Rank = "F1"; Name = "GPT 6 Astra (272K ctx)";     Id = "cb/gpt-6-astra";                      Eligible = $true;  Cost = "0.050 in/0.25 out" }
+  @{ Rank = "F2"; Name = "GPT 6.1 Sol";                Id = "cx/gpt-6.1-sol";                      Eligible = $true;  Cost = "0.018 in/0.09 out" }
+)
+
+# ---- Claude Code slots (issue #53) ----
+# Same defaults as `slots:` in shared\litellm\config\inferhub_fallbacks.yaml
+# (tests\test_slots.py checks that). Each chain is first model, then fallbacks.
+$SlotOrder = @("sonnet", "opus", "fable", "haiku")
+$SlotDefaults = [ordered]@{
+  sonnet = @("cb/deepseek-v4.1-flash", "ali/qwen3.8-flash", "cbcn/glm-5.3-flash")
+  opus   = @("cb/gpt-6-astra", "cx/gpt-6.1-sol", "ali/qwen3.8-max-0902")
+  fable  = @("cbcn/glm-5.3-flash", "ali/qwen3.8-flash", "cb/deepseek-v4.1-flash")
+  haiku  = @("cb/deepseek-v4.1-flash", "ali/qwen3.8-flash", "cbcn/glm-5.3-flash")
+}
+$SlotInfo = @{
+  sonnet = "SONNET (main chat; the launcher model)"
+  opus   = "OPUS (planning: the planner sub-agent runs here)"
+  fable  = "FABLE (the advisor)"
+  haiku  = "HAIKU (background calls and cheap sub-agents; must handle tools)"
+}
+# Claude Code's auto-compact window: GPT 6 Astra (the opus slot's first model) has 272K.
+$AutoCompactWindow = "272000"
 
 function Read-EnvValue {
   param([string]$Path, [string]$Name)
@@ -207,14 +234,13 @@ function Get-ProjectDirs([string]$Path) {
 }
 
 # ---- launch wizard (no typing) ----
-# Steps: MAIN model, MAIN 2nd (fallback 1), MAIN 3rd (fallback 2), ADVISOR model
-# (or OFF), ADVISOR 2nd, ADVISOR 3rd, folder. Up/Down move, Enter picks and
-# goes on, Left goes back a step (picks are remembered), Right goes on keeping
-# the highlighted pick. Esc quits. Tests fill $script:NavKeys with key names.
+# Steps: slots (use saved / change), then per slot (sonnet, opus, fable, haiku)
+# its first, 2nd and 3rd model, then the folder and "launch with". Up/Down move,
+# Enter picks and goes on, Left goes back a step (picks are remembered), Right
+# goes on keeping the highlighted pick. Esc quits. Tests fill $script:NavKeys.
 $script:NavKeys = $null
 $script:NavQuiet = $false
 $script:NavTrace = New-Object System.Collections.ArrayList
-$script:ChainCache = @{}
 
 function Read-NavKey {
   if ($null -ne $script:NavKeys) {
@@ -249,27 +275,6 @@ function Format-OldModelLine {
   "{0}{1,2}  {2,-28} {3,-42} {4}  ~{5}/Mtok" -f $Star, $m.Rank, $m.Name, $m.Id, $tag, $m.Cost
 }
 
-function Get-DefaultChain {
-  # Default fallbacks for a seat primary, from shared\ladder (cached). Falls
-  # back to the next Top 20 rows when Python is missing.
-  param([string]$Role, [string]$PrimaryId)
-  $ck = $Role + "|" + $PrimaryId
-  if ($script:ChainCache.ContainsKey($ck)) { return $script:ChainCache[$ck] }
-  $chain = @()
-  $py = Get-LadderPython
-  if ($py) {
-    $tmp = [IO.Path]::Combine([IO.Path]::GetTempPath(), "ccl-chain-" + [guid]::NewGuid().ToString("N") + ".json")
-    $extra = @(); if (-not $env:CCL_IRE_JSON) { $extra = @("--no-ire") }
-    $ErrorActionPreference = "Continue"
-    $null = & $py $LadderCli choose @extra --state $tmp --role $Role ("--primary=" + $PrimaryId) --non-interactive 2>&1
-    try { $chain = @((Get-Content -LiteralPath $tmp -Raw -Encoding UTF8 | ConvertFrom-Json).$Role.fallbacks) } catch {}
-    Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue
-  }
-  if ($chain.Count -eq 0) { $chain = @($Models | Where-Object { $_.Id -ne $PrimaryId -and $_.Eligible } | Select-Object -First 2 | ForEach-Object { $_.Id }) }
-  $script:ChainCache[$ck] = $chain
-  return $chain
-}
-
 function Get-LastPicksPath {
   # Next to this script (windows\last-picks.json, git-ignored). CCL_LAST_PICKS overrides (tests).
   if ($env:CCL_LAST_PICKS) { return $env:CCL_LAST_PICKS }
@@ -277,33 +282,74 @@ function Get-LastPicksPath {
 }
 
 function Read-LastPicks {
-  # The cache file (model picks by slot, "" = OFF/none, plus start_dir). Empty when missing or unreadable.
+  # The cache file's plain values (start_dir, launch, uc_orch, uc_worker). Empty when missing or unreadable.
+  # The slot picks live in the same file under "slots" (Read-SlotPicks). The old
+  # main/advisor seat keys (main, main1, adv, ...) are ignored and dropped on the next write.
   $out = @{}
   $p = Get-LastPicksPath
   if (-not (Test-Path -LiteralPath $p)) { return $out }
   try {
     $j = Get-Content -LiteralPath $p -Raw -Encoding UTF8 | ConvertFrom-Json
-    foreach ($prop in $j.PSObject.Properties) { if ($null -ne $prop.Value) { $out[$prop.Name] = [string]$prop.Value } }
+    foreach ($prop in $j.PSObject.Properties) {
+      if ($null -ne $prop.Value -and ($prop.Value -is [string] -or $prop.Value -is [ValueType])) { $out[$prop.Name] = [string]$prop.Value }
+    }
   } catch {}
   return $out
 }
 
+function Read-SlotPicks {
+  # The saved slot chains: @{ sonnet = @(ids); opus; fable; haiku; haiku_same = $bool }, or $null
+  # when nothing is saved yet (first run, or a file from before issue #53).
+  $p = Get-LastPicksPath
+  if (-not (Test-Path -LiteralPath $p)) { return $null }
+  try { $j = Get-Content -LiteralPath $p -Raw -Encoding UTF8 | ConvertFrom-Json } catch { return $null }
+  if (-not $j -or -not $j.slots) { return $null }
+  $out = @{ haiku_same = ($j.slots.haiku_same -eq $true) }
+  foreach ($slot in $SlotOrder) {
+    $chain = @($j.slots.$slot | Where-Object { $_ -and ([string]$_) -notmatch 'ckff' } | ForEach-Object { [string]$_ })
+    if ($chain.Count -eq 0) { $chain = @($SlotDefaults[$slot]) }
+    $out[$slot] = $chain
+  }
+  if ($out.haiku_same) { $out.haiku = @($out.sonnet) }
+  return $out
+}
+
 function Write-LastPicks {
-  # Merge $Values into the cache file and write it back.
-  param($Values)
+  # Merge $Values into the cache file and write it back. $Slots (from the slot steps) replaces the saved slots.
+  param($Values, $Slots = $null)
   $p = Get-LastPicksPath
   $c = Read-LastPicks
   foreach ($k in @($Values.Keys)) { $c[$k] = $Values[$k] }
-  $o = [ordered]@{}
-  foreach ($k in @("main", "main1", "main2", "adv", "adv1", "adv2", "start_dir", "launch", "uc_orch", "uc_worker")) { if ($c.ContainsKey($k)) { $o[$k] = $c[$k] } }
-  try { [IO.File]::WriteAllText($p, ($o | ConvertTo-Json), [Text.UTF8Encoding]::new($false)) } catch {}
+  if ($null -eq $Slots) { $Slots = Read-SlotPicks }
+  $o = [ordered]@{ version = 2 }
+  if ($null -ne $Slots) {
+    $so = [ordered]@{}
+    foreach ($slot in $SlotOrder) { $so[$slot] = @($Slots[$slot]) }
+    $so["haiku_same"] = [bool]$Slots.haiku_same
+    $o["slots"] = $so
+  }
+  foreach ($k in @("start_dir", "launch", "uc_orch", "uc_worker")) { if ($c.ContainsKey($k)) { $o[$k] = $c[$k] } }
+  try { [IO.File]::WriteAllText($p, ($o | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false)) } catch {}
 }
 
-function Save-LastPicks {
-  param($S)
-  $v = @{}
-  foreach ($k in @("main", "main1", "main2", "adv", "adv1", "adv2")) { $v[$k] = $(if ($null -ne $S[$k]) { $S[$k] } else { "" }) }
-  Write-LastPicks $v
+function Get-DefaultSlots {
+  $out = @{ haiku_same = $true }
+  foreach ($slot in $SlotOrder) { $out[$slot] = @($SlotDefaults[$slot]) }
+  if (-not @($out.sonnet)[0]) { $out.sonnet = @($DefaultModelId) }   # rank 1 if the table is ever emptied
+  return $out
+}
+
+function Format-SlotChain {
+  param($Chain)
+  return (@($Chain) -join " -> ")
+}
+
+function Get-SlotSummary {
+  param($Slots)
+  return @(foreach ($slot in $SlotOrder) {
+    $tag = $(if ($slot -eq "haiku" -and $Slots.haiku_same) { "  (same as sonnet)" } else { "" })
+    ("{0,-7} {1}{2}" -f $slot, (Format-SlotChain $Slots[$slot]), $tag)
+  })
 }
 
 function Get-StartPick {
@@ -315,47 +361,70 @@ function Get-StartPick {
   return $Default
 }
 
-function Invoke-ModelStep {
-  # A model step. $Slot: main, main1, main2, adv, adv1, adv2. Writes the pick to $S.
-  param([string]$Slot, $S, $Last = @{})
-  $role = $(if ($Slot -like "main*") { "main" } else { "advisor" })
-  $seat = $(if ($role -eq "main") { "MAIN" } else { "ADVISOR" })
-  $help = @("Up/Down move. Enter picks. Left = previous step, Right = next step (keeps the highlighted pick). Esc quits.")
-  if ($Slot -eq "main") {
-    $choices = @($Models)
-    $lines = @(foreach ($m in $choices) { Format-OldModelLine $m $(if ($m.Id -eq $DefaultModelId) { "*" } else { " " }) })
-    $want = Get-StartPick -S $S -Last $Last -Slot $Slot -Choices $choices -Default $DefaultModelId
-    $title = "Step 1: choose MAIN model (IRE Top 20). Default DeepSeek V4.1 Flash."
-    $help += "MAIN executor (maps to alias sonnet/main). gated = ranked but not currently recommendation-eligible."
-  } elseif ($Slot -eq "adv") {
-    $choices = @(@{ Rank = 0; Name = "OFF (no advisor)"; Id = ""; Eligible = $true; Cost = "-" }) + $Models
-    $lines = @(foreach ($m in $choices) {
-      if ($m.Id -eq "") { "   OFF  (disable advisor tool / seat aliases fall back to main)" } else { Format-OldModelLine $m }
-    })
-    $want = Get-StartPick -S $S -Last $Last -Slot $Slot -Choices $choices -Default ""
-    $title = "Step 4: choose ADVISOR model (IRE Top 20) or OFF."
-    $help += "Mid-session use /advisor opus or /advisor sonnet (aliases), not raw InferHub ids."
+function Get-SlotChoices {
+  return @($Models) + @($FrontierModels)
+}
+
+function Invoke-SlotsChoiceStep {
+  # Step 1 when slots are saved: use them (Enter) or change them. Returns @{ Action; Change = $bool }.
+  param($Saved, [bool]$Change = $false)
+  $lines = @("Use the saved slots") + @(Get-SlotSummary $Saved | ForEach-Object { "      " + $_ }) + @("Change the slots")
+  $index = $(if ($Change) { $lines.Count - 1 } else { 0 })
+  $help = @("Up/Down move. Enter picks. Right = next step (keeps the highlighted pick). Esc quits.",
+            "The saved slots are used by every launch, Paseo included. Change them here any time.")
+  $r = Select-FromList -Title "Step 1: model slots (sonnet = main, opus = planning, fable = advisor, haiku = background)" -Lines $lines -Index $index -Help $help
+  $change = ($r.Index -eq ($lines.Count - 1))
+  $script:NavTrace.Add(("  step slots  {0,-7} -> {1}" -f $r.Action, $(if ($r.Action -eq "back") { "(back)" } elseif ($change) { "change" } else { "use saved" }))) | Out-Null
+  return @{ Action = $r.Action; Change = $change }
+}
+
+function Invoke-SlotStep {
+  # One slot model step. $Rung 0 = first model, 1 = 2nd (fallback 1), 2 = 3rd (fallback 2).
+  # Writes into $S.slots[$Slot] (and $S.slots.haiku_same). Returns the action.
+  param([string]$Slot, [int]$Rung, $S)
+  $chain = @($S.slots[$Slot])
+  $dflt = $(if ($Rung -lt $chain.Count) { $chain[$Rung] } else { "" })
+  $help = @("Up/Down move. Enter picks. Left = previous step, Right = next step (keeps the highlighted pick). Esc quits.",
+            "F rows are frontier picks (InferHub, not CKFF). gated = ranked but not currently recommendation-eligible.")
+  $all = @(Get-SlotChoices)
+  if ($Rung -eq 0) {
+    $choices = @($all)
+    if ($Slot -eq "haiku") { $same = @{ Rank = 0; Name = "same"; Eligible = $true; Cost = "-" }; $same.Id = "@sonnet"; $choices = @($same) + $choices }
+    $want = $(if ($Slot -eq "haiku" -and $S.slots.haiku_same) { "@sonnet" } else { $dflt })
+    $title = "Slot " + $SlotInfo[$Slot] + ": first model.   now: " + (Format-SlotChain $chain)
   } else {
-    $base = $(if ($role -eq "main") { "main" } else { "adv" })
-    $primary = $S[$base]
-    $isSecond = $Slot.EndsWith("1")
-    $taken = @($primary); if (-not $isSecond) { $taken += $S[$base + "1"] }
-    $choices = @($Models | Where-Object { $taken -notcontains $_.Id }) + @(@{ Rank = 0; Name = "none"; Id = ""; Eligible = $true; Cost = "-" })
-    $lines = @(foreach ($m in $choices) {
-      if ($m.Id -eq "") { "   none (no further fallback)" } else { Format-OldModelLine $m }
-    })
-    $chain = @(Get-DefaultChain -Role $role -PrimaryId $primary | Where-Object { $taken -notcontains $_ })
-    $dflt = $(if ($chain.Count -gt 0) { $chain[0] } else { "" })
-    $want = Get-StartPick -S $S -Last $Last -Slot $Slot -Choices $choices -Default $dflt
-    $n = $(if ($isSecond) { "2nd" } else { "3rd" })
-    $step = @{ main1 = 2; main2 = 3; adv1 = 5; adv2 = 6 }[$Slot]
-    $title = "Step " + $step + ": " + $seat + " " + $n + " model (fallback " + $(if ($isSecond) { 1 } else { 2 }) + ") after " + $primary + "   default: " + $(if ($dflt) { $dflt } else { "none" })
+    $taken = @($chain[0..($Rung - 1)])
+    $choices = @($all | Where-Object { $taken -notcontains $_.Id }) + @(@{ Rank = 0; Name = "none"; Id = ""; Eligible = $true; Cost = "-" })
+    $want = $dflt
+    $n = $(if ($Rung -eq 1) { "2nd" } else { "3rd" })
+    $title = "Slot " + $SlotInfo[$Slot] + ": " + $n + " model (fallback " + $Rung + ") after " + $chain[$Rung - 1] + "   default: " + $(if ($dflt) { $dflt } else { "none" })
   }
+  $lines = @(foreach ($m in $choices) {
+    if ($m.Id -eq "@sonnet") { "   same chain as sonnet: " + (Format-SlotChain $S.slots.sonnet) }
+    elseif ($m.Id -eq "") { "   none (no further fallback)" }
+    else { Format-OldModelLine $m $(if ($m.Id -eq $dflt) { "*" } else { " " }) }
+  })
   $index = 0
   for ($i = 0; $i -lt $choices.Count; $i++) { if ($choices[$i].Id -eq $want) { $index = $i; break } }
   $r = Select-FromList -Title $title -Lines $lines -Index $index -Help $help
-  if ($r.Action -ne "back") { $S[$Slot] = $choices[$r.Index].Id }
-  $script:NavTrace.Add(("  step {0,-6} {1,-7} -> {2}" -f $Slot, $r.Action, $(if ($r.Action -eq "back") { "(back)" } elseif ($S[$Slot]) { $S[$Slot] } else { "OFF/none" }))) | Out-Null
+  if ($r.Action -ne "back") {
+    $pick = $choices[$r.Index].Id
+    if ($pick -eq "@sonnet") {
+      $S.slots.haiku_same = $true
+      $S.slots.haiku = @($S.slots.sonnet)
+    } else {
+      if ($Slot -eq "haiku" -and $Rung -eq 0) { $S.slots.haiku_same = $false }
+      $new = @($chain | Select-Object -First $Rung)
+      if ($pick) {
+        $new += $pick
+        # keep the rest of the old chain after the pick, minus repeats
+        $new += @($chain | Select-Object -Skip ($Rung + 1) | Where-Object { $new -notcontains $_ })
+      }
+      $S.slots[$Slot] = @($new | Select-Object -First 3)
+      if ($Slot -eq "sonnet" -and $S.slots.haiku_same) { $S.slots.haiku = @($S.slots.sonnet) }
+    }
+  }
+  $script:NavTrace.Add(("  step {0}{1} {2,-7} -> {3}" -f $Slot, $Rung, $r.Action, $(if ($r.Action -eq "back") { "(back)" } else { Format-SlotChain $S.slots[$Slot] }))) | Out-Null
   return $r.Action
 }
 
@@ -465,49 +534,57 @@ function Invoke-LaunchStep {
 }
 
 function Invoke-LaunchWizard {
-  # Returns @{ Main; Advisor; MainFallbacks; AdvisorFallbacks; Folder; Launch; UcOrch; UcWorker }.
-  $S = @{ main = $null; main1 = $null; main2 = $null; adv = $null; adv1 = $null; adv2 = $null; uc_orch = $null; uc_worker = $null }
+  # Returns @{ Slots; Folder; Launch; UcOrch; UcWorker }. With saved slots, Step 1
+  # offers them (Enter keeps them); otherwise the slot steps run with the defaults
+  # highlighted, so Enter all the way through takes Alex's default chains.
+  $saved = Read-SlotPicks
+  $S = @{ slots = $(if ($saved) { $saved } else { Get-DefaultSlots }); uc_orch = $null; uc_worker = $null; change = ($null -eq $saved) }
   $last = Read-LastPicks
   $folderState = @{ Path = (Get-StartDir); Index = 0; Message = "" }
-  $steps = @("main", "main1", "main2", "adv", "adv1", "adv2", "folder", "launch", "uc_orch", "uc_worker")
+  $steps = @("slots")
+  foreach ($slot in $SlotOrder) { foreach ($r in 0, 1, 2) { $steps += ($slot + ":" + $r) } }
+  $steps += @("folder", "launch", "uc_orch", "uc_worker")
   $i = 0; $dir = 1; $folder = $null; $launch = $null
   while ($i -lt $steps.Count) {
     if ($i -lt 0) { $i = 0 }
-    $slot = $steps[$i]
-    if (($slot -eq "adv1" -or $slot -eq "adv2") -and -not $S.adv) { $i += $dir; continue }   # advisor OFF
-    if ($slot -eq "main2" -and -not $S.main1) { $i += $dir; continue }   # no 2nd, no 3rd
-    if ($slot -eq "adv2" -and -not $S.adv1) { $i += $dir; continue }
-    if ($slot -eq "folder") {
+    $step = $steps[$i]
+    if ($step -eq "slots") {
+      if (-not $saved) { $S.change = $true; $i += 1; $dir = 1; continue }   # first run: straight to the slot steps
+      $r = Invoke-SlotsChoiceStep -Saved $S.slots -Change $S.change
+      $S.change = $r.Change
+      $i++; $dir = 1; continue
+    }
+    if ($step -match '^(\w+):(\d)$') {
+      $slot = $matches[1]; $rung = [int]$matches[2]
+      $chain = @($S.slots[$slot])
+      $skip = (-not $S.change) -or ($rung -gt 0 -and $chain.Count -lt $rung) -or ($slot -eq "haiku" -and $rung -gt 0 -and $S.slots.haiku_same)
+      if ($skip) { $i += $dir; continue }
+      $action = Invoke-SlotStep -Slot $slot -Rung $rung -S $S
+      if ($action -eq "back") { $dir = -1; $i-- } else { $dir = 1; $i++ }
+      continue
+    }
+    if ($step -eq "folder") {
       $folder = Invoke-FolderStep -State $folderState
       if ($folder) { $dir = 1; $i++; continue }
       $dir = -1; $i--; $folderState = @{ Path = (Get-StartDir); Index = 0; Message = "" }; continue
     }
-    if ($slot -eq "launch") {
+    if ($step -eq "launch") {
       # Coming back from Step 9 highlights this session's pick, not last time's.
       $launch = Invoke-LaunchStep -Last $(if ($launch) { @{ launch = $launch } } else { $last })
       if (-not $launch) { $dir = -1; $i--; continue }
       if ($launch -ne "ultracode") { break }
       $dir = 1; $i++; continue
     }
-    if ($slot -eq "uc_orch" -or $slot -eq "uc_worker") {
-      $action = Invoke-UltraCodeStep -Slot $slot -S $S -Last $last
+    if ($step -eq "uc_orch" -or $step -eq "uc_worker") {
+      $action = Invoke-UltraCodeStep -Slot $step -S $S -Last $last
       if ($action -eq "back") { $dir = -1; $i-- } else { $dir = 1; $i++ }
       continue
     }
-    $action = Invoke-ModelStep -Slot $slot -S $S -Last $last
-    if ($action -eq "back") { $dir = -1; $i-- } else { $dir = 1; $i++ }
   }
-  Save-LastPicks -S $S
   $picks = @{ launch = $launch }
   if ($launch -eq "ultracode") { $picks["uc_orch"] = $S.uc_orch; $picks["uc_worker"] = $(if ($S.uc_worker) { $S.uc_worker } else { "" }) }
-  Write-LastPicks $picks
-  $main = $Models | Where-Object { $_.Id -eq $S.main } | Select-Object -First 1
-  $adv = $(if ($S.adv) { $Models | Where-Object { $_.Id -eq $S.adv } | Select-Object -First 1 } else { @{ Rank = 0; Name = "OFF (no advisor)"; Id = ""; Eligible = $true; Cost = "-" } })
-  return @{
-    Main = $main; Advisor = $adv; Folder = $folder; Launch = $launch; UcOrch = $S.uc_orch; UcWorker = $S.uc_worker
-    MainFallbacks = @($(if ($S.main1) { @($S.main1, $S.main2) }) | Where-Object { $_ })
-    AdvisorFallbacks = @($(if ($S.adv -and $S.adv1) { @($S.adv1, $S.adv2) }) | Where-Object { $_ })
-  }
+  Write-LastPicks $picks -Slots $S.slots
+  return @{ Slots = $S.slots; Folder = $folder; Launch = $launch; UcOrch = $S.uc_orch; UcWorker = $S.uc_worker }
 }
 
 function Get-ProjectEntries {
@@ -544,28 +621,23 @@ function Select-ProjectFolderNumbered {
 }
 
 function Sync-ModelPicker {
-  param([string]$MainId, [string]$SeatAlias)
+  # ~/.claude/settings.json: the /model picker lists the four slots (then the direct
+  # ih/ models), the model stays sonnet, and the advisor is the fable slot. Nothing
+  # here touches plan mode or permissions.
+  param([string]$SeatAlias)
   $settingsPath = Join-Path $env:USERPROFILE ".claude\settings.json"
   if (-not (Test-Path -LiteralPath $settingsPath)) { return }
   $options = @(
-    [ordered]@{
-      model = $SeatAlias
-      label = "InferHub seat (sonnet alias)"
-      description = "Maps to seated Top 20 main via local LiteLLM"
-      behavesAs = "claude-sonnet-5"
-    }
-    [ordered]@{
-      model = "opus"
-      label = "InferHub seat (opus/advisor alias)"
-      description = "Maps to seated Top 20 advisor via local LiteLLM"
-      behavesAs = "claude-opus-4-6"
-    }
+    [ordered]@{ model = $SeatAlias; label = "Sonnet slot (main)"; description = "Main chat chain via local LiteLLM"; behavesAs = "claude-sonnet-5" }
+    [ordered]@{ model = "opus"; label = "Opus slot (planning)"; description = "Planning chain via local LiteLLM"; behavesAs = "claude-opus-5-5" }
+    [ordered]@{ model = "fable"; label = "Fable slot (advisor)"; description = "Advisor chain via local LiteLLM"; behavesAs = "claude-fable-5" }
+    [ordered]@{ model = "haiku"; label = "Haiku slot (background)"; description = "Background chain via local LiteLLM"; behavesAs = "claude-haiku-4-5-20251001" }
   )
   foreach ($m in $Models) {
     $options += [ordered]@{
       model = ("ih/" + $m.Id)
       label = ($m.Name + " (InferHub ih/)")
-      description = ("IRE Top 20 #" + $m.Rank + "; " + $(if ($m.Eligible) { "eligible" } else { "gated" }) + " - prefer sonnet/opus seats for advisor")
+      description = ("IRE Top 20 #" + $m.Rank + "; " + $(if ($m.Eligible) { "eligible" } else { "gated" }) + " - direct, no slot chain")
       behavesAs = "claude-sonnet-5"
     }
   }
@@ -575,15 +647,31 @@ function Sync-ModelPicker {
       $json | Add-Member -NotePropertyName modelPicker -NotePropertyValue ([pscustomobject]@{}) -Force
     }
     $json.modelPicker = [pscustomobject]@{ options = $options }
-    $json.model = $SeatAlias
-    # Advisor must use InferHub seat alias (opus), not a raw Anthropic id that
-    # could resolve via CKFF if BASE_URL ever leaked.
-    $json.advisorModel = "opus"
+    if ($json.PSObject.Properties["model"]) { $json.model = $SeatAlias } else { $json | Add-Member -NotePropertyName model -NotePropertyValue $SeatAlias -Force }
+    # The advisor is the fable slot (ANTHROPIC_DEFAULT_FABLE_MODEL pins it to claude-fable-5).
+    if ($json.PSObject.Properties["advisorModel"]) { $json.advisorModel = "fable" } else { $json | Add-Member -NotePropertyName advisorModel -NotePropertyValue "fable" -Force }
     $out = $json | ConvertTo-Json -Depth 20
     [System.IO.File]::WriteAllText($settingsPath, $out + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
   } catch {
     Write-Host ("warning: could not sync model picker: " + $_.Exception.Message)
   }
+}
+
+function Invoke-PlannerInstall {
+  # The planner sub-agent (~/.claude/agents/planner.md, model opus, read-only) and
+  # the CLAUDE.md line that hands planning to it (shared\claude\install_planner.py).
+  # Idempotent; never fatal. CCL_PLANNER=off skips it. Action: install or uninstall.
+  param([string]$Action = "install", [switch]$Quiet)
+  if ($Action -eq "install" -and $env:CCL_PLANNER -eq "off") { return 0 }
+  $py = Get-LadderPython
+  if (-not $py) { [Console]::Error.WriteLine("planner: no Python found; planner sub-agent not " + $Action + "ed"); return 1 }
+  $helper = Join-Path $RepoRoot "shared\claude\install_planner.py"
+  $a = @($Action); if ($Quiet) { $a += "--quiet" }
+  $ErrorActionPreference = "Continue"
+  $out = & $py $helper @a 2>&1
+  $rc = $LASTEXITCODE
+  foreach ($line in @($out)) { if ($line) { [Console]::Error.WriteLine([string]$line) } }
+  return $rc
 }
 
 # ---- UltraCode (optional "launch with" target) ----
@@ -637,13 +725,15 @@ function Invoke-UcModels {
 
 function Get-UltraCodeChoices {
   # Writes the cache's config.json and returns the choices (@{ Id; Label }) for
-  # Steps 9 and 10. Rebuilt only when the main or advisor seat changes.
+  # Steps 9 and 10. Rebuilt only when the sonnet or fable slot's first model changes.
   param($S)
-  $key = "" + $S.main + "|" + $S.adv
+  $mainId = "" + @($S.slots.sonnet)[0]
+  $advId = "" + @($S.slots.fable)[0]
+  $key = $mainId + "|" + $advId
   if ($script:UcChoices -and $script:UcChoicesKey -eq $key) { return $script:UcChoices }
   $dir = Get-UltraCodeShim
-  $mainName = "" + ($Models | Where-Object { $_.Id -eq $S.main } | Select-Object -First 1).Name
-  $advName = $(if ($S.adv) { "" + ($Models | Where-Object { $_.Id -eq $S.adv } | Select-Object -First 1).Name } else { "" })
+  $mainName = "" + (@(Get-SlotChoices) | Where-Object { $_.Id -eq $mainId } | Select-Object -First 1).Name
+  $advName = $(if ($advId) { "" + (@(Get-SlotChoices) | Where-Object { $_.Id -eq $advId } | Select-Object -First 1).Name } else { "" })
   $tmp = [IO.Path]::Combine([IO.Path]::GetTempPath(), "ccl-uc-" + [guid]::NewGuid().ToString("N"))
   $top = $tmp + "-top20.txt"
   $list = $tmp + "-choices.tsv"
@@ -752,34 +842,30 @@ function Ensure-LiteLLMProxy {
 }
 
 function Apply-InferHubSeat {
-  param([string]$MainId, [string]$AdvisorId)
+  # Writes the slot chains to the seat file and regenerates the proxy config
+  # (apply_inferhub_seat.py + merge_litellm_config.py), then hot-reloads the
+  # running proxy so the chains apply without a restart.
+  param($Slots)
   $py = Join-Path $LiteLLMRoot ".litellm-venv\Scripts\python.exe"
   if (-not (Test-Path -LiteralPath $py)) {
     # venv may not exist yet; start script creates it. Write seat JSON for start script.
     $seatPath = Join-Path $LiteLLMRoot "config\inferhub_seat.json"
-    $seat = @{
-      main_inferhub_id = $MainId
-      advisor_inferhub_id = $(if ($AdvisorId) { $AdvisorId } else { $null })
-      updated_at = (Get-Date).ToUniversalTime().ToString("o")
-    } | ConvertTo-Json
+    $so = [ordered]@{}
+    foreach ($slot in $SlotOrder) { $so[$slot] = @($Slots[$slot]) }
+    $seat = [ordered]@{ version = 2; slots = $so; updated_at = (Get-Date).ToUniversalTime().ToString("o") } | ConvertTo-Json -Depth 5
     New-Item -ItemType Directory -Force -Path (Split-Path $seatPath) | Out-Null
     # UTF-8 without a BOM: PS 5.1's -Encoding UTF8 adds one and json.loads rejects it.
     [System.IO.File]::WriteAllText($seatPath, $seat, [System.Text.UTF8Encoding]::new($false))
-    Write-Host "wrote seat file (venv not ready yet); proxy start will apply aliases"
+    Write-Host "wrote seat file (venv not ready yet); proxy start will apply the slots"
     return
   }
   # reload_runtime.py reads an optional LITELLM_MASTER_KEY from these files.
   $env:CLAUDE_IH_ENV_FILES = (@($CkffEnvFile, $InferHubEnvFile) -join ";")
   $apply = Join-Path $LiteLLMRoot "scripts\apply_inferhub_seat.py"
-  $merge = Join-Path $LiteLLMRoot "scripts\merge_litellm_config.py"
-  $advArg = @()
-  if ($AdvisorId) { $advArg = @("--advisor", $AdvisorId) } else { $advArg = @("--advisor", "") }
-  & $py $apply --main $MainId @advArg
+  # --slot=name=a,b,c as one argument so Windows PowerShell 5.1 keeps it whole.
+  $slotArgs = @(foreach ($slot in $SlotOrder) { "--slot=" + $slot + "=" + (@($Slots[$slot]) -join ",") })
+  & $py $apply @slotArgs ("--base-url=" + $ProxyBase)
   if ($LASTEXITCODE -ne 0) { throw "apply_inferhub_seat.py failed" }
-  if (Test-Path -LiteralPath (Join-Path $LiteLLMRoot "config\config.yaml")) {
-    & $py $merge
-    if ($LASTEXITCODE -ne 0) { throw "merge_litellm_config.py failed" }
-  }
 }
 
 function Get-IreRecommendations {
@@ -809,15 +895,9 @@ function Get-IreRecommendations {
   if (Test-Path -LiteralPath $out) { $env:CCL_IRE_JSON = $out }
 }
 
-# ---- fallback ladders (issue #5) ----
-# After each seat is picked, show its default fallback ladder and let Alex
-# accept it (Enter) or pick up to 3 rungs. Applied to the running proxy after
-# the last Apply-InferHubSeat through /workbench/reload_runtime (scope ladder),
-# with no restart. CLAUDE_IH_LADDER=default takes the defaults without asking;
-# =off skips the step (the stock inferhub_fallbacks.yaml chains stay).
-$LadderCli = Join-Path $RepoRoot "shared\ladder\ladder_cli.py"
-$LadderState = Join-Path $LiteLLMRoot "config\ladder_state.json"
-
+# ---- Python for the helpers ----
+# (The per-seat fallback ladders of issue #5 are gone: every slot's chain is now
+# generated into runtime.yaml by apply_inferhub_seat.py, issue #53.)
 function Get-LadderPython {
   $venvPy = Join-Path $LiteLLMRoot ".litellm-venv\Scripts\python.exe"
   if (Test-Path -LiteralPath $venvPy) { return $venvPy }
@@ -826,30 +906,6 @@ function Get-LadderPython {
     if ($cmd) { return $cmd.Source }
   }
   return $null
-}
-
-function Save-Ladders {
-  # Record the picked 2nd/3rd models as each seat's fallback ladder.
-  param($W)
-  if ($env:CLAUDE_IH_LADDER -eq "off") { return }
-  $py = Get-LadderPython
-  if (-not $py) { return }
-  Remove-Item -LiteralPath $LadderState -ErrorAction SilentlyContinue
-  $ErrorActionPreference = "Continue"   # the helper logs on stderr; that is not a failure
-  $null = & $py $LadderCli choose --state $LadderState --role main ("--primary=" + $W.Main.Id) ("--picks=" + ($W.MainFallbacks -join ",")) 2>&1
-  if ($LASTEXITCODE -ne 0) { Write-Host "warning: main fallbacks not accepted; the stock chains stay" }
-  $null = & $py $LadderCli choose --state $LadderState --role advisor ("--primary=" + $W.Advisor.Id) ("--picks=" + ($W.AdvisorFallbacks -join ",")) 2>&1
-  if ($LASTEXITCODE -ne 0) { Write-Host "warning: advisor fallbacks not accepted; the stock chains stay" }
-}
-
-function Apply-Ladder {
-  if ($env:CLAUDE_IH_LADDER -eq "off") { return }
-  if (-not (Test-Path -LiteralPath $LadderState)) { return }
-  $py = Get-LadderPython
-  if (-not $py) { return }
-  $ErrorActionPreference = "Continue"
-  $null = & $py $LadderCli apply --state $LadderState --base-url $ProxyBase 2>&1
-  if ($LASTEXITCODE -ne 0) { Write-Host "warning: could not apply the fallback ladders; the stock chains stay" }
 }
 
 # ---- Claude Code environment ----
@@ -912,17 +968,17 @@ function Initialize-ClaudeLaunchEnv {
     $env:ANTHROPIC_API_KEY = $master
     $authLine = $(if ($master -eq "local") { "auth=dummy API key (run /login with your claude.ai account to use Artifacts)" } else { "auth=LiteLLM master key (Artifacts need a keyless proxy)" })
   }
-  $env:ANTHROPIC_MODEL = $SeatAlias      # sonnet seat -> InferHub main
-  # small-fast is the fast seat alias (cb/deepseek-v4.1-flash unless the seat file says otherwise).
-  $env:ANTHROPIC_SMALL_FAST_MODEL = "small-fast"
-  # Pin every model tier to a name the proxy serves. Without these, a subagent or
-  # skill with "model: haiku" asks for Claude Code's built-in haiku id
-  # (claude-haiku-4-5-20251001), which the proxy does not have, and gets a 400.
-  # The pins also keep sonnet/opus working when a Claude Code update renames them.
-  $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "claude-sonnet-5"   # main seat
-  $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "claude-opus-5-5"     # advisor seat (main when advisor is OFF)
-  $env:ANTHROPIC_DEFAULT_FABLE_MODEL = "claude-fable-5"     # advisor seat
-  $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "claude-haiku-4-5-20251001"  # fast seat (an id Claude Code knows, so no "unrecognized model" warning)
+  $env:ANTHROPIC_MODEL = $SeatAlias      # sonnet: the main chat (never opusplan)
+  # Pin every slot to a Claude-style name the proxy serves (scripts\slots.py maps
+  # each to its chain). The pins keep the slots working when a Claude Code update
+  # renames its defaults, and a sub-agent with "model: haiku" or "model: opus"
+  # lands on its own slot. The deprecated ANTHROPIC_SMALL_FAST_MODEL is not set:
+  # background calls use the haiku pin.
+  $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "claude-sonnet-5"            # sonnet slot (main)
+  $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "claude-opus-5-5"              # opus slot (planning)
+  $env:ANTHROPIC_DEFAULT_FABLE_MODEL = "claude-fable-5"              # fable slot (the advisor)
+  $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "claude-haiku-4-5-20251001"   # haiku slot (an id Claude Code knows)
+  $env:CLAUDE_CODE_AUTO_COMPACT_WINDOW = $AutoCompactWindow          # GPT 6 Astra's 272K window
   $env:CLAUDE_CODE_WORKFLOWS = "1"
   # Do NOT set ANTHROPIC_AUTH_TOKEN (would win over API_KEY and risk CKFF).
   # Keep experimental betas ON - do not set CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS
@@ -941,13 +997,15 @@ function Initialize-ClaudeLaunchEnv {
 
 function Read-LauncherOptions {
   param([string[]]$ArgList)
-  $o = @{ NonInteractive = ($env:CCL_NONINTERACTIVE -eq "1"); PrintEnv = ""; Folder = ""; Rest = @(); Error = "" }
+  $o = @{ NonInteractive = ($env:CCL_NONINTERACTIVE -eq "1"); PrintEnv = ""; Folder = ""; Rest = @(); Error = ""; Planner = "" }
   if ($env:CCL_PRINT_ENV) { $o.NonInteractive = $true; $o.PrintEnv = $env:CCL_PRINT_ENV }
   if (-not $ArgList) { $ArgList = @() }
   $i = 0
   while ($i -lt $ArgList.Count) {
     $a = $ArgList[$i]
     if ($a -eq "-NonInteractive" -or $a -eq "--non-interactive") { $o.NonInteractive = $true; $i++; continue }
+    if ($a -eq "-UninstallPlanner" -or $a -eq "--uninstall-planner") { $o.Planner = "uninstall"; $i++; continue }
+    if ($a -eq "-InstallPlanner" -or $a -eq "--install-planner") { $o.Planner = "install"; $i++; continue }
     if ($a -eq "-PrintEnv" -or $a -eq "--print-env") {
       if ($i + 1 -ge $ArgList.Count) { $o.Error = "$a needs json or dotenv"; break }
       $o.NonInteractive = $true; $o.PrintEnv = $ArgList[$i + 1]; $i += 2; continue
@@ -966,17 +1024,23 @@ function Read-LauncherOptions {
 
 function Get-SeatInfo {
   # What the running proxy is seated with (shared\litellm\config\inferhub_seat.json,
-  # written by the last interactive launch) and the cached picks. Read only.
+  # written by the last interactive launch) and the saved slot picks. Read only.
   $seatPath = $(if ($env:CCL_SEAT_FILE) { $env:CCL_SEAT_FILE } else { Join-Path $LiteLLMRoot "config\inferhub_seat.json" })
   $seat = $null
   if (Test-Path -LiteralPath $seatPath) { try { $seat = Get-Content -LiteralPath $seatPath -Raw -Encoding UTF8 | ConvertFrom-Json } catch {} }
-  $picks = Read-LastPicks
+  $picks = Read-SlotPicks
+  $proxySlots = [ordered]@{}
+  $pickSlots = [ordered]@{}
+  foreach ($slot in $SlotOrder) {
+    $proxySlots[$slot] = $(if ($seat -and $seat.slots -and $seat.slots.$slot) { (@($seat.slots.$slot) -join ",") } else { "" })
+    $pickSlots[$slot] = $(if ($picks) { (@($picks[$slot]) -join ",") } else { "" })
+  }
   $info = [ordered]@{
-    main = $(if ($seat -and $seat.main_inferhub_id) { [string]$seat.main_inferhub_id } elseif ($picks["main"]) { $picks["main"] } else { "" })
-    advisor = $(if ($seat) { [string]$seat.advisor_inferhub_id } elseif ($picks["adv"]) { $picks["adv"] } else { "" })
-    seat_source = $(if ($seat) { "seat file" } elseif ($picks.Count -gt 0) { "last picks" } else { "none" })
-    picks_main = $(if ($picks["main"]) { $picks["main"] } else { "" })
-    picks_advisor = $(if ($picks["adv"]) { $picks["adv"] } else { "" })
+    main = $(if ($proxySlots.sonnet) { $proxySlots.sonnet.Split(",")[0] } elseif ($seat -and $seat.main_inferhub_id) { [string]$seat.main_inferhub_id } elseif ($pickSlots.sonnet) { $pickSlots.sonnet.Split(",")[0] } else { "" })
+    advisor = $(if ($proxySlots.fable) { $proxySlots.fable.Split(",")[0] } elseif ($seat) { [string]$seat.advisor_inferhub_id } else { "" })
+    seat_source = $(if ($seat) { "seat file" } elseif ($picks) { "saved picks" } else { "none" })
+    slots = $proxySlots
+    picks = $pickSlots
   }
   return $info
 }
@@ -1009,9 +1073,14 @@ function Invoke-NonInteractive {
     return 3
   }
   $info = Get-SeatInfo
-  if ($info.picks_main -and $info.seat_source -eq "seat file" -and $info.picks_main -ne $info.main) {
-    [Console]::Error.WriteLine("launch-claude-inferhub: note: last-picks.json says main=" + $info.picks_main + " but the proxy is seated with " + $info.main + ". Non-interactive mode keeps the proxy's seat; run the launcher interactively to change it.")
+  if ($info.seat_source -eq "seat file") {
+    foreach ($slot in $SlotOrder) {
+      if ($info.picks[$slot] -and $info.slots[$slot] -and $info.picks[$slot] -ne $info.slots[$slot]) {
+        [Console]::Error.WriteLine("launch-claude-inferhub: note: the saved " + $slot + " slot is " + $info.picks[$slot] + " but the proxy has " + $info.slots[$slot] + ". Non-interactive mode keeps the proxy's chains; run the launcher once to apply the saved picks.")
+      }
+    }
   }
+  if (-not $Options.PrintEnv) { $null = Invoke-PlannerInstall -Quiet }
   $authLine = Initialize-ClaudeLaunchEnv -Master (Read-LiteLLMMasterKey) -SeatAlias "sonnet"
   $info["proxy_healthy"] = [bool]$healthy
   $info["auth"] = $authLine
@@ -1026,6 +1095,7 @@ function Invoke-NonInteractive {
 # ---- interactive flow ----
 if ($env:CCL_LAUNCHER_LIBRARY_ONLY -eq "1") { return }   # tests dot-source the functions only
 $LauncherOptions = Read-LauncherOptions -ArgList $args
+if ($LauncherOptions.Planner) { exit (Invoke-PlannerInstall -Action $LauncherOptions.Planner) }
 if ($LauncherOptions.NonInteractive -or $LauncherOptions.Error) {
   $niResult = Invoke-NonInteractive -Options $LauncherOptions
   if ($niResult -ne "exec") { exit $niResult }
@@ -1035,37 +1105,24 @@ if ($LauncherOptions.NonInteractive -or $LauncherOptions.Error) {
 }
 Get-IreRecommendations
 if ([Console]::IsInputRedirected) {
-  # No console keys: default seats, advisor OFF, default chains, numbered folder list.
-  $w = @{ Main = ($Models | Where-Object { $_.Id -eq $DefaultModelId } | Select-Object -First 1)
-          Advisor = @{ Rank = 0; Name = "OFF (no advisor)"; Id = ""; Eligible = $true; Cost = "-" } }
-  $w.MainFallbacks = @(Get-DefaultChain -Role main -PrimaryId $DefaultModelId | Select-Object -First 2)
-  $w.AdvisorFallbacks = @()
+  # No console keys: the saved slots (or the defaults), numbered folder list.
+  $saved = Read-SlotPicks
+  $w = @{ Slots = $(if ($saved) { $saved } else { Get-DefaultSlots }); Launch = "claude" }
   $w.Folder = Select-ProjectFolderNumbered
-  $w.Launch = "claude"
 } else {
   $w = Invoke-LaunchWizard
 }
-$main = $w.Main
-$advisor = $w.Advisor
 $folder = $w.Folder
-Save-Ladders -W $w
 
-$advisorId = $advisor.Id
-$advisorLabel = $(if ($advisorId) { $advisor.Name + " (" + $advisorId + ")" } else { "OFF" })
-
-Apply-InferHubSeat -MainId $main.Id -AdvisorId $advisorId
+Apply-InferHubSeat -Slots $w.Slots
 Ensure-LiteLLMProxy
 
-# Re-apply seat after proxy/venv exists, then ask for config reload by restarting if needed.
-Apply-InferHubSeat -MainId $main.Id -AdvisorId $advisorId
-# The seat's merge step reloads the stock chains, so the picked ladders go on top.
-Apply-Ladder
-# Soft note: LiteLLM may need restart to pick runtime.yaml changes if already running with old seat.
-Write-Host "Seat applied. If proxy was already running with an old seat, restart it:"
-Write-Host "  cd $LiteLLMOps; .\stop-litellm.ps1; .\start-litellm.ps1 -Background -InferHubEnvFile `"$InferHubEnvFile`""
+# Re-apply after the proxy/venv exists (the first apply may only have written the seat file).
+Apply-InferHubSeat -Slots $w.Slots
 
 $seatAlias = "sonnet"
-Sync-ModelPicker -MainId $main.Id -SeatAlias $seatAlias
+Sync-ModelPicker -SeatAlias $seatAlias
+$null = Invoke-PlannerInstall -Quiet
 $master = Read-LiteLLMMasterKey
 
 $authLine = Initialize-ClaudeLaunchEnv -Master $master -SeatAlias $seatAlias
@@ -1074,12 +1131,10 @@ Set-Location -LiteralPath $folder
 
 Clear-Host
 Write-Host ("cwd=" + (Get-Location))
-Write-Host ("proxy=" + $env:ANTHROPIC_BASE_URL + "  (unified CKFF+InferHub LiteLLM)")
-Write-Host ("small_fast=" + $env:ANTHROPIC_SMALL_FAST_MODEL + "  (fast seat alias, InferHub cheap side model for search/hooks)")
-Write-Host ("seat_alias=" + $seatAlias + "  behavesAs=claude-sonnet-5")
-Write-Host "tiers=sonnet:claude-sonnet-5 opus:claude-opus-5-5 fable:claude-fable-5 haiku:claude-haiku-4-5-20251001 (all proxy seat aliases)"
-Write-Host ("main=" + $main.Id + "  (" + $main.Name + ")")
-Write-Host ("advisor=" + $advisorLabel)
+Write-Host ("proxy=" + $env:ANTHROPIC_BASE_URL + "  (local LiteLLM, InferHub only; CKFF off)")
+Write-Host "slots (Claude Code name -> chain):"
+foreach ($line in @(Get-SlotSummary $w.Slots)) { Write-Host ("  " + $line) }
+Write-Host "pins=sonnet:claude-sonnet-5 opus:claude-opus-5-5 fable:claude-fable-5 haiku:claude-haiku-4-5-20251001  advisor=fable  auto-compact=$AutoCompactWindow"
 Write-Host $authLine
 Write-Host "permission=bypassPermissions (auto mode is Anthropic-only)"
 Write-Host "betas=experimental ON (advisor_20260301 via LiteLLM orchestration)"

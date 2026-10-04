@@ -126,7 +126,9 @@ def test_generated_config_gives_seats_and_rungs_a_cooldown(tmp_path):
     assert cd["sonnet"] == 180.0
     # every fallback target of the seat is benched the same way once its retries are spent
     targets = [t for d in rs["fallbacks"] for k, v in d.items() if k == "sonnet" for t in v]
-    assert targets and all(cd.get(t) == 180.0 for t in targets)
+    assert targets == ["ccl-sonnet-2", "ccl-sonnet-3"]
+    # every fallback but the last is benched once its retries are spent; the last never is
+    assert cd["ccl-sonnet-2"] == 180.0 and cd["ccl-sonnet-3"] == 0.0
     # and the hook would bench the seat from this exact model_list entry
     seat = next(m for m in doc["model_list"] if m["model_name"] == "sonnet")
     seat.setdefault("model_info", {}).setdefault("id", "seat-id")

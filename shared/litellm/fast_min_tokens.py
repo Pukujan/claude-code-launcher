@@ -13,8 +13,9 @@ from __future__ import annotations
 
 import os
 
-# Same names as FAST_ALIASES in scripts/apply_inferhub_seat.py.
-FAST_ALIASES = {"haiku", "claude-haiku-5", "claude-haiku-4-5-20251001", "small-fast", "ih-haiku", "ih-small-fast", "inferhub-haiku"}
+# The haiku slot's names (SLOT_NAMES["haiku"] in scripts/slots.py, plus claude-haiku-4-5 while CKFF is off).
+FAST_ALIASES = {"haiku", "claude-haiku-5", "claude-haiku-4-5-20251001", "claude-haiku-4-5", "small-fast",
+                "ih-haiku", "ih-small-fast", "inferhub-haiku"}
 DEFAULT_FLOOR = 4096
 
 _installed = {"done": False}

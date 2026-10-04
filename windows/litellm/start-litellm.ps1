@@ -1,8 +1,12 @@
 #!/usr/bin/env pwsh
-# Start the ONE local LiteLLM proxy (CKFF + InferHub model groups) from this
-# repository's shared/litellm folder. No litellm-ckff-ops checkout is needed.
-# The launcher passes the env files it chose: -CkffEnvFile (CKFF keys) and
-# -InferHubEnvFile (INFERHUB_API_KEY etc.). Values are never printed.
+# Start the ONE local LiteLLM proxy from this repository's shared/litellm
+# folder. No litellm-ckff-ops checkout is needed.
+# The launcher passes the env files it chose: -CkffEnvFile (the Desktop configs
+# env: web search keys, and the CKFF keys) and -InferHubEnvFile
+# (INFERHUB_API_KEY etc.). Values are never printed.
+# CKFF is off (ckff_enabled: false in shared/litellm/config/inferhub_fallbacks.yaml;
+# CCL_CKFF=on overrides it). While it is off no CKFF model is served and every
+# ckff*/CKFF_* variable is removed from the proxy's environment.
 # An optional machine-local env file (-LocalEnvFile, default
 # shared\litellm\.env.local, gitignored) is loaded last, for per-PC settings
 # such as CCL_WEB_SEARCH_CHAIN and SEARXNG_API_BASE. A missing file is fine.
@@ -104,7 +108,20 @@ if (-not [string]::IsNullOrWhiteSpace($aliasSpec)) {
     }
 }
 
-# Map CKFF secrets to the names LiteLLM expects
+# The CKFF switch (one place: inferhub_fallbacks.yaml, CCL_CKFF overrides).
+$CkffOn = $false
+$fallbacksYaml = Join-Path $LiteLLMRoot 'config\inferhub_fallbacks.yaml'
+$ckffLine = Get-Content -LiteralPath $fallbacksYaml -ErrorAction SilentlyContinue | Where-Object { $_ -match '^ckff_enabled\s*:' } | Select-Object -First 1
+if ($ckffLine -match '^ckff_enabled\s*:\s*(true|yes|on)\b') { $CkffOn = $true }
+$ckffEnv = [Environment]::GetEnvironmentVariable('CCL_CKFF', 'Process')
+if ($ckffEnv -match '^(1|on|true|yes)$') { $CkffOn = $true } elseif ($ckffEnv -match '^(0|off|false|no)$') { $CkffOn = $false }
+if (-not $CkffOn) {
+    $gone = @(Get-ChildItem Env: | Where-Object { $_.Name -match '^ckff' })
+    foreach ($e in $gone) { Remove-Item ("Env:" + $e.Name) -ErrorAction SilentlyContinue }
+    Write-Host "CKFF is off: $($gone.Count) CKFF variables left out of the proxy environment"
+}
+
+# Map CKFF secrets to the names LiteLLM expects (only while CKFF is on)
 $envMap = @{
     'CKFF_DEFAULT_KEY'      = 'ckff-cortex-default'
     'CKFF_GROK_KEY'         = 'ckff-cortex-grok'
@@ -126,6 +143,7 @@ if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable('LITELLM_
     [Environment]::SetEnvironmentVariable('LITELLM_DANGEROUSLY_PERMIT_WEAK_OR_UNSET_MASTER_KEY', 'true', 'Process')
 }
 
+if (-not $CkffOn) { $envMap = @{} }
 foreach ($secretName in $envMap.Keys) {
     $envKey = $envMap[$secretName]
     $value = [Environment]::GetEnvironmentVariable($envKey, 'Process')
@@ -201,9 +219,9 @@ if ($needInstall) {
 # --- Build InferHub fragments + merge runtime config ---
 $SeatPath = Join-Path $LiteLLMRoot 'config\inferhub_seat.json'
 if (-not (Test-Path -LiteralPath $SeatPath)) {
+    # No slots yet: apply_inferhub_seat.py uses the default chains in inferhub_fallbacks.yaml.
     $defaultSeat = @{
-        main_inferhub_id = 'cb/deepseek-v4.1-flash'
-        advisor_inferhub_id = $null
+        version = 2
         updated_at = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
     } | ConvertTo-Json
     # UTF-8 without a BOM: PS 5.1's -Encoding UTF8 adds one and json.loads rejects it.
@@ -225,16 +243,16 @@ if (-not $SkipSync -or -not (Test-Path -LiteralPath $Top20Yaml)) {
     if ($LASTEXITCODE -ne 0) { throw "sync_inferhub_top20.py failed: $LASTEXITCODE" }
 }
 
-Write-Host 'Applying InferHub Claude seat aliases ...'
+Write-Host 'Writing the Claude Code slot chains ...'
 & $Python (Join-Path $PythonScripts 'apply_inferhub_seat.py') --api-base $ihUrl --no-reload
 if ($LASTEXITCODE -ne 0) { throw "apply_inferhub_seat.py failed: $LASTEXITCODE" }
 
-Write-Host 'Merging CKFF + InferHub into config/runtime.yaml ...'
+Write-Host 'Merging into config/runtime.yaml ...'
 & $Python (Join-Path $PythonScripts 'merge_litellm_config.py') --no-reload
 if ($LASTEXITCODE -ne 0) { throw "merge_litellm_config.py failed: $LASTEXITCODE" }
 
 $ConfigPath = Join-Path $LiteLLMRoot 'config\runtime.yaml'
-Write-Host "Starting unified LiteLLM proxy on http://127.0.0.1:$Port (CKFF + InferHub)"
+Write-Host "Starting LiteLLM proxy on http://127.0.0.1:$Port ($(if ($CkffOn) { 'CKFF + InferHub' } else { 'InferHub only; CKFF off' }))"
 
 # Never take over a port someone else holds (port 4000 is the live proxy).
 $listener = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue

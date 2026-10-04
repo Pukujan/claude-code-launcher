@@ -15,8 +15,9 @@ enough.
 ## Start it
 
 **Windows.** Clone this repository, then double-click
-`windows\launch-claude-inferhub.cmd`. Pick the main model, the advisor (or OFF)
-and a project folder with the arrow keys. The first run makes the Python venv
+`windows\launch-claude-inferhub.cmd`. Pick a model chain for each of Claude
+Code's four slots (or keep the saved ones) and a project folder with the arrow
+keys. The first run makes the Python venv
 under `shared\litellm\.litellm-venv` with uv (or with `python -m venv` and
 pip if uv is not installed); Claude Code and either uv or Python must already
 be installed.
@@ -28,8 +29,9 @@ once for your InferHub key. Folders can be picked from a list, browsed with the
 arrow keys in the terminal, or typed. See [mac/README.md](mac/README.md).
 **The Mac launcher has only been tested on Linux so far.**
 
-Both launchers default to DeepSeek V4.1 Flash with the advisor OFF, and start
-Claude Code with `claude --model sonnet --permission-mode bypassPermissions`.
+Both launchers start Claude Code with
+`claude --model sonnet --permission-mode bypassPermissions`. Plan mode is never
+switched on; planning goes to a planner sub-agent instead (see "Slots" below).
 The model list is the IRE Top 20, fetched at start-up by `shared/ire/` (see
 below).
 
@@ -61,14 +63,16 @@ environment variables do the same thing. Launcher options go first, and `--`
 ends them. The JSON output has four parts:
 
 - `set`: the variables Claude Code gets, the same ones an interactive launch
-  sets (base URL, auth, `sonnet` seat, `small-fast`, the four tier pins and
-  `CLAUDE_CODE_WORKFLOWS`)
+  sets (base URL, auth, `sonnet` as the model, the four slot pins,
+  `CLAUDE_CODE_AUTO_COMPACT_WINDOW` and `CLAUDE_CODE_WORKFLOWS`)
 - `unset`: names to clear first
 - `unset_prefixes`: prefixes whose leftover variables should be cleared too
 - `info`: the seat, where it was read from, whether the proxy is healthy and
   which auth is used
 
-`last-picks.json` is only reported. To change the seat, run the launcher
+Non-interactive mode uses the slots saved by the last interactive launch and
+never shows a menu. `last-picks.json` is only reported; if it disagrees with
+what the proxy has, you get a warning. To change the slots, run the launcher
 interactively.
 
 Passing arguments that contain double quotes (JSON) through Windows PowerShell
@@ -103,19 +107,44 @@ Only `.env.example` is tracked. `.env` is gitignored.
 
 ## How a request is routed
 
-Claude Code only knows Anthropic model names. The proxy maps them to the two
-InferHub seats you picked:
+Claude Code has four model slots, and each one gets its own InferHub chain: a
+first model plus up to two fallbacks. The defaults:
 
-| Claude Code asks for | Goes to |
-| --- | --- |
-| `sonnet`, `main`, `claude-sonnet-5` | the main seat |
-| `opus`, `advisor`, `claude-opus-5-5`, `claude-fable-5` | the advisor seat, or main when the advisor is OFF |
-| `haiku`, `small-fast`, `claude-haiku-5`, `claude-haiku-4-5-20251001` | the fast seat, `cb/deepseek-v4.1-flash` unless the seat file says otherwise, with its own fallback chain ending on `ali/qwen3.8-flash`. Both launchers point Claude Code's small, fast requests here. |
-| `ih/<model id>` | that InferHub model directly |
+| Slot | Used for | Default chain |
+| --- | --- | --- |
+| `sonnet` | the main chat (`--model sonnet`) | DeepSeek V4.1 Flash, Qwen3.8 Flash, GLM-5.3 Flash |
+| `opus` | planning (the planner sub-agent) and `model: opus` sub-agents | GPT-6 Astra, GPT-6.1 Sol, Qwen3.8 Max |
+| `fable` | the advisor (`advisorModel: fable`) | GLM-5.3 Flash, Qwen3.8 Flash, DeepSeek V4.1 Flash |
+| `haiku` | background calls (titles, summaries, Explore) | the same chain as sonnet |
 
-If a seat fails, the proxy falls back along the chains in
-`shared/litellm/config/inferhub_fallbacks.yaml`. Changing seats later
-hot-reloads the running proxy; it does not restart it.
+The proxy answers to the slot word and to the Claude names Claude Code sends for
+it (`claude-sonnet-5`, `claude-opus-5-5`, `claude-fable-5`,
+`claude-haiku-4-5-20251001`, and older ones like `main`, `advisor` and
+`small-fast`). A `claude-*` name it has never seen goes to the slot in its name
+(`claude-opus-4-8` goes to opus); one with no slot word goes to sonnet and logs a
+warning. `ih/<model id>` still reaches that InferHub model directly. The full
+list is in `shared/litellm/scripts/slots.py`.
+
+When a model fails, its retries are spent first, then the slot moves to its next
+model. A model that keeps failing is benched for a few minutes, except the last
+one in each chain, which is never benched, so a slot always has somewhere to go.
+An empty reply is retried once on the same model, then the slot moves on; empty
+replies never bench anything. Changing the slots later hot-reloads the running
+proxy; it does not restart it.
+
+CKFF is off. Its models are left out of the proxy entirely; set
+`ckff_enabled: true` in `shared/litellm/config/inferhub_fallbacks.yaml` (or
+`CCL_CKFF=on`) to bring them back. GPT-6 Astra above is InferHub's `cb/` route,
+not CKFF.
+
+### Planner sub-agent
+
+Each launch makes sure `~/.claude/agents/planner.md` and a short block in
+`~/.claude/CLAUDE.md` exist (`shared/claude/install_planner.py`). The planner is
+read-only and runs on the opus slot; the CLAUDE.md block tells the main session
+to hand non-trivial planning to it. Plan mode stays off. Your own `planner.md`,
+if you have one, is left alone. `CCL_PLANNER=off` skips the install, and
+`--uninstall-planner` (Windows `-UninstallPlanner`) removes both again.
 
 ## Where the model list comes from
 

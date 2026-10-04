@@ -48,9 +48,8 @@ CLAUDE_INSTALLER_URL="${CLAUDE_INSTALLER_URL:-https://claude.ai/install.sh}"
 
 DEFAULT_MODEL_ID="cb/deepseek-v4.1-flash"
 SEAT_ALIAS="sonnet"
-# small-fast is the fast seat alias from apply_inferhub_seat.py (cb/deepseek-v4.1-flash
-# unless the seat file says otherwise), the same name Windows uses.
-SMALL_FAST_MODEL="small-fast"
+# Claude Code's auto-compact window: GPT 6 Astra (the opus slot's first model) has 272K.
+AUTO_COMPACT_WINDOW="272000"
 
 OS_NAME="$(uname -s)"
 if [ "$OS_NAME" = "Darwin" ]; then
@@ -866,8 +865,11 @@ run_ultracode() {
 LADDER_CLI="$REPO_ROOT/shared/ladder/ladder_cli.py"
 LADDER_STATE="$LITELLM_DIR/config/ladder_state.json"
 
+# Off by default since issue #53: every slot's chain is generated into runtime.yaml
+# (apply_inferhub_seat.py), and a ladder would replace it. CLAUDE_IH_LADDER=ask or
+# =default brings the old per-seat ladders back.
 pick_ladder() {
-  local role="$1" primary="$2" mode="${CLAUDE_IH_LADDER:-ask}"
+  local role="$1" primary="$2" mode="${CLAUDE_IH_LADDER:-off}"
   [ "$mode" = "off" ] && return 0
   local extra=()
   if [ "$mode" = "default" ] || [ ! -t 0 ]; then extra=(--non-interactive); fi
@@ -887,7 +889,7 @@ pick_frontier() {
 }
 
 apply_ladder() {
-  [ "${CLAUDE_IH_LADDER:-ask}" = "off" ] && return 0
+  [ "${CLAUDE_IH_LADDER:-off}" = "off" ] && return 0
   [ -f "$LADDER_STATE" ] || return 0
   if "$VENV_PY" "$LADDER_CLI" apply --state "$LADDER_STATE" --base-url "$PROXY_BASE" >> "$LOG_FILE" 2>&1; then
     log "Fallback ladders applied to the running proxy."
@@ -898,7 +900,9 @@ apply_ladder() {
 
 # ---- seat + Claude settings ---------------------------------------------------
 apply_seat() {
-  log "Seating main=$MAIN_ID advisor=${ADVISOR_ID:-OFF} through LiteLLM ..."
+  # --main / --advisor set the first model of the sonnet and fable slots; the rest of
+  # each chain, and the opus and haiku slots, come from the saved or default chains.
+  log "Slots: sonnet first=$MAIN_ID fable first=${ADVISOR_ID:-default} through LiteLLM ..."
   (
     export_proxy_env
     export LITELLM_BASE_URL="$PROXY_BASE"
@@ -917,10 +921,14 @@ import json, os, sys
 path = sys.argv[1]
 seat = os.environ["SEAT_ALIAS"]
 options = [
-    {"model": seat, "label": "InferHub seat (sonnet alias)",
-     "description": "Maps to seated Top 20 main via local LiteLLM", "behavesAs": "claude-sonnet-5"},
-    {"model": "opus", "label": "InferHub seat (opus/advisor alias)",
-     "description": "Maps to seated Top 20 advisor via local LiteLLM", "behavesAs": "claude-opus-4-6"},
+    {"model": seat, "label": "Sonnet slot (main)", "description": "Main chat chain via local LiteLLM",
+     "behavesAs": "claude-sonnet-5"},
+    {"model": "opus", "label": "Opus slot (planning)", "description": "Planning chain via local LiteLLM",
+     "behavesAs": "claude-opus-5-5"},
+    {"model": "fable", "label": "Fable slot (advisor)", "description": "Advisor chain via local LiteLLM",
+     "behavesAs": "claude-fable-5"},
+    {"model": "haiku", "label": "Haiku slot (background)", "description": "Background chain via local LiteLLM",
+     "behavesAs": "claude-haiku-4-5-20251001"},
 ]
 for row in os.environ["MODELS_TABLE"].splitlines():
     rank, name, mid, elig, _cost = row.split("|")
@@ -928,14 +936,14 @@ for row in os.environ["MODELS_TABLE"].splitlines():
         "model": "ih/" + mid,
         "label": name + " (InferHub ih/)",
         "description": "IRE Top 20 #" + rank + "; " + ("eligible" if elig == "true" else "gated")
-                       + " - prefer sonnet/opus seats for advisor",
+                       + " - direct, no slot chain",
         "behavesAs": "claude-sonnet-5",
     })
 with open(path, encoding="utf-8") as f:
     data = json.load(f)
 data["modelPicker"] = {"options": options}
 data["model"] = seat
-data["advisorModel"] = "opus"
+data["advisorModel"] = "fable"  # the advisor is the fable slot
 tmp = path + ".tmp-claude-inferhub"
 with open(tmp, "w", encoding="utf-8") as f:
     f.write(json.dumps(data, indent=2) + "\n")
@@ -994,16 +1002,27 @@ set_claude_env() {
       AUTH_LINE="auth=LiteLLM master key (Artifacts need a keyless proxy)"
     fi
   fi
-  export ANTHROPIC_MODEL="$SEAT_ALIAS"
-  export ANTHROPIC_SMALL_FAST_MODEL="$SMALL_FAST_MODEL"
-  # Pin every model tier to a name the proxy serves. Without these, a subagent or
-  # skill with "model: haiku" asks for Claude Code's built-in haiku id
-  # (claude-haiku-4-5-20251001), which the proxy does not have, and gets a 400.
-  export ANTHROPIC_DEFAULT_SONNET_MODEL="claude-sonnet-5"   # main seat
-  export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-opus-5-5"     # advisor seat (main when advisor is OFF)
-  export ANTHROPIC_DEFAULT_FABLE_MODEL="claude-fable-5"     # advisor seat
-  export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-haiku-4-5-20251001"  # fast seat (an id Claude Code knows, so no "unrecognized model" warning)
+  export ANTHROPIC_MODEL="$SEAT_ALIAS"   # sonnet: the main chat (never opusplan)
+  # Pin every slot to a Claude-style name the proxy serves (shared/litellm/scripts/slots.py
+  # maps each to its chain). The deprecated ANTHROPIC_SMALL_FAST_MODEL is not set:
+  # background calls use the haiku pin.
+  export ANTHROPIC_DEFAULT_SONNET_MODEL="claude-sonnet-5"            # sonnet slot (main)
+  export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-opus-5-5"              # opus slot (planning)
+  export ANTHROPIC_DEFAULT_FABLE_MODEL="claude-fable-5"              # fable slot (the advisor)
+  export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-haiku-4-5-20251001"   # haiku slot (an id Claude Code knows)
+  export CLAUDE_CODE_AUTO_COMPACT_WINDOW="$AUTO_COMPACT_WINDOW"      # GPT 6 Astra's 272K window
   export CLAUDE_CODE_WORKFLOWS=1
+}
+
+# install_planner [install|uninstall]: the planner sub-agent (~/.claude/agents/planner.md,
+# model opus, read-only) and the CLAUDE.md line that hands planning to it. Idempotent,
+# never fatal; CCL_PLANNER=off skips the install.
+install_planner() {
+  local action="${1:-install}" py="${VENV_PY:-}"
+  [ "$action" = "install" ] && [ "${CCL_PLANNER:-}" = "off" ] && return 0
+  [ -n "$py" ] && [ -x "$py" ] || py="$(command -v python3 2>/dev/null)" || true
+  [ -n "$py" ] || { printf 'planner: no Python found; planner sub-agent not changed\n' >&2; return 0; }
+  "$py" "$REPO_ROOT/shared/claude/install_planner.py" "$action" --quiet >&2 || true
 }
 
 # ---- non-interactive mode (see README "Non-interactive mode") ---------------
@@ -1111,6 +1130,7 @@ run_noninteractive() {
   master="$(secret LITELLM_MASTER_KEY)" || master="local"
   set_claude_env "$master"
   master=""
+  [ -n "$CCL_PRINT" ] || install_planner install
   if [ -n "$CCL_PRINT" ]; then
     print_claude_env "$CCL_PRINT" "$healthy" "$main_id" "$adv_id" "$source"
     return 0
@@ -1159,6 +1179,7 @@ main() {
   # ladders go on top of that.
   apply_ladder
   sync_model_picker
+  install_planner install
 
   local master
   # Keyless proxy: claude still needs some key, so "local" unless a real
@@ -1171,12 +1192,10 @@ main() {
   cd "$PROJECT_DIR" || die "cannot cd to $PROJECT_DIR"
   log ""
   log "cwd=$PROJECT_DIR"
-  log "proxy=$ANTHROPIC_BASE_URL  (unified CKFF+InferHub LiteLLM)"
-  log "small_fast=$ANTHROPIC_SMALL_FAST_MODEL  (InferHub cheap side model for search/hooks)"
-  log "seat_alias=$SEAT_ALIAS  behavesAs=claude-sonnet-5"
-  log "tiers=sonnet:claude-sonnet-5 opus:claude-opus-5-5 fable:claude-fable-5 haiku:claude-haiku-4-5-20251001 (all proxy seat aliases)"
-  log "main=$MAIN_ID  ($MAIN_NAME)"
-  if [ -n "$ADVISOR_ID" ]; then log "advisor=$ADVISOR_NAME ($ADVISOR_ID)"; else log "advisor=OFF"; fi
+  log "proxy=$ANTHROPIC_BASE_URL  (local LiteLLM, InferHub only; CKFF off)"
+  log "pins=sonnet:claude-sonnet-5 opus:claude-opus-5-5 fable:claude-fable-5 haiku:claude-haiku-4-5-20251001  advisor=fable  auto-compact=$AUTO_COMPACT_WINDOW"
+  log "sonnet first=$MAIN_ID  ($MAIN_NAME)"
+  if [ -n "$ADVISOR_ID" ]; then log "fable (advisor) first=$ADVISOR_NAME ($ADVISOR_ID)"; else log "fable (advisor)=default chain"; fi
   log "$AUTH_LINE"
   log "permission=bypassPermissions (auto mode is Anthropic-only)"
   log "betas=experimental ON (advisor_20260301 via LiteLLM orchestration)"
