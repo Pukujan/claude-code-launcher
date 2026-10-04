@@ -657,6 +657,13 @@ def _install_bench_hook():
         _rf.install()
     except Exception as e:
         print(f"[sitecustomize] request fixes not installed: {e}", flush=True)
+    # Advisor sub-calls get plain text, not the agent's tool calls (see advisor_fix.py).
+    try:
+        import advisor_fix as _af
+
+        _af.install()
+    except Exception as e:
+        print(f"[sitecustomize] advisor fix not installed: {e}", flush=True)
 
 
 async def _starlette_call_with_reload(self, scope, receive, send, _o=_prev_starlette_call):
