@@ -1,9 +1,11 @@
 name: launcher-ci
 
 # Lint, the Mac launcher dry run (on Linux), the Mac launcher under the bash
-# 3.2 that macOS ships, and the Python unit tests. All four job names are
+# 3.2 that macOS ships, and the Python unit tests. Those four job names are
 # required checks on main, next to `gates`. No path filters, so every PR
-# reports all of them.
+# reports all of them. windows-installer (issue #61) runs the installer's
+# Pester tests on a Windows runner, does one real sandboxed install and
+# uninstall, and uploads windows/install.ps1 as the build artifact.
 # Nothing here touches port 4000: the dry runs use 4100/4101 and refuse 4000.
 
 on:
@@ -151,8 +153,68 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          uv pip install --system --quiet PyYAML==6.0.3 pytest==9.1.1 \
+          uv pip install --system --quiet PyYAML==6.0.3 pytest==9.1.1 hypothesis==6.168.3 \
             --requirement shared/litellm/requirements-overrides.txt
 
       - name: Run the unit tests
         run: python -m pytest -q tests
+
+      - name: Installer Pester tests on Linux pwsh
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck
+          Import-Module Pester -RequiredVersion 5.7.1
+          $r = Invoke-Pester -Path tests/pester -TagFilter Spec, Property, Metamorphic -Output Detailed -PassThru
+          if ($r.FailedCount -gt 0 -or $r.PassedCount -eq 0) { throw "Pester: $($r.FailedCount) failed, $($r.PassedCount) passed" }
+
+  windows-installer:
+    # Never touches port 4000 or a real profile: every test uses a temp
+    # USERPROFILE / CLAUDE_CONFIG_DIR / install folder and ports from 47100.
+    name: windows-installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install Pester 5.7.1 (Windows PowerShell and pwsh)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Scope CurrentUser -Force | Out-Null
+          Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck
+          pwsh -NoProfile -Command "Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck"
+
+      - name: Spec, Property and Metamorphic tests (Windows PowerShell 5.1)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Import-Module Pester -RequiredVersion 5.7.1
+          $r = Invoke-Pester -Path tests/pester -TagFilter Spec, Property, Metamorphic -Output Detailed -PassThru
+          if ($r.FailedCount -gt 0 -or $r.PassedCount -eq 0) { throw "Pester: $($r.FailedCount) failed, $($r.PassedCount) passed" }
+
+      - name: Spec, Property and Metamorphic tests (pwsh 7)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Import-Module Pester -RequiredVersion 5.7.1
+          $r = Invoke-Pester -Path tests/pester -TagFilter Spec, Property, Metamorphic -Output Detailed -PassThru
+          if ($r.FailedCount -gt 0 -or $r.PassedCount -eq 0) { throw "Pester: $($r.FailedCount) failed, $($r.PassedCount) passed" }
+
+      - name: E2E install, coexistence and uninstall (Windows PowerShell 5.1)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Import-Module Pester -RequiredVersion 5.7.1
+          $r = Invoke-Pester -Path tests/pester -TagFilter E2E -Output Detailed -PassThru
+          if ($r.FailedCount -gt 0 -or $r.PassedCount -eq 0) { throw "Pester E2E: $($r.FailedCount) failed, $($r.PassedCount) passed" }
+
+      - name: Upload the installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: install.ps1
+          path: windows/install.ps1
+          if-no-files-found: error

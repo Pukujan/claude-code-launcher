@@ -33,4 +33,4 @@ None known.
 
 ## Next atomic action
 
-Write the red tests for CCL-0061 from `docs/specs/windows-package.md` and commit them before the implementation.
+Get PR #62 green, including the new `windows-installer` job, then release `v1.0.0-windows` with `install.ps1` attached.

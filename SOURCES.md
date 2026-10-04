@@ -71,6 +71,16 @@ process whose path looked related and then killed whatever owned port 4000. The
 new one stops only the PID in `litellm.pid`, and only if that process is this
 repository's venv LiteLLM.
 
+Issue #61 (the one-command Windows installer, `windows/install.ps1`, written
+here, not copied) added a packaged mode to both copied scripts. The launcher
+notices an install folder (`CCL_HOME`, or `install.json` above the repository)
+and then reads the key, port, venv, logs and picks from there, skips every
+PC-specific path, checks `/ccl/identity` before trusting a proxy, and syncs
+`settings.json` through `shared/claude/settings_sync.py`. `start-litellm.ps1`
+takes `-CclHome` for the same layout and creates its venv with Python 3.12.
+Without an install folder both behave as before. See
+`docs/specs/windows-package.md`.
+
 ## Mac
 
 | File here | Source repo | Source path | Commit | Source SHA-256 | Changed here |

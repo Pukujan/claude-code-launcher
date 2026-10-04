@@ -32,12 +32,19 @@ def server(instance):
     class H(http.server.BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802
             if self.path.startswith("/health/"):
-                self.send_response(200); self.end_headers(); self.wfile.write(b"ok"); return
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"ok")
+                return
             if self.path == "/ccl/identity" and instance is not None:
                 body = json.dumps({"app": "claude-code-launcher", "instance": instance}).encode()
-                self.send_response(200); self.send_header("content-type", "application/json"); self.end_headers()
-                self.wfile.write(body); return
-            self.send_response(404); self.end_headers()
+                self.send_response(200)
+                self.send_header("content-type", "application/json")
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            self.send_response(404)
+            self.end_headers()
 
         def log_message(self, *a):
             pass
@@ -216,4 +223,5 @@ def test_a_different_port_changes_only_the_base_url(inst):
         assert docs[1].pop("ANTHROPIC_BASE_URL") == f"http://127.0.0.1:{pb}"
         assert docs[0] == docs[1]
     finally:
-        a.shutdown(); b.shutdown()
+        a.shutdown()
+        b.shutdown()

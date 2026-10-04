@@ -139,7 +139,11 @@ function Resolve-CclInferHubKey {
 
 # ---------------------------------------------------------------- state
 
-function New-CclInstanceId { return [guid]::NewGuid().ToString('N') }
+function New-CclInstanceId {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Only returns a new random id; changes nothing.')]
+    param()
+    return [guid]::NewGuid().ToString('N')
+}
 
 function Read-CclInstallState {
     param([string]$InstallDir)
@@ -270,6 +274,7 @@ function Test-CclTaskRegistered {
 }
 
 function Stop-CclProxy {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Internal helper of a non-interactive installer; -WhatIf is not offered.')]
     # Stops only our proxy: the task, then the PID in logs\litellm.pid (with its children).
     # Never kills by port.
     param([string]$InstallDir)
@@ -287,6 +292,7 @@ function Stop-CclProxy {
 }
 
 function Start-CclProxy {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Internal helper of a non-interactive installer; -WhatIf is not offered.')]
     # Starts the proxy (the task when there is one, else a hidden direct start) and waits
     # until the port answers as ours. Returns $true when it does.
     param([string]$InstallDir, [int]$Port, [string]$InstanceId, [int]$TimeoutSec = 300)
@@ -333,6 +339,7 @@ function Add-CclUserPath {
 }
 
 function Remove-CclUserPath {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Internal helper of a non-interactive installer; -WhatIf is not offered.')]
     param([string]$Dir)
     if (-not $script:CclOnWindows) { return }
     $cur = [Environment]::GetEnvironmentVariable('Path', 'User')
@@ -342,6 +349,8 @@ function Remove-CclUserPath {
 }
 
 function Update-CclSessionPath {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Internal helper of a non-interactive installer; -WhatIf is not offered.')]
+    param()
     if (-not $script:CclOnWindows) { return }
     $m = [Environment]::GetEnvironmentVariable('Path', 'Machine')
     $u = [Environment]::GetEnvironmentVariable('Path', 'User')
