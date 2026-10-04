@@ -135,7 +135,7 @@ the `de69e68` versions plus the small local edits listed below. What `de69e68`
 brings in:
 
 - `apply_inferhub_seat.py`: the fast seat. `haiku`, `claude-haiku-5`,
-  `small-fast`, `ih-haiku`, `ih-small-fast` and `inferhub-haiku` go to
+  `claude-haiku-4-5-20251001`, `small-fast`, `ih-haiku`, `ih-small-fast` and `inferhub-haiku` go to
   `ali/qwen3.8-flash` by default (`--fast`, or `fast_inferhub_id` in the seat
   file; empty means the main seat). `claude-haiku-4-5` stays with CKFF. The seat
   file is read as `utf-8-sig`, so the BOM Windows PowerShell 5.1 writes no
