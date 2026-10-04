@@ -33,4 +33,4 @@ None known.
 
 ## Next atomic action
 
-Get PR #62 green, including the new `windows-installer` job, then release `v1.0.0-windows` with `install.ps1` attached.
+PR #62 is green and set to auto-merge. After it merges, tag `v1.0.0-windows` on the merge commit, create the release with `install.ps1` attached, and close issue #61.
