@@ -28,7 +28,7 @@
     "claim_queue": [],
     "standby": [],
     "grace_minutes": 10,
-    "who_is_boss_now": null,
+    "who_is_boss_now": "executor-claude-code-launcher",
     "as_of_history": [
       {
         "as_of": "2026-10-04T22:37:58Z",
@@ -41,6 +41,12 @@
         "boss_agent_id": "executor-claude-code-launcher",
         "ended_at": "2026-10-05T02:35:12Z",
         "notes": "CCL-0063 (issue #63); the seat was vacant after CCL-0061."
+      },
+      {
+        "as_of": "2026-10-05T03:36:31Z",
+        "boss_agent_id": "executor-claude-code-launcher",
+        "ended_at": null,
+        "notes": "CCL-0072 (issue #72); the seat was vacant after CCL-0063."
       }
     ]
   },

@@ -1,15 +1,15 @@
 {
   "schema_version": "claude-code-launcher.boss-claim.v1",
-  "status": "vacant",
-  "who_is_boss_now": null,
-  "last_heartbeat": "2026-10-05T02:35:12Z",
-  "last_github_activity": "2026-10-05T02:35:12Z",
+  "status": "held",
+  "who_is_boss_now": "executor-claude-code-launcher",
+  "last_heartbeat": "2026-10-05T03:36:31Z",
+  "last_github_activity": "2026-10-05T03:36:31Z",
   "claim_queue": [],
-  "recorded_at": "2026-10-05T02:35:12Z",
-  "notes": "Released by executor-claude-code-launcher at the end of CCL-0063 (issue #63, PR #66), in the last push before merge. The seat is vacant; the next live continuer fills it under join/continue order and renews the check-in every <=15 minutes against the 30-minute lease TTL. A returning old boss joins the end of claim_queue.",
+  "recorded_at": "2026-10-05T03:36:31Z",
+  "notes": "Claimed by executor-claude-code-launcher for CCL-0072 / issue #72, the v1.0.2-windows fixes. Heartbeat renewed with every push, at most 15 minutes apart, against the 30-minute lease. Released (status vacant) in the final push before merge.",
   "lease_ttl_minutes": 30,
-  "task": "CCL-0063",
-  "issue": "https://github.com/Pukujan/claude-code-launcher/issues/63",
-  "branch": "ccl-0063-windows-v101",
-  "phase": "released before merge"
+  "task": "CCL-0072",
+  "issue": "https://github.com/Pukujan/claude-code-launcher/issues/72",
+  "branch": "ccl-0072-windows-v102",
+  "phase": "red tests"
 }
