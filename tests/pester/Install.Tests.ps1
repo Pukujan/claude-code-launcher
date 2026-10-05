@@ -3,6 +3,8 @@
 # Runs on Linux and Windows pwsh. Never installs prerequisites, never registers a task,
 # never touches the real PATH or ~/.claude, never binds port 4000.
 
+BeforeDiscovery { $script:PosixHost = -not (($PSVersionTable.PSEdition -eq 'Desktop') -or $IsWindows) }
+
 BeforeAll {
     $script:Repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
     $script:Installer = Join-Path $Repo 'windows/install.ps1'
@@ -30,7 +32,11 @@ BeforeAll {
             NoTask = $true; NoPath = $true; NoStart = $true; NonInteractive = ($null -eq $KeyPrompt)
             StartPort = 47100
         }
+        # Old tests keep Claude's config in the sandbox "profile"; the self-contained tests pass
+        # ClaudeConfigDir = '' to get the default <InstallDir>\claude-config.
+        $p.ClaudeConfigDir = $Sandbox.ClaudeDir
         foreach ($k in $Extra.Keys) { $p[$k] = $Extra[$k] }
+        foreach ($k in @($p.Keys)) { if ($null -eq $p[$k]) { $p.Remove($k) } }
         if ($KeyPrompt) { $p.KeyPrompt = $KeyPrompt }
         # Interactive runs never reach the real masked TinyFish prompt: default to skipping it.
         if ($TinyFishPrompt) { $p.TinyFishPrompt = $TinyFishPrompt; $p.NonInteractive = $false }
@@ -98,6 +104,85 @@ BeforeAll {
         New-Item -ItemType Directory -Force -Path $s.Root, (Split-Path $s.ClaudeDir) | Out-Null
         return $s
     }
+    function Get-TreeSnapshot {
+        # Relative path -> length + SHA-256 for every file and folder under $Dir.
+        param([string]$Dir)
+        $out = [ordered]@{}
+        if (-not (Test-Path -LiteralPath $Dir)) { return $out }
+        foreach ($i in Get-ChildItem -LiteralPath $Dir -Recurse -Force | Sort-Object FullName) {
+            $rel = $i.FullName.Substring($Dir.Length)
+            $out[$rel] = $(if ($i.PSIsContainer) { 'dir' } else { (Get-FileHash -LiteralPath $i.FullName -Algorithm SHA256).Hash })
+        }
+        return $out
+    }
+
+    function New-FakeToolSpecs {
+        # Zips holding tiny stand-in tools (sh scripts, so POSIX hosts only) and a spec table
+        # pointing at them with their real SHA-256. The fake uv "installs" Python by linking
+        # the host python3 into UV_PYTHON_INSTALL_DIR.
+        param([string]$Dir, [switch]$BadHash)
+        New-Item -ItemType Directory -Force -Path $Dir | Out-Null
+        $py = (Get-Command python3 -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+        $uv = @'
+#!/bin/sh
+d="$UV_PYTHON_INSTALL_DIR/cpython-3.12-fake/bin"
+case "$1 $2" in
+  "python install") mkdir -p "$d" && ln -sf "@PY@" "$d/python.exe" ;;
+  "python find") echo "$d/python.exe" ;;
+  *) echo "uv 0.0.0-fake" ;;
+esac
+'@.Replace('@PY@', $py)
+        $files = [ordered]@{
+            uv = [ordered]@{ 'uv.exe' = $uv }
+            node = [ordered]@{ 'node-v0-fake/node.exe' = "#!/bin/sh`necho v24.21.0`n" }
+            pnpm = [ordered]@{ 'pnpm.exe' = "#!/bin/sh`necho 12.9.1`n" }
+            git = [ordered]@{ 'cmd/git.exe' = "#!/bin/sh`necho git version 2.56.0`n"; 'bin/bash.exe' = "#!/bin/sh`nexit 0`n" }
+        }
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $specs = @{}
+        foreach ($name in $files.Keys) {
+            $src = Join-Path $Dir "src-$name"
+            foreach ($rel in $files[$name].Keys) {
+                $f = Join-Path $src $rel
+                New-Item -ItemType Directory -Force -Path (Split-Path $f) | Out-Null
+                [IO.File]::WriteAllText($f, $files[$name][$rel])
+                & chmod +x $f
+            }
+            $zip = Join-Path $Dir "$name.zip"
+            if (Test-Path $zip) { Remove-Item $zip }
+            [IO.Compression.ZipFile]::CreateFromDirectory($src, $zip)
+            $specs[$name] = @{ version = '0-fake'; url = $zip; sha256 = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower(); kind = 'zip' }
+        }
+        $specs.uv.exe = 'uv.exe'
+        $specs.node.exe = 'node.exe'; $specs.node.strip = 'node-v0-fake'
+        $specs.pnpm.exe = 'pnpm.exe'
+        $specs.git.exe = 'cmd/git.exe'; $specs.git.bash = 'bin/bash.exe'
+        $claude = Join-Path $Dir 'claude.exe'
+        [IO.File]::WriteAllText($claude, "#!/bin/sh`necho '2.1.285 (Claude Code)'`n")
+        & chmod +x $claude
+        $specs.claude = @{ version = '2.1.285'; url = $claude; sha256 = (Get-FileHash $claude -Algorithm SHA256).Hash.ToLower(); kind = 'file'; exe = 'claude.exe' }
+        $specs.python = @{ version = '3.12'; kind = 'uv-python' }
+        if ($BadHash) { $specs.uv.sha256 = ('0' * 64) }
+        return $specs
+    }
+
+    function Get-NoDownloadSpecs {
+        # Every download points at a file that doesn't exist, so any use of it fails.
+        $s = @{}
+        foreach ($n in 'uv', 'node', 'pnpm', 'git', 'claude') {
+            $s[$n] = @{ version = 'x'; url = (Join-Path ([IO.Path]::GetTempPath()) ('ccl-missing-' + [guid]::NewGuid().ToString('N'))); sha256 = ('0' * 64); kind = 'zip'; exe = "$n.exe" }
+        }
+        $s.claude.kind = 'file'
+        $s.python = @{ version = '3.12'; kind = 'uv-python' }
+        return $s
+    }
+
+    function Get-HostPythonFound {
+        $py = (Get-Command python3 -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+        $v = (& $py -c 'import sys; print("%d.%d.%d" % sys.version_info[:3])').Trim()
+        return @{ path = $py; version = $v }
+    }
+
     $script:GoodKeys = @('ih-abc123', 'sk-' + ('x' * 60), 'key with spaces inside', 'k=v=w', "tab`tkey", 'ümlaut-ключ-鍵', ('a' * 4096))
     $script:BadKeys = @('', '   ', "line1`nline2", "cr`rkey", "nul`0key", 'quote"key', ('a' * 4097))
 }
@@ -159,8 +244,8 @@ Describe 'Install state, shim and task' -Tag 'Spec' {
         $d = Join-Path $TestDrive 'st'
         Write-CclInstallState -InstallDir $d -State @{ port = 4001; instance_id = ('a' * 32); claude_settings_created = $true }
         $j = Get-Content (Join-Path $d 'install.json') -Raw | ConvertFrom-Json
-        @($j.PSObject.Properties.Name | Sort-Object) | Should -Be @('claude_settings_created', 'instance_id', 'port', 'ref', 'schema', 'task_name', 'version')
-        $j.schema | Should -Be 'claude-code-launcher.install.v1'
+        @($j.PSObject.Properties.Name | Sort-Object) | Should -Be @('claude_config_dir', 'claude_settings_created', 'instance_id', 'port', 'ref', 'schema', 'task_name', 'tools', 'version')
+        $j.schema | Should -Be 'claude-code-launcher.install.v2'
         $j.task_name | Should -Be 'claude-code-launcher-proxy'
         (Read-CclInstallState -InstallDir $d).port | Should -Be 4001
     }
@@ -766,5 +851,306 @@ Describe 'settings.json edge cases through the installer (v1.0.1 #4, #5)' -Tag '
         (Get-Item -LiteralPath $p).IsReadOnly | Should -BeTrue
         $out | Should -Match 'read-only'
         Test-Path (Join-Path $sb.InstallDir 'install.json') | Should -BeTrue
+    }
+}
+
+# ---------------------------------------------------------------- v1.0.1 #7: one self-contained folder
+
+Describe 'Tool versions and plan (v1.0.1 #7)' -Tag 'Spec' {
+    It 'Python <V> is usable: <Ok>' -ForEach @(
+        @{ V = '3.9.18'; Ok = $false }, @{ V = '3.10.0'; Ok = $true }, @{ V = '3.12.10'; Ok = $true }, @{ V = '3.13.7'; Ok = $true },
+        @{ V = '3.14.0'; Ok = $false }, @{ V = '2.7.18'; Ok = $false }, @{ V = 'Python 3.12.1'; Ok = $true }, @{ V = 'garbage'; Ok = $false }, @{ V = ''; Ok = $false }
+    ) {
+        Test-CclPythonVersion -Version $V | Should -Be $Ok
+    }
+    It 'Node <V> is usable: <Ok>' -ForEach @(
+        @{ V = 'v16.20.2'; Ok = $false }, @{ V = 'v17.9.1'; Ok = $false }, @{ V = 'v18.0.0'; Ok = $true }, @{ V = '18.19.1'; Ok = $true },
+        @{ V = 'v24.21.0'; Ok = $true }, @{ V = 'x'; Ok = $false }, @{ V = ''; Ok = $false }
+    ) {
+        Test-CclNodeVersion -Version $V | Should -Be $Ok
+    }
+    It 'reuses good Python, Node, uv and pnpm, and bundles git and Claude Code by default' {
+        $found = @{ python = @{ path = 'p'; version = '3.12.1' }; node = @{ path = 'n'; version = 'v22.1.0' }; uv = @{ path = 'u'; version = '0.12' }
+            pnpm = @{ path = 'pn'; version = '10' }; git = @{ path = 'g'; version = '2.50' }; claude = @{ path = 'c'; version = '2.1' } }
+        $plan = Get-CclToolPlan -Found $found
+        $plan.python | Should -Be 'reuse'; $plan.node | Should -Be 'reuse'; $plan.uv | Should -Be 'reuse'; $plan.pnpm | Should -Be 'reuse'
+        $plan.git | Should -Be 'bundle'; $plan.claude | Should -Be 'bundle'
+        $all = Get-CclToolPlan -Found $found -UseSystemTools
+        foreach ($n in 'python', 'node', 'uv', 'pnpm', 'git', 'claude') { $all[$n] | Should -Be 'reuse' }
+        $none = Get-CclToolPlan -Found $found -PortableOnly -UseSystemTools
+        foreach ($n in 'python', 'node', 'uv', 'pnpm', 'git', 'claude') { $none[$n] | Should -Be 'bundle' }
+    }
+    It 'bundles a too-old Python or Node and anything missing' {
+        $plan = Get-CclToolPlan -Found @{ python = @{ path = 'p'; version = '3.9.1' }; node = @{ path = 'n'; version = 'v16.0.0' } }
+        foreach ($n in 'python', 'node', 'uv', 'pnpm', 'git', 'claude') { $plan[$n] | Should -Be 'bundle' }
+    }
+    It 'keeps every tool variable inside the folder for <_>' -ForEach @(0, 1, 2, 3, 4) {
+        $dir = $script:NonAsciiDirs[$_]
+        $e = Get-CclToolEnv -InstallDir $dir
+        $e.CLAUDE_CONFIG_DIR | Should -Be (Join-Path $dir 'claude-config')
+        $e.UV_CACHE_DIR | Should -Be (Join-Path $dir 'cache/uv')
+        $e.UV_PYTHON_INSTALL_DIR | Should -Be (Join-Path $dir 'tools/python')
+        $e.npm_config_store_dir | Should -Be (Join-Path $dir 'cache/pnpm-store')
+        $e.PNPM_HOME | Should -Be (Join-Path $dir 'tools/pnpm')
+        $e.DISABLE_AUTOUPDATER | Should -Be '1'
+    }
+    It 'accepts a missing, empty or earlier-install folder and refuses any other' {
+        $d = Join-Path $TestDrive ('t-' + [guid]::NewGuid().ToString('N'))
+        Test-CclInstallTarget -InstallDir $d | Should -BeTrue
+        New-Item -ItemType Directory -Force $d | Out-Null
+        Test-CclInstallTarget -InstallDir $d | Should -BeTrue
+        'x' | Set-Content (Join-Path $d 'notes.txt')
+        Test-CclInstallTarget -InstallDir $d | Should -BeFalse
+        '{}' | Set-Content (Join-Path $d 'install.json')
+        Test-CclInstallTarget -InstallDir $d | Should -BeTrue
+        $e = Join-Path $TestDrive ('e-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force (Join-Path $e 'app/windows') | Out-Null
+        'x' | Set-Content (Join-Path $e 'app/windows/install.ps1')
+        Test-CclInstallTarget -InstallDir $e | Should -BeTrue
+    }
+}
+
+Describe 'Tool plan invariants (v1.0.1 #7)' -Tag 'Property' {
+    It 'never reuses what is missing or unsuitable, and -PortableOnly bundles all (seed <_>)' -ForEach (1..40) {
+        $rng = [Random]::new(7100 + $_)
+        $found = @{}
+        foreach ($n in 'python', 'node', 'uv', 'pnpm', 'git', 'claude') {
+            if ($rng.Next(0, 3) -gt 0) {
+                $v = $(switch ($n) { 'python' { '3.' + $rng.Next(6, 16) + '.1' } 'node' { 'v' + $rng.Next(12, 26) + '.0.0' } default { '1.0' } })
+                $found[$n] = @{ path = "/x/$n"; version = $v }
+            }
+        }
+        $po = [bool]$rng.Next(0, 2); $us = [bool]$rng.Next(0, 2)
+        $plan = Get-CclToolPlan -Found $found -PortableOnly:$po -UseSystemTools:$us
+        foreach ($n in 'python', 'node', 'uv', 'pnpm', 'git', 'claude') {
+            $plan[$n] | Should -BeIn @('reuse', 'bundle')
+            if ($plan[$n] -eq 'reuse') {
+                $found.ContainsKey($n) | Should -BeTrue
+                $po | Should -BeFalse
+                if ($n -eq 'python') { Test-CclPythonVersion $found.python.version | Should -BeTrue }
+                if ($n -eq 'node') { Test-CclNodeVersion $found.node.version | Should -BeTrue }
+                if ($n -in 'git', 'claude') { $us | Should -BeTrue }
+            }
+            # -UseSystemTools never turns a reuse into a bundle.
+            if ((Get-CclToolPlan -Found $found -PortableOnly:$po)[$n] -eq 'reuse') { $plan[$n] | Should -Be 'reuse' }
+        }
+    }
+    It 'every folder variable starts with the install folder (seed <_>)' -ForEach (1..20) {
+        $rng = [Random]::new(7300 + $_)
+        $name = (-join $(for ($i = 0; $i -lt $rng.Next(1, 16); $i++) { [char]$rng.Next(0x20, 0x3000) })) -replace '[\\/:*?"<>|]', '_'
+        $dir = Join-Path ([IO.Path]::GetTempPath()) ('ccl ' + $name)
+        $e = Get-CclToolEnv -InstallDir $dir
+        foreach ($k in $e.Keys) {
+            if ($k -in 'DISABLE_AUTOUPDATER', 'PATH') { continue }
+            ([string]$e[$k]).StartsWith($dir) | Should -BeTrue -Because $k
+        }
+        foreach ($p in @($e.PATH)) { ([string]$p).StartsWith($dir) | Should -BeTrue }
+    }
+}
+
+Describe 'Choosing the install folder (v1.0.1 #7)' -Tag 'Spec' {
+    BeforeEach {
+        $script:sb = New-Sandbox
+        $script:saved = @{ USERPROFILE = $env:USERPROFILE; LOCALAPPDATA = $env:LOCALAPPDATA; CCL_INSTALL_DIR = $env:CCL_INSTALL_DIR }
+        $env:USERPROFILE = Join-Path $sb.Root 'home'
+        $env:LOCALAPPDATA = Join-Path $sb.Root 'home/AppData/Local'
+        Remove-Item Env:CCL_INSTALL_DIR -ErrorAction SilentlyContinue
+    }
+    AfterEach {
+        foreach ($k in $script:saved.Keys) { if ($null -eq $script:saved[$k]) { Remove-Item "Env:$k" -ErrorAction SilentlyContinue } else { Set-Item "Env:$k" $script:saved[$k] } }
+        Remove-Sandbox $script:sb
+    }
+
+    It 'asks for the folder, suggests %USERPROFILE%\claude-code-launcher and installs where the answer says' {
+        $target = Join-Path $sb.Root ('picked ' + $script:Jose)
+        $script:suggested = $null
+        $rc = Invoke-SandboxInstall $sb -Extra @{ InstallDir = $null; InferHubKey = 'ih-x'; SkipTinyFish = $true; NonInteractive = $false
+            LocationPrompt = { param($s) $script:suggested = $s; $target }.GetNewClosure() }
+        $rc | Should -Be 0
+        $script:suggested | Should -Be (Join-Path $env:USERPROFILE 'claude-code-launcher')
+        Test-Path -LiteralPath (Join-Path $target 'install.json') | Should -BeTrue
+    }
+    It 'takes the suggestion on an empty answer' {
+        $rc = Invoke-SandboxInstall $sb -Extra @{ InstallDir = $null; InferHubKey = 'ih-x'; SkipTinyFish = $true; NonInteractive = $false; LocationPrompt = { param($s) '' } }
+        $rc | Should -Be 0
+        Test-Path -LiteralPath (Join-Path $env:USERPROFILE 'claude-code-launcher/install.json') | Should -BeTrue
+    }
+    It 'uses the suggestion without asking when non-interactive' {
+        $rc = Invoke-SandboxInstall $sb -Extra @{ InstallDir = $null; InferHubKey = 'ih-x'; LocationPrompt = { throw 'asked' } }
+        $rc | Should -Be 0
+        Test-Path -LiteralPath (Join-Path $env:USERPROFILE 'claude-code-launcher/install.json') | Should -BeTrue
+    }
+    It 'suggests an existing v1.0.0 install folder' {
+        $old = Join-Path $env:LOCALAPPDATA 'claude-code-launcher'
+        New-Item -ItemType Directory -Force $old | Out-Null
+        '{"schema":"claude-code-launcher.install.v1","port":4000,"instance_id":"' + ('b' * 32) + '"}' | Set-Content (Join-Path $old 'install.json')
+        $script:suggested = $null
+        $rc = Invoke-SandboxInstall $sb -Extra @{ InstallDir = $null; InferHubKey = 'ih-x'; SkipTinyFish = $true; NonInteractive = $false; LocationPrompt = { param($s) $script:suggested = $s; '' } }
+        $rc | Should -Be 0
+        $script:suggested | Should -Be $old
+    }
+    It 'asks again for a folder that holds other files, and installs into the next answer' {
+        $bad = Join-Path $sb.Root 'Documents'
+        New-Item -ItemType Directory -Force $bad | Out-Null
+        'mine' | Set-Content (Join-Path $bad 'letter.txt')
+        $good = Join-Path $sb.Root 'good'
+        $script:answers = [Collections.Generic.Queue[string]]::new([string[]]@($bad, $good))
+        $rc = Invoke-SandboxInstall $sb -Extra @{ InstallDir = $null; InferHubKey = 'ih-x'; SkipTinyFish = $true; NonInteractive = $false; LocationPrompt = { param($s) $script:answers.Dequeue() } }
+        $rc | Should -Be 0
+        @(Get-ChildItem -LiteralPath $bad -Force).Count | Should -Be 1
+        Test-Path -LiteralPath (Join-Path $good 'install.json') | Should -BeTrue
+    }
+    It 'gives up with exit 2 after three such answers' {
+        $bad = Join-Path $sb.Root 'Documents'
+        New-Item -ItemType Directory -Force $bad | Out-Null
+        'mine' | Set-Content (Join-Path $bad 'letter.txt')
+        $before = Get-TreeSnapshot $bad
+        $rc = Invoke-SandboxInstall $sb -Extra @{ InstallDir = $null; InferHubKey = 'ih-x'; SkipTinyFish = $true; NonInteractive = $false; LocationPrompt = { param($s) $bad }.GetNewClosure() }
+        $rc | Should -Be 2
+        Compare-Snapshot $before (Get-TreeSnapshot $bad) | Should -Be ''
+    }
+    It 'refuses -InstallDir pointing at a folder with other files (exit 2, untouched)' {
+        $bad = Join-Path $sb.Root 'Documents'
+        New-Item -ItemType Directory -Force $bad | Out-Null
+        'mine' | Set-Content (Join-Path $bad 'letter.txt')
+        $before = Get-TreeSnapshot $bad
+        Invoke-SandboxInstall $sb -Extra @{ InstallDir = $bad; InferHubKey = 'ih-x' } | Should -Be 2
+        Compare-Snapshot $before (Get-TreeSnapshot $bad) | Should -Be ''
+    }
+}
+
+Describe 'Self-contained install with private tools (v1.0.1 #7)' -Tag 'Spec' -Skip:(-not $script:PosixHost) {
+    BeforeEach {
+        $script:sb = New-Sandbox
+        $script:home0 = Join-Path $sb.Root 'home'
+        $script:fake = New-FakeToolSpecs -Dir (Join-Path $sb.Root 'dl')
+        $script:envBefore = @{ PATH = $env:PATH; UV_CACHE_DIR = $env:UV_CACHE_DIR; PNPM_HOME = $env:PNPM_HOME }
+    }
+    AfterEach { Remove-Sandbox $script:sb }
+
+    It 'puts every tool, cache and Claude config in the folder and nothing in the profile' {
+        $before = Get-TreeSnapshot $home0
+        $rc = Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-x'; SkipPrereqs = $false; PortableOnly = $true; ClaudeConfigDir = $null
+            ToolSpecs = $fake; ToolProbe = { @{} } }
+        $rc | Should -Be 0
+        Compare-Snapshot $before (Get-TreeSnapshot $home0) | Should -Be ''
+        $st = Read-CclInstallState -InstallDir $sb.InstallDir
+        $st.schema | Should -Be 'claude-code-launcher.install.v2'
+        $st.claude_config_dir | Should -Be (Join-Path $sb.InstallDir 'claude-config')
+        foreach ($n in 'python', 'node', 'uv', 'pnpm', 'git', 'claude') {
+            $st.tools.$n.source | Should -Be 'bundled' -Because $n
+            ([string]$st.tools.$n.path).StartsWith($sb.InstallDir) | Should -BeTrue -Because $n
+            Test-Path -LiteralPath $st.tools.$n.path | Should -BeTrue -Because $n
+        }
+        (Get-Content (Join-Path $sb.InstallDir 'claude-config/settings.json') -Raw | ConvertFrom-Json).advisorModel | Should -Be 'fable'
+        Test-Path (Join-Path $sb.InstallDir 'claude-config/agents/planner.md') | Should -BeTrue
+    }
+    It 'leaves the caller''s environment as it was' {
+        Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-x'; SkipPrereqs = $false; PortableOnly = $true; ClaudeConfigDir = $null; ToolSpecs = $fake; ToolProbe = { @{} } } | Should -Be 0
+        $env:PATH | Should -Be $envBefore.PATH
+        $env:UV_CACHE_DIR | Should -Be $envBefore.UV_CACHE_DIR
+        $env:PNPM_HOME | Should -Be $envBefore.PNPM_HOME
+        $env:CLAUDE_CONFIG_DIR | Should -Be $sb.ClaudeDir
+    }
+    It 'stops with exit 3 on a checksum mismatch and leaves no half tool' {
+        $bad = New-FakeToolSpecs -Dir (Join-Path $sb.Root 'dl-bad') -BadHash
+        $rc = Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-x'; SkipPrereqs = $false; PortableOnly = $true; ClaudeConfigDir = $null; ToolSpecs = $bad; ToolProbe = { @{} } }
+        $rc | Should -Be 3
+        Test-Path -LiteralPath (Join-Path $sb.InstallDir 'tools/uv') | Should -BeFalse
+    }
+    It 'uninstall deletes the folder and leaves the profile alone' {
+        Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-x'; SkipPrereqs = $false; PortableOnly = $true; ClaudeConfigDir = $null; ToolSpecs = $fake; ToolProbe = { @{} } } | Should -Be 0
+        $before = Get-TreeSnapshot $home0
+        Invoke-SandboxInstall $sb -Extra @{ Uninstall = $true } | Should -Be 0
+        Test-Path -LiteralPath $sb.InstallDir | Should -BeFalse
+        Compare-Snapshot $before (Get-TreeSnapshot $home0) | Should -Be ''
+    }
+}
+
+Describe 'Self-contained install reusing the PC''s tools (v1.0.1 #7)' -Tag 'Spec' -Skip:(-not $script:PosixHost) {
+    BeforeEach {
+        $script:sb = New-Sandbox
+        $script:home0 = Join-Path $sb.Root 'home'
+        $script:fake = New-FakeToolSpecs -Dir (Join-Path $sb.Root 'dl')
+        $script:pyFound = Get-HostPythonFound
+    }
+    AfterEach { Remove-Sandbox $script:sb }
+
+    It 'reuses Python, Node, uv and pnpm, records them, downloads only git and Claude Code, and writes nothing outside' {
+        $specs = Get-NoDownloadSpecs
+        $specs.git = $fake.git; $specs.claude = $fake.claude
+        $found = @{ python = $pyFound; node = @{ path = '/opt/node/bin/node'; version = 'v20.11.1' }; uv = @{ path = '/opt/uv/uv'; version = '0.12.0' }; pnpm = @{ path = '/opt/pnpm/pnpm'; version = '10.0.0' } }
+        $before = Get-TreeSnapshot $home0
+        $rc = Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-x'; SkipPrereqs = $false; ClaudeConfigDir = $null; ToolSpecs = $specs; ToolProbe = { $found }.GetNewClosure() }
+        $rc | Should -Be 0
+        Compare-Snapshot $before (Get-TreeSnapshot $home0) | Should -Be ''
+        $st = Read-CclInstallState -InstallDir $sb.InstallDir
+        $st.tools.python.source | Should -Be 'reused'; $st.tools.python.path | Should -Be $pyFound.path
+        $st.tools.node.source | Should -Be 'reused'; $st.tools.node.version | Should -Be 'v20.11.1'
+        $st.tools.uv.source | Should -Be 'reused'; $st.tools.pnpm.source | Should -Be 'reused'
+        $st.tools.git.source | Should -Be 'bundled'; $st.tools.claude.source | Should -Be 'bundled'
+        foreach ($n in 'python', 'node', 'uv', 'pnpm') { Test-Path -LiteralPath (Join-Path $sb.InstallDir "tools/$n") | Should -BeFalse -Because $n }
+        Test-Path (Join-Path $sb.InstallDir 'claude-config/settings.json') | Should -BeTrue
+    }
+    It 'with -UseSystemTools and everything found, downloads nothing' {
+        $found = @{ python = $pyFound; node = @{ path = '/n'; version = 'v22.0.0' }; uv = @{ path = '/u'; version = '1' }; pnpm = @{ path = '/p'; version = '1' }
+            git = @{ path = '/g'; version = '2.56.0' }; claude = @{ path = '/c'; version = '2.1.0' } }
+        $rc = Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-x'; SkipPrereqs = $false; UseSystemTools = $true; ClaudeConfigDir = $null; ToolSpecs = (Get-NoDownloadSpecs); ToolProbe = { $found }.GetNewClosure() }
+        $rc | Should -Be 0
+        $st = Read-CclInstallState -InstallDir $sb.InstallDir
+        foreach ($n in 'python', 'node', 'uv', 'pnpm', 'git', 'claude') { $st.tools.$n.source | Should -Be 'reused' -Because $n }
+        @(Get-ChildItem -LiteralPath (Join-Path $sb.InstallDir 'tools') -Force -ErrorAction SilentlyContinue).Count | Should -Be 0
+    }
+}
+
+Describe 'Upgrading a v1.0.0 install (v1.0.1 #7)' -Tag 'Spec' {
+    BeforeEach { $script:sb = New-Sandbox }
+    AfterEach { Remove-Sandbox $script:sb }
+
+    It 'moves Claude config into the folder and cleans what v1.0.0 left in the profile' {
+        New-Item -ItemType Directory -Force $sb.ClaudeDir | Out-Null
+        '{"theme":"dark"}' | Set-Content (Join-Path $sb.ClaudeDir 'settings.json')
+        Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-x' } | Should -Be 0     # like v1.0.0: config in the profile
+        $p = Join-Path $sb.InstallDir 'install.json'
+        $j = Get-Content $p -Raw | ConvertFrom-Json
+        $v1 = [ordered]@{ schema = 'claude-code-launcher.install.v1'; version = '1.0.0-windows'; ref = 'v1.0.0-windows'; port = $j.port
+            instance_id = $j.instance_id; task_name = $j.task_name; claude_settings_created = $false }
+        ($v1 | ConvertTo-Json) | Set-Content $p
+        Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-x'; ClaudeConfigDir = $null } | Should -Be 0
+        $old = Get-Content (Join-Path $sb.ClaudeDir 'settings.json') -Raw | ConvertFrom-Json
+        @($old.PSObject.Properties.Name) | Should -Be @('theme')
+        Test-Path (Join-Path $sb.ClaudeDir 'agents/planner.md') | Should -BeFalse
+        (Get-Content (Join-Path $sb.InstallDir 'claude-config/settings.json') -Raw | ConvertFrom-Json).advisorModel | Should -Be 'fable'
+        (Read-CclInstallState -InstallDir $sb.InstallDir).claude_config_dir | Should -Be (Join-Path $sb.InstallDir 'claude-config')
+    }
+}
+
+Describe 'Self-contained relations (v1.0.1 #7)' -Tag 'Metamorphic' -Skip:(-not $script:PosixHost) {
+    It 'reusing or bundling the tools gives the same app, secrets and Claude config' {
+        $a = New-Sandbox; $b = New-Sandbox
+        try {
+            $fa = New-FakeToolSpecs -Dir (Join-Path $a.Root 'dl'); $fb = New-FakeToolSpecs -Dir (Join-Path $b.Root 'dl')
+            $py = Get-HostPythonFound
+            $found = @{ python = $py; node = @{ path = '/n'; version = 'v22.0.0' }; uv = @{ path = '/u'; version = '1' }; pnpm = @{ path = '/p'; version = '1' } }
+            Invoke-SandboxInstall $a -Extra @{ InferHubKey = 'ih-m'; SkipPrereqs = $false; PortableOnly = $true; ClaudeConfigDir = $null; ToolSpecs = $fa; ToolProbe = { @{} } } | Should -Be 0
+            Invoke-SandboxInstall $b -Extra @{ InferHubKey = 'ih-m'; SkipPrereqs = $false; ClaudeConfigDir = $null; ToolSpecs = $fb; ToolProbe = { $found }.GetNewClosure() } | Should -Be 0
+            foreach ($sub in 'app', 'secrets', 'claude-config', 'bin') {
+                Compare-Snapshot (Get-TreeSnapshot (Join-Path $a.InstallDir $sub)) (Get-TreeSnapshot (Join-Path $b.InstallDir $sub)) | Should -Be '' -Because $sub
+            }
+        } finally { Remove-Sandbox $a; Remove-Sandbox $b }
+    }
+    It 'a second install reuses the private tools it already has (no downloads) and changes no state' {
+        $sb = New-Sandbox
+        try {
+            $f = New-FakeToolSpecs -Dir (Join-Path $sb.Root 'dl')
+            Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-m'; SkipPrereqs = $false; PortableOnly = $true; ClaudeConfigDir = $null; ToolSpecs = $f; ToolProbe = { @{} } } | Should -Be 0
+            $one = Get-InstallSnapshot $sb -KeepInstance
+            $tools1 = Get-TreeSnapshot (Join-Path $sb.InstallDir 'tools')
+            $nd = Get-NoDownloadSpecs
+            foreach ($n in 'uv', 'node', 'pnpm', 'git', 'claude') { $nd[$n].version = $f[$n].version }
+            Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-m'; SkipPrereqs = $false; PortableOnly = $true; ClaudeConfigDir = $null; ToolSpecs = $nd; ToolProbe = { @{} } } | Should -Be 0
+            Compare-Snapshot $one (Get-InstallSnapshot $sb -KeepInstance) | Should -Be ''
+            Compare-Snapshot $tools1 (Get-TreeSnapshot (Join-Path $sb.InstallDir 'tools')) | Should -Be ''
+        } finally { Remove-Sandbox $sb }
     }
 }

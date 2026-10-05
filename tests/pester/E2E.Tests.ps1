@@ -1,19 +1,54 @@
 # End-to-end test of windows/install.ps1 on a real Windows machine (the CI windows-installer job).
-# Tag: E2E. Skipped elsewhere. Builds the real LiteLLM venv with uv, registers the logon task,
-# starts the proxy next to a fake "other LiteLLM" that holds the start port, then uninstalls.
-# Never uses port 4000: the start port is 47400.
+# Tag: E2E. Skipped elsewhere. Real installs without -SkipPrereqs: one reuses the runner's tools
+# (and builds the real venv, registers the logon task and starts the proxy next to a fake "other
+# LiteLLM" that holds the start port), one fetches private copies of every tool (-PortableOnly).
+# Both install outside the user profile, and the whole profile (except %TEMP%) is snapshotted
+# before and after to prove nothing lands there. Never uses port 4000.
 
 BeforeDiscovery { $script:OnWindows = ($PSVersionTable.PSEdition -eq 'Desktop') -or $IsWindows }
 
-Describe 'Windows install end to end' -Tag 'E2E' -Skip:(-not $script:OnWindows) {
+BeforeAll {
+    $script:Repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+    $script:Installer = Join-Path $Repo 'windows\install.ps1'
+    # Outside the profile, so any write into the profile shows up in the snapshot.
+    $script:E2EBase = $(if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { Join-Path $env:SystemDrive 'ccl-e2e' })
+
+    function Invoke-RealInstall {
+        # A real install in a child Windows PowerShell, prerequisites included.
+        param([string]$InstallDir, [string[]]$More = @())
+        $argv = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $script:Installer, '-Source', $script:Repo,
+            '-InstallDir', $InstallDir, '-NonInteractive') + $More
+        $log = & powershell.exe @argv *>&1 | Out-String
+        return @{ Code = $LASTEXITCODE; Log = $log }
+    }
+
+    function Get-ProfileSnapshot {
+        # Every file and folder under %USERPROFILE% with size and time, skipping %TEMP% and the
+        # folders Windows and PowerShell themselves keep writing to.
+        $prof = $env:USERPROFILE
+        $xd = @($env:TEMP, [IO.Path]::GetTempPath().TrimEnd('\')) | Select-Object -Unique
+        $lines = & robocopy.exe $prof (Join-Path $env:SystemDrive 'ccl-null-target') /L /S /E /NJH /NJS /NP /FP /TS /BYTES /XJ /R:0 /W:0 /NC /XD @xd 2>&1
+        $global:LASTEXITCODE = 0
+        $noise = '\\AppData\\(Local|Roaming|LocalLow)\\(Microsoft|Packages|PowerShell|NuGet|D3DSCache|CrashDumps)(\\|$)|\\ntuser|\\AppData\\Local\\Temp(\\|$)'
+        $set = @{}
+        foreach ($l in $lines) { $s = ("$l" -replace '\s+', ' ').Trim(); if ($s -and $s -notmatch $noise) { $set[$s] = $true } }
+        return $set
+    }
+
+    function Compare-ProfileSnapshot($Before, $After) {
+        $d = @()
+        foreach ($k in $After.Keys) { if (-not $Before.ContainsKey($k)) { $d += "+ $k" } }
+        foreach ($k in $Before.Keys) { if (-not $After.ContainsKey($k)) { $d += "- $k" } }
+        return ($d | Sort-Object) -join "`n"
+    }
+}
+
+Describe 'Windows install end to end, reusing the runner''s tools' -Tag 'E2E' -Skip:(-not $script:OnWindows) {
     BeforeAll {
-        $script:Repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-        $script:Installer = Join-Path $Repo 'windows\install.ps1'
-        $script:Root = Join-Path ([IO.Path]::GetTempPath()) ('ccl-e2e-' + [guid]::NewGuid().ToString('N'))
+        $script:Root = Join-Path $E2EBase ('ccl e2e reuse ' + [guid]::NewGuid().ToString('N').Substring(0, 8))
         $script:InstallDir = Join-Path $Root 'install'
-        $script:ClaudeDir = Join-Path $Root 'claude'
-        New-Item -ItemType Directory -Force -Path $ClaudeDir | Out-Null
-        $env:CLAUDE_CONFIG_DIR = $ClaudeDir
+        $script:ProfileBefore = Get-ProfileSnapshot
+        $script:UserPathBefore = [Environment]::GetEnvironmentVariable('Path', 'User')
         $script:Key = 'ih-e2e-' + [guid]::NewGuid().ToString('N')
         $script:TfKey = 'tf-e2e-' + [guid]::NewGuid().ToString('N')
         $script:StartPort = 47400
@@ -32,20 +67,37 @@ Describe 'Windows install end to end' -Tag 'E2E' -Skip:(-not $script:OnWindows) 
             }
         }).AddArgument($Other)
         $script:OtherHandle = $OtherPs.BeginInvoke()
-        $script:Log = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Installer -Source $Repo -InstallDir $InstallDir `
-            -InferHubKey $Key -TinyFishKey $TfKey -StartPort $StartPort -SkipPrereqs -NoPath -NonInteractive *>&1 | Out-String
-        $script:InstallExit = $LASTEXITCODE
+        $r = Invoke-RealInstall -InstallDir $InstallDir -More @('-InferHubKey', $Key, '-TinyFishKey', $TfKey, '-StartPort', "$StartPort", '-NoPath')
+        $script:Log = $r.Log
+        $script:InstallExit = $r.Code
         Write-Host $Log
+        $script:ProfileAfterInstall = Get-ProfileSnapshot
     }
     AfterAll {
         try { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $InstallDir 'app\windows\install.ps1') -InstallDir $InstallDir -Uninstall -NonInteractive *>&1 | Out-Null } catch {}
         try { $Other.Stop() } catch {}
         try { $OtherPs.Dispose() } catch {}
-        Remove-Item Env:CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue
-        if (Test-Path $Root) { Remove-Item $Root -Recurse -Force -ErrorAction SilentlyContinue }
+        if (Test-Path -LiteralPath $Root) { Remove-Item -LiteralPath $Root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 
     It 'installs with exit 0' { $InstallExit | Should -Be 0 }
+    It 'writes nothing into the user profile (outside %TEMP%) and leaves the user PATH alone' {
+        Compare-ProfileSnapshot $ProfileBefore $ProfileAfterInstall | Should -Be ''
+        [Environment]::GetEnvironmentVariable('Path', 'User') | Should -Be $UserPathBefore
+    }
+    It 'records which tools it reused and which it bundled' {
+        $st = Get-Content -LiteralPath (Join-Path $InstallDir 'install.json') -Raw | ConvertFrom-Json
+        Write-Host ($st.tools | ConvertTo-Json -Depth 4)
+        foreach ($n in 'python', 'node', 'uv', 'pnpm', 'git', 'claude') {
+            $st.tools.$n.source | Should -BeIn @('reused', 'bundled') -Because $n
+            Test-Path -LiteralPath $st.tools.$n.path | Should -BeTrue -Because $n
+        }
+        $st.tools.uv.source | Should -Be 'reused'        # setup-uv put uv on PATH
+        $st.tools.git.source | Should -Be 'bundled'
+        $st.tools.claude.source | Should -Be 'bundled'
+        $st.tools.claude.path | Should -Be (Join-Path $InstallDir 'tools\claude\claude.exe')
+        (& $st.tools.claude.path --version) | Should -Match '\d+\.\d+\.\d+'
+    }
     It 'never prints the key' { $Log | Should -Not -BeLike "*$Key*" }
     It 'stores the TinyFish key without printing it' {
         $Log | Should -Not -BeLike "*$TfKey*"
@@ -78,7 +130,9 @@ Describe 'Windows install end to end' -Tag 'E2E' -Skip:(-not $script:OnWindows) 
         } finally { Remove-Item Env:CCL_HOME }
         $doc = ($out | Select-Object -Last 1) | ConvertFrom-Json
         $doc.set.ANTHROPIC_BASE_URL | Should -Be "http://127.0.0.1:$($st.port)"
-        (Get-Content (Join-Path $ClaudeDir 'settings.json') -Raw | ConvertFrom-Json).advisorModel | Should -Be 'fable'
+        $doc.set.CLAUDE_CONFIG_DIR | Should -Be (Join-Path $InstallDir 'claude-config')
+        $doc.set.CCL_CLAUDE_BIN | Should -Be (Join-Path $InstallDir 'tools\claude\claude.exe')
+        (Get-Content (Join-Path $InstallDir 'claude-config\settings.json') -Raw | ConvertFrom-Json).advisorModel | Should -Be 'fable'
     }
     It 'the claude-inferhub shim exists' {
         Test-Path (Join-Path $InstallDir 'bin\claude-inferhub.cmd') | Should -BeTrue
@@ -90,6 +144,76 @@ Describe 'Windows install end to end' -Tag 'E2E' -Skip:(-not $script:OnWindows) 
         Get-ScheduledTask -TaskName 'claude-code-launcher-proxy' -ErrorAction SilentlyContinue | Should -BeNullOrEmpty
         Test-Path $InstallDir | Should -BeFalse
         { Invoke-RestMethod "http://127.0.0.1:$($st.port)/ccl/identity" -TimeoutSec 3 } | Should -Throw
+        Compare-ProfileSnapshot $ProfileBefore (Get-ProfileSnapshot) | Should -Be ''
+    }
+}
+
+# v1.0.1 #7: every tool as a private copy in the folder (-PortableOnly), in a folder whose name
+# isn't ASCII. Builds the real venv on the uv-managed Python in tools\python.
+Describe 'Windows install end to end with private copies of every tool' -Tag 'E2E' -Skip:(-not $script:OnWindows) {
+    BeforeAll {
+        $script:Root = Join-Path $E2EBase ('ccl e2e portable Jos' + [char]0x00E9 + ' ' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        $script:InstallDir = Join-Path $Root 'install'
+        $script:ProfileBefore = Get-ProfileSnapshot
+        $script:UserPathBefore = [Environment]::GetEnvironmentVariable('Path', 'User')
+        $r = Invoke-RealInstall -InstallDir $InstallDir -More @('-PortableOnly', '-InferHubKey', 'ih-e2e-portable', '-SkipTinyFish', '-StartPort', '47700', '-NoTask', '-NoStart', '-NoPath')
+        $script:InstallExit = $r.Code
+        Write-Host $r.Log
+        $script:ProfileAfterInstall = Get-ProfileSnapshot
+        $script:St = $(if (Test-Path -LiteralPath (Join-Path $InstallDir 'install.json')) { Get-Content -LiteralPath (Join-Path $InstallDir 'install.json') -Raw | ConvertFrom-Json })
+    }
+    AfterAll {
+        if (Test-Path -LiteralPath $InstallDir) {
+            try { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Installer -InstallDir $InstallDir -Uninstall -NonInteractive *>&1 | Out-Null } catch {}
+        }
+        if (Test-Path -LiteralPath $Root) { Remove-Item -LiteralPath $Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'installs with exit 0' { $InstallExit | Should -Be 0 }
+    It 'writes nothing into the user profile (outside %TEMP%) and leaves the user PATH alone' {
+        Compare-ProfileSnapshot $ProfileBefore $ProfileAfterInstall | Should -Be ''
+        [Environment]::GetEnvironmentVariable('Path', 'User') | Should -Be $UserPathBefore
+    }
+    It 'bundles every tool inside the folder' {
+        Write-Host ($St.tools | ConvertTo-Json -Depth 4)
+        foreach ($n in 'python', 'node', 'uv', 'pnpm', 'git', 'claude') {
+            $St.tools.$n.source | Should -Be 'bundled' -Because $n
+            ([string]$St.tools.$n.path).StartsWith($InstallDir) | Should -BeTrue -Because $n
+            Test-Path -LiteralPath $St.tools.$n.path | Should -BeTrue -Because $n
+        }
+    }
+    It 'the private tools run' {
+        (& $St.tools.node.path --version) | Should -Match '^v24\.'
+        (& $St.tools.pnpm.path --version) | Should -Match '^\d+\.'
+        (& $St.tools.uv.path --version) | Should -Match '^uv '
+        (& $St.tools.git.path --version) | Should -Match '^git version'
+        Test-Path -LiteralPath (Join-Path $InstallDir 'tools\git\bin\bash.exe') | Should -BeTrue
+        (& $St.tools.claude.path --version) | Should -Match '\d+\.\d+\.\d+'
+        (& $St.tools.python.path -c 'import sys; print(sys.version_info[:2])') | Should -Be '(3, 12)'
+    }
+    It 'builds the venv on the private Python' {
+        $cfg = Get-Content -LiteralPath (Join-Path $InstallDir 'venv\pyvenv.cfg') -Raw
+        $cfg | Should -Match ([regex]::Escape((Join-Path $InstallDir 'tools\python')))
+        Test-Path -LiteralPath (Join-Path $InstallDir 'cache\uv') | Should -BeTrue
+        & (Join-Path $InstallDir 'venv\Scripts\python.exe') -c 'import litellm' | Out-Null
+        $LASTEXITCODE | Should -Be 0
+    }
+    It 'hands the folder''s config and Claude Code to integrations' {
+        $env:CCL_HOME = $InstallDir; $env:CCL_ALLOW_PROXY_DOWN = '1'
+        try {
+            $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $InstallDir 'app\windows\launch-claude-inferhub.ps1') --non-interactive --print-env json
+        } finally { Remove-Item Env:CCL_HOME, Env:CCL_ALLOW_PROXY_DOWN }
+        $doc = ($out | Select-Object -Last 1) | ConvertFrom-Json
+        $doc.set.CLAUDE_CONFIG_DIR | Should -Be (Join-Path $InstallDir 'claude-config')
+        $doc.set.CCL_CLAUDE_BIN | Should -Be $St.tools.claude.path
+        $doc.set.DISABLE_AUTOUPDATER | Should -Be '1'
+        Test-Path -LiteralPath (Join-Path $InstallDir 'claude-config\settings.json') | Should -BeTrue
+    }
+    It 'uninstall deletes the folder and the profile is still untouched' {
+        $r = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $InstallDir 'app\windows\install.ps1') -InstallDir $InstallDir -Uninstall -NonInteractive *>&1 | Out-String
+        $LASTEXITCODE | Should -Be 0 -Because $r
+        Test-Path -LiteralPath $InstallDir | Should -BeFalse
+        Compare-ProfileSnapshot $ProfileBefore (Get-ProfileSnapshot) | Should -Be ''
     }
 }
 

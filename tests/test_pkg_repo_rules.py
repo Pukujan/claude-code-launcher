@@ -44,7 +44,8 @@ def test_installer_declares_the_spec_parameters():
         assert re.search(r"\$" + p + r"\b", text), p
     assert "v1.0.1-windows" in text and "v1.0.0-windows" not in text
     assert "--python" in text and "3.12" in text
-    assert "https://claude.ai/install.ps1" in text
+    for p in ("PortableOnly", "UseSystemTools", "ClaudeConfigDir"):
+        assert re.search(r"\$" + p + r"\b", text), p
 
 
 @pytest.mark.spec
@@ -113,3 +114,44 @@ def test_docs_show_the_latest_one_liner_and_the_pinned_url():
 def test_ci_runs_the_shim_through_a_real_cmd_exe():
     e2e = (REPO / "tests" / "pester" / "E2E.Tests.ps1").read_text(encoding="utf-8")
     assert "cmd.exe" in e2e and "claude-inferhub.cmd" in e2e
+
+
+@pytest.mark.spec
+def test_installer_uses_no_global_installers():
+    # Self-contained install (v1.0.1 #7): no winget, no global uv/pnpm/Claude installers.
+    code = "\n".join(code_lines(INSTALL.read_text(encoding="utf-8-sig")))
+    for bit in ("winget", "claude.ai/install.ps1", "astral.sh/uv/install.ps1", "get.pnpm.io", "corepack enable",
+                "npm install -g", "npm i -g"):
+        assert bit not in code, bit
+
+
+@pytest.mark.spec
+def test_installer_pins_every_download_by_sha256():
+    text = INSTALL.read_text(encoding="utf-8-sig")
+    block = re.search(r"\$script:CclToolSpecs\s*=\s*@\{.*?\n\}", text, re.S)
+    assert block, "CclToolSpecs table"
+    for name in ("uv", "node", "pnpm", "git", "claude", "python"):
+        assert re.search(r"\b" + name + r"\s*=\s*@\{", block.group(0)), name
+    assert len(re.findall(r"sha256\s*=\s*'[0-9a-f]{64}'", block.group(0))) >= 4
+
+
+@pytest.mark.spec
+def test_docs_describe_the_one_folder_install():
+    for doc in (README, REPO / "README.md", SPEC):
+        text = doc.read_text(encoding="utf-8")
+        assert "CLAUDE_CONFIG_DIR" in text, doc
+        assert "-PortableOnly" in text, doc
+    friend = README.read_text(encoding="utf-8")
+    assert "Install folder" in friend
+    assert "claude-env-exec.mjs" in (REPO / "README.md").read_text(encoding="utf-8")
+
+
+@pytest.mark.spec
+def test_ci_e2e_runs_real_installs_and_snapshots_the_profile():
+    e2e = (REPO / "tests" / "pester" / "E2E.Tests.ps1").read_text(encoding="utf-8")
+    assert "-PortableOnly" in e2e
+    assert "Get-ProfileSnapshot" in e2e
+    # The real installs go through one helper that never passes -SkipPrereqs.
+    helper = re.search(r"function Invoke-RealInstall \{.*?\n    \}", e2e, re.S)
+    assert helper and "SkipPrereqs" not in helper.group(0)
+    assert e2e.count("Invoke-RealInstall") >= 3
