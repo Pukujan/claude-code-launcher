@@ -1,15 +1,15 @@
 {
   "schema_version": "claude-code-launcher.boss-claim.v1",
-  "status": "vacant",
-  "who_is_boss_now": null,
-  "last_heartbeat": "2026-10-04T23:40:33Z",
-  "last_github_activity": "2026-10-04T23:40:33Z",
+  "status": "claimed",
+  "who_is_boss_now": "executor-claude-code-launcher",
+  "last_heartbeat": "2026-10-05T00:57:01Z",
+  "last_github_activity": "2026-10-05T00:57:01Z",
   "claim_queue": [],
-  "recorded_at": "2026-10-04T23:40:33Z",
-  "notes": "Released by executor-claude-code-launcher at the end of CCL-0061 (issue #61, PR #62), in the last push before merge. The seat is vacant; the next live continuer fills it under join/continue order and renews the check-in every <=15 minutes against the 30-minute lease TTL. A returning old boss joins the end of claim_queue.",
+  "recorded_at": "2026-10-05T00:57:01Z",
+  "notes": "Claimed by executor-claude-code-launcher for CCL-0069 (issue #69); the seat was vacant. The v1.0.1 installer work (issue #63, PR #66) stays on its own branch; whichever lands second rebases onto main. Released in the last push before merge.",
   "lease_ttl_minutes": 30,
-  "task": "CCL-0061",
-  "issue": "https://github.com/Pukujan/claude-code-launcher/issues/61",
-  "branch": "ccl-0061-windows-installer",
-  "phase": "released before merge"
+  "task": "CCL-0069",
+  "issue": "https://github.com/Pukujan/claude-code-launcher/issues/69",
+  "branch": "ccl-0069-glob-timeout",
+  "phase": "red tests"
 }
