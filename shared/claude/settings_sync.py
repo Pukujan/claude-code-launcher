@@ -6,8 +6,14 @@
           has a value for it (issue #69), keeping every other key as it is.
           Creates the file (and its folder) when it is missing.
   unsync  removes those keys again, but only when they still hold the launcher's
-          values, so a user's own choices survive an uninstall. An env left
-          empty by that is removed too.
+          values, so a user's own choices survive an uninstall. The search
+          timeout goes only when the launcher's sync added it (issue #72): sync
+          records that in .ccl-settings-sync.json next to settings.json, and
+          "120" and 120 count the same. An env is removed only when it is empty
+          and the launcher's sync created it. unsync deletes the record.
+          --only-if-ours: change nothing unless there is proof the launcher
+          wrote this file (its model picker, or the record); for a config the
+          uninstaller can't tie to an install.
 
 The settings file is --settings, else $CLAUDE_CONFIG_DIR/settings.json, else
 ~/.claude/settings.json. The picker options come from --options-file (a JSON
@@ -49,8 +55,16 @@ SLOT_OPTIONS = [
 ]
 
 
+RECORD_NAME = ".ccl-settings-sync.json"
+RECORD_SCHEMA = "claude-code-launcher.settings-sync.v1"
+
+
 def sync(settings: dict, options: list) -> dict:
-    """A copy of settings with the launcher's three keys set; nothing else changes."""
+    """A copy of settings with the launcher's keys set: model, advisorModel and
+    modelPicker.options, plus env.CLAUDE_CODE_GLOB_TIMEOUT_SECONDS = "120" when env
+    has no value for it (issue #69). A dict env keeps its other keys; an env that is
+    not a dict is left as it is. Nothing else changes. sync_record() tells what this
+    added, so unsync() can take back only that."""
     out = dict(settings)
     out["model"] = MODEL
     out["advisorModel"] = ADVISOR
@@ -61,6 +75,34 @@ def sync(settings: dict, options: list) -> dict:
     elif isinstance(env, dict) and env.get(GLOB_TIMEOUT_KEY) in (None, ""):
         out["env"] = {**env, GLOB_TIMEOUT_KEY: GLOB_TIMEOUT}
     return out
+
+
+def sync_record(before: dict, after: dict, record: dict | None = None) -> dict:
+    """What sync added going from before to after, merged into an earlier record."""
+    rec = {"glob_timeout_added": False, "env_created": False}
+    if isinstance(record, dict):
+        rec["glob_timeout_added"] = bool(record.get("glob_timeout_added"))
+        rec["env_created"] = bool(record.get("env_created"))
+    env_b = before.get("env")
+    env_a = after.get("env")
+    had = isinstance(env_b, dict) and env_b.get(GLOB_TIMEOUT_KEY) not in (None, "")
+    if not had and isinstance(env_a, dict) and _is_our_timeout(env_a.get(GLOB_TIMEOUT_KEY)):
+        rec["glob_timeout_added"] = True
+        if "env" not in before:
+            rec["env_created"] = True
+    return rec
+
+
+def _is_our_timeout(value) -> bool:
+    # "120" and 120 are the same setting to Claude Code; a bool is not a number here.
+    if isinstance(value, bool):
+        return False
+    return value == GLOB_TIMEOUT or value == int(GLOB_TIMEOUT)
+
+
+def has_proof(settings: dict, record: dict | None) -> bool:
+    """True when this file shows the launcher wrote it: its picker or a sync record."""
+    return isinstance(record, dict) or _picker_is_ours(settings.get("modelPicker"))
 
 
 def _picker_is_ours(picker) -> bool:
@@ -78,8 +120,9 @@ def _picker_is_ours(picker) -> bool:
     return True
 
 
-def unsync(settings: dict) -> dict:
-    """A copy without the launcher's keys, where they still hold the launcher's values."""
+def unsync(settings: dict, record: dict | None = None) -> dict:
+    """A copy without the launcher's keys, where they still hold the launcher's values.
+    The search timeout and an emptied env go only as far as record says sync added them."""
     out = dict(settings)
     if "modelPicker" in out and _picker_is_ours(out["modelPicker"]):
         del out["modelPicker"]
@@ -87,14 +130,38 @@ def unsync(settings: dict) -> dict:
         del out["advisorModel"]
     if out.get("model") == MODEL:
         del out["model"]
+    rec = record if isinstance(record, dict) else {}
     env = out.get("env")
-    if isinstance(env, dict) and env.get(GLOB_TIMEOUT_KEY) == GLOB_TIMEOUT:
+    if rec.get("glob_timeout_added") and isinstance(env, dict) and _is_our_timeout(env.get(GLOB_TIMEOUT_KEY)):
         env = {k: v for k, v in env.items() if k != GLOB_TIMEOUT_KEY}
-        if env:
+        if env or not rec.get("env_created"):
             out["env"] = env
         else:
             del out["env"]
     return out
+
+
+def record_path(path: Path) -> Path:
+    return path.parent / RECORD_NAME
+
+
+def read_record(path: Path) -> dict | None:
+    try:
+        doc = json.loads(record_path(path).read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return None
+    return doc if isinstance(doc, dict) else None
+
+
+def _write_record(path: Path, rec: dict) -> None:
+    p = record_path(path)
+    if not (rec.get("glob_timeout_added") or rec.get("env_created")):
+        if p.exists():
+            p.unlink()
+        return
+    doc = {"schema": RECORD_SCHEMA, "glob_timeout_added": bool(rec.get("glob_timeout_added")),
+           "env_created": bool(rec.get("env_created"))}
+    p.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8", newline="\n")
 
 
 def settings_path(arg: str | None, env=None) -> Path:
@@ -142,6 +209,7 @@ def main(argv=None) -> int:
     ap.add_argument("action", choices=("sync", "unsync"))
     ap.add_argument("--settings", default=None)
     ap.add_argument("--options-file", default=None)
+    ap.add_argument("--only-if-ours", action="store_true", help="unsync: change nothing without proof the launcher wrote the file")
     a = ap.parse_args(argv)
     path = settings_path(a.settings)
     existed = path.exists()
@@ -168,12 +236,19 @@ def main(argv=None) -> int:
                 print("settings_sync: the options file must hold a JSON list", file=sys.stderr)
                 return 2
         new = sync(current, options)
+        record = sync_record(current, new, read_record(path))
     else:
         if not existed:
             print("settings_sync: unchanged (no settings file)", file=sys.stderr)
             return 0
-        new = unsync(current)
+        rec = read_record(path)
+        if a.only_if_ours and not has_proof(current, rec):
+            print(f"settings_sync: no sign the launcher wrote {path}; left untouched", file=sys.stderr)
+            return 0
+        new = unsync(current, rec)
+        record = None
     if existed and new == current:
+        _save_record(path, record)
         print(f"settings_sync: unchanged {path}", file=sys.stderr)
         return 0
     if existed and is_read_only(path):
@@ -185,8 +260,22 @@ def main(argv=None) -> int:
     except OSError as e:
         print(f"settings_sync: could not write {path} ({type(e).__name__})", file=sys.stderr)
         return 1
+    _save_record(path, record)
     print(f"settings_sync: {'updated' if existed else 'created'} {path}", file=sys.stderr)
     return 0
+
+
+def _save_record(path: Path, record: dict | None) -> None:
+    # After sync: the record of what it added. After unsync (record None): gone.
+    try:
+        if record is None:
+            p = record_path(path)
+            if p.exists():
+                p.unlink()
+        else:
+            _write_record(path, record)
+    except OSError as e:
+        print(f"settings_sync: could not update {record_path(path)} ({type(e).__name__})", file=sys.stderr)
 
 
 if __name__ == "__main__":

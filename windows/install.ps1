@@ -26,7 +26,7 @@
 param(
     [string]$InferHubKey = '',
     [string]$InstallDir = '',
-    [string]$Ref = 'v1.0.1-windows',
+    [string]$Ref = 'v1.0.2-windows',
     [string]$Source = '',
     [int]$StartPort = 4000,
     [switch]$Uninstall,
@@ -48,7 +48,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
-$script:CclVersion = '1.0.1-windows'
+$script:CclVersion = '1.0.2-windows'
 $script:CclDefaultRef = $Ref
 $script:CclRepo = 'Pukujan/claude-code-launcher'
 $script:CclTaskName = 'claude-code-launcher-proxy'
@@ -1003,6 +1003,112 @@ function Get-CclKeyErrorCode {
     return 2
 }
 
+# ---------------------------------------------------------------- settings cleanup without Python (v1.0.2)
+# The same rules as settings_sync.py unsync, for when <folder>\app (or Python) is gone.
+
+$script:CclSyncRecordName = '.ccl-settings-sync.json'
+
+function Test-CclPickerIsOurs {
+    param($Picker)
+    if ($null -eq $Picker -or $Picker -isnot [pscustomobject]) { return $false }
+    $names = @($Picker.PSObject.Properties.Name)
+    if ($names.Count -ne 1 -or $names[0] -ne 'options') { return $false }
+    $opts = $Picker.options
+    if ($null -eq $opts -or $opts -is [string] -or -not ($opts -is [System.Collections.IEnumerable])) { return $false }
+    foreach ($o in @($opts)) {
+        if ($o -isnot [pscustomobject]) { return $false }
+        $text = ([string]$o.description) + ' ' + ([string]$o.label)
+        if ($text -notmatch 'via local LiteLLM|InferHub') { return $false }
+    }
+    return $true
+}
+
+function Test-CclOurTimeout {
+    param($Value)
+    if ($null -eq $Value -or $Value -is [bool]) { return $false }
+    if ($Value -is [string]) { return $Value -eq '120' }
+    if ($Value -is [int] -or $Value -is [long] -or $Value -is [double] -or $Value -is [decimal]) { return [double]$Value -eq 120 }
+    return $false
+}
+
+function Invoke-CclSettingsUnsyncBuiltin {
+    # Returns 0 (done or nothing to do), 1 (not JSON or not written), 3 (read-only).
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Internal helper of a non-interactive installer; -WhatIf is not offered.')]
+    param([string]$Settings, [switch]$OnlyIfOurs)
+    if (-not (Test-Path -LiteralPath $Settings)) { return 0 }
+    $recPath = Join-Path (Split-Path -Parent $Settings) $script:CclSyncRecordName
+    $rec = $null
+    if (Test-Path -LiteralPath $recPath) {
+        try { $rec = Get-Content -LiteralPath $recPath -Raw -Encoding UTF8 | ConvertFrom-Json } catch { $rec = $null }
+    }
+    try { $text = [IO.File]::ReadAllText($Settings) } catch { return 1 }
+    if (-not $text.Trim()) { return 0 }
+    try { $doc = $text | ConvertFrom-Json } catch { Write-CclLog "$Settings is not valid JSON; left untouched." 'warn'; return 1 }
+    if ($doc -isnot [pscustomobject]) { return 1 }
+    if ($OnlyIfOurs -and -not $rec -and -not (Test-CclPickerIsOurs $doc.modelPicker)) {
+        Write-CclLog "No sign the launcher wrote $Settings; left untouched."
+        return 0
+    }
+    $changed = $false
+    $props = $doc.PSObject.Properties
+    if ($props['modelPicker'] -and (Test-CclPickerIsOurs $doc.modelPicker)) { $props.Remove('modelPicker'); $changed = $true }
+    if ($props['advisorModel'] -and $doc.advisorModel -is [string] -and $doc.advisorModel -eq 'fable') { $props.Remove('advisorModel'); $changed = $true }
+    if ($props['model'] -and $doc.model -is [string] -and $doc.model -eq 'sonnet') { $props.Remove('model'); $changed = $true }
+    $envObj = $doc.env
+    if ($rec -and $rec.glob_timeout_added -and $envObj -is [pscustomobject] -and $envObj.PSObject.Properties['CLAUDE_CODE_GLOB_TIMEOUT_SECONDS'] -and (Test-CclOurTimeout $envObj.CLAUDE_CODE_GLOB_TIMEOUT_SECONDS)) {
+        $envObj.PSObject.Properties.Remove('CLAUDE_CODE_GLOB_TIMEOUT_SECONDS'); $changed = $true
+        if (@($envObj.PSObject.Properties).Count -eq 0 -and $rec.env_created) { $props.Remove('env') }
+    }
+    if ($changed) {
+        if ((Get-Item -LiteralPath $Settings).Attributes -band [IO.FileAttributes]::ReadOnly) {
+            Write-CclLog "$Settings is read-only, so it was left untouched." 'warn'
+            return 3
+        }
+        try { Write-CclUtf8 -Path $Settings -Text (($doc | ConvertTo-Json -Depth 64) + "`n") } catch { return 1 }
+    }
+    if (Test-Path -LiteralPath $recPath) { Remove-Item -LiteralPath $recPath -Force -ErrorAction SilentlyContinue }
+    return 0
+}
+
+function Invoke-CclSettingsUnsync {
+    # settings_sync.py unsync when the app and a Python are there, else the built-in rules.
+    param([string]$InstallDir, [string]$Settings, [switch]$OnlyIfOurs)
+    if (-not (Test-Path -LiteralPath $Settings)) { return 0 }
+    $sync = Join-Path $InstallDir 'app/shared/claude/settings_sync.py'
+    if ((Test-Path -LiteralPath $sync) -and (Get-CclPython -InstallDir $InstallDir)) {
+        $a = @('unsync', '--settings', $Settings)
+        if ($OnlyIfOurs) { $a += '--only-if-ours' }
+        $rc = Invoke-CclHelper -InstallDir $InstallDir -Script $sync -HelperArgs $a
+    } else {
+        Write-CclLog "No settings helper under $InstallDir\app; cleaning $Settings with the installer's own rules."
+        $rc = Invoke-CclSettingsUnsyncBuiltin -Settings $Settings -OnlyIfOurs:$OnlyIfOurs
+    }
+    if ($rc -eq 3) { Write-CclLog 'Claude Code settings.json is read-only, so it was left untouched.' 'warn' }
+    return $rc
+}
+
+function Invoke-CclPlannerUninstall {
+    param([string]$InstallDir, [string]$ClaudeDir)
+    $planner = Join-Path $InstallDir 'app/shared/claude/install_planner.py'
+    if (Test-Path -LiteralPath $planner) {
+        $null = Invoke-CclHelper -InstallDir $InstallDir -Script $planner -HelperArgs @('uninstall', '--quiet', '--claude-dir', $ClaudeDir)
+        return
+    }
+    # Same rule as install_planner.py: our planner.md carries the owner line; the CLAUDE.md block is between our markers.
+    $agent = Join-Path $ClaudeDir 'agents/planner.md'
+    if ((Test-Path -LiteralPath $agent) -and ([IO.File]::ReadAllText($agent)).Contains('installed by claude-code-launcher (install_planner.py)')) {
+        Remove-Item -LiteralPath $agent -Force
+    }
+    $md = Join-Path $ClaudeDir 'CLAUDE.md'
+    if (Test-Path -LiteralPath $md) {
+        $txt = [IO.File]::ReadAllText($md)
+        $new = [regex]::Replace($txt, '(?s)\r?\n?<!-- claude-code-launcher:planner:start -->.*?<!-- claude-code-launcher:planner:end -->\r?\n?', "`n")
+        if ($new -ne $txt) {
+            if (-not $new.Trim()) { Remove-Item -LiteralPath $md -Force } else { Write-CclUtf8 -Path $md -Text ($new.TrimStart("`r", "`n")) }
+        }
+    }
+}
+
 function Invoke-CclPartialUninstall {
     # install.json is missing, so the folder can't be proven ours: undo what is ours
     # outside it (settings, planner, PATH, a task pointing here) and our own secrets and
@@ -1019,19 +1125,20 @@ function Invoke-CclPartialUninstall {
             Unregister-ScheduledTask -TaskName $script:CclTaskName -Confirm:$false -ErrorAction SilentlyContinue
         }
     }
-    $app = Join-Path $InstallDir 'app'
-    $sync = Join-Path $app 'shared/claude/settings_sync.py'
-    $planner = Join-Path $app 'shared/claude/install_planner.py'
-    $settings = Join-Path (Get-CclClaudeDir) 'settings.json'
-    if (Test-Path -LiteralPath $sync) {
-        if (Test-Path -LiteralPath $settings) {
-            $rc = Invoke-CclHelper -InstallDir $InstallDir -Script $sync -HelperArgs @('unsync', '--settings', $settings)
-            if ($rc -eq 3) { Write-CclLog 'Claude Code settings.json is read-only, so it was left untouched.' 'warn' }
-        }
-    } else { Write-CclLog "No settings helper under $app; Claude Code settings.json was not changed." 'warn' }
-    if (Test-Path -LiteralPath $planner) {
-        $null = Invoke-CclHelper -InstallDir $InstallDir -Script $planner -HelperArgs @('uninstall', '--quiet')
-    } else { Write-CclLog "No planner helper under $app; the planner sub-agent was not removed." 'warn' }
+    # v1.0.1+ keeps Claude's config in <folder>\claude-config: clean that. A config outside the
+    # folder (~\.claude or CLAUDE_CONFIG_DIR) is changed only where it shows the launcher wrote
+    # it (issue #72): its model picker or the sync record; the planner helpers only ever take
+    # out files and blocks carrying our markers.
+    $inner = Join-Path $InstallDir 'claude-config'
+    if (Test-Path -LiteralPath $inner) {
+        $null = Invoke-CclSettingsUnsync -InstallDir $InstallDir -Settings (Join-Path $inner 'settings.json')
+        Invoke-CclPlannerUninstall -InstallDir $InstallDir -ClaudeDir $inner
+    }
+    $outer = Get-CclClaudeDir
+    if ([IO.Path]::GetFullPath($outer).TrimEnd('\', '/') -ne [IO.Path]::GetFullPath($inner).TrimEnd('\', '/')) {
+        $null = Invoke-CclSettingsUnsync -InstallDir $InstallDir -Settings (Join-Path $outer 'settings.json') -OnlyIfOurs
+        Invoke-CclPlannerUninstall -InstallDir $InstallDir -ClaudeDir $outer
+    }
     $secrets = Join-Path $InstallDir 'secrets'
     foreach ($f in 'inferhub.env', 'tinyfish.env') {
         $p = Join-Path $secrets $f
@@ -1059,15 +1166,15 @@ function Invoke-CclUninstall {
     Write-CclLog "Removing claude-inferhub from $InstallDir ..."
     Stop-CclProxy -InstallDir $InstallDir
     if (Test-CclTaskRegistered) { Unregister-ScheduledTask -TaskName $script:CclTaskName -Confirm:$false -ErrorAction SilentlyContinue }
-    $app = Join-Path $InstallDir 'app'
     # A Claude config folder inside the install goes with it; one outside (a v1.0.0 install,
     # or -ClaudeConfigDir) gets our entries taken out.
     $claudeDir = $(if ($state -and $state.claude_config_dir) { [string]$state.claude_config_dir } else { Get-CclClaudeDir })
     $inside = ([IO.Path]::GetFullPath($claudeDir).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar).StartsWith($InstallDir.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar)
     $settings = Join-Path $claudeDir 'settings.json'
-    if (-not $inside -and (Test-Path -LiteralPath (Join-Path $app 'shared/claude/settings_sync.py'))) {
+    if (-not $inside) {
         if (Test-Path -LiteralPath $settings) {
-            $null = Invoke-CclHelper -InstallDir $InstallDir -Script (Join-Path $app 'shared/claude/settings_sync.py') -HelperArgs @('unsync', '--settings', $settings)
+            # Without app\ (deleted by hand) the installer's own rules do it (issue #72).
+            $null = Invoke-CclSettingsUnsync -InstallDir $InstallDir -Settings $settings
             if ($state -and $state.claude_settings_created) {
                 try {
                     $doc = Get-Content -LiteralPath $settings -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -1075,7 +1182,7 @@ function Invoke-CclUninstall {
                 } catch { }
             }
         }
-        $null = Invoke-CclHelper -InstallDir $InstallDir -Script (Join-Path $app 'shared/claude/install_planner.py') -HelperArgs @('uninstall', '--quiet', '--claude-dir', $claudeDir)
+        Invoke-CclPlannerUninstall -InstallDir $InstallDir -ClaudeDir $claudeDir
     }
     Remove-CclUserPath -Dir (Join-Path $InstallDir 'bin')
     $script:CclLogFile = $null

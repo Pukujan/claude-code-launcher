@@ -1236,3 +1236,80 @@ Describe 'Remove-CclTree' -Tag 'Spec' {
         Should -Invoke Remove-Item -Times 3 -Exactly
     }
 }
+
+
+Describe 'Uninstall never edits a Claude config it cannot prove it wrote (v1.0.2 #1)' -Tag 'Spec' {
+    BeforeEach { $script:sb = New-Sandbox }
+    AfterEach { Remove-Sandbox $script:sb }
+
+    It 'a v1.0.1 folder without install.json: the profile settings.json stays byte for byte, the folder''s claude-config is cleaned' {
+        New-Item -ItemType Directory -Force $sb.ClaudeDir | Out-Null
+        $user = Join-Path $sb.ClaudeDir 'settings.json'
+        $text = '{"model":"sonnet","advisorModel":"fable","theme":"dark"}'
+        [IO.File]::WriteAllText($user, $text)
+        Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-x'; ClaudeConfigDir = $null } | Should -Be 0
+        [IO.File]::ReadAllText($user) | Should -Be $text
+        Remove-Item -LiteralPath (Join-Path $sb.InstallDir 'install.json')
+        Invoke-SandboxInstall $sb -Extra @{ Uninstall = $true } | Should -Be 0
+        [IO.File]::ReadAllText($user) | Should -Be $text
+        $inner = Get-Content (Join-Path $sb.InstallDir 'claude-config/settings.json') -Raw | ConvertFrom-Json
+        $inner.advisorModel | Should -BeNullOrEmpty
+        $inner.modelPicker | Should -BeNullOrEmpty
+        Test-Path (Join-Path $sb.InstallDir 'claude-config/agents/planner.md') | Should -BeFalse
+    }
+    It 'an outside config with our picker (a v1.0.0 install, no record) is still cleaned' {
+        New-Item -ItemType Directory -Force $sb.ClaudeDir | Out-Null
+        '{"theme":"dark"}' | Set-Content (Join-Path $sb.ClaudeDir 'settings.json')
+        Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-x' } | Should -Be 0
+        Remove-Item -LiteralPath (Join-Path $sb.ClaudeDir '.ccl-settings-sync.json') -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath (Join-Path $sb.InstallDir 'install.json')
+        Invoke-SandboxInstall $sb -Extra @{ Uninstall = $true } | Should -Be 0
+        $s = Get-Content (Join-Path $sb.ClaudeDir 'settings.json') -Raw | ConvertFrom-Json
+        $s.theme | Should -Be 'dark'
+        $s.advisorModel | Should -BeNullOrEmpty
+        $s.modelPicker | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Uninstall cleans an outside config even when app\ is gone (v1.0.2 #2)' -Tag 'Spec' {
+    BeforeEach { $script:sb = New-Sandbox }
+    AfterEach { Remove-Sandbox $script:sb }
+
+    It 'takes our keys out with the logic in install.ps1, keeps the user''s, and deletes the folder' {
+        New-Item -ItemType Directory -Force $sb.ClaudeDir | Out-Null
+        '{"theme":"dark","env":{"A":"1"}}' | Set-Content (Join-Path $sb.ClaudeDir 'settings.json')
+        Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-x' } | Should -Be 0
+        Remove-Item -LiteralPath (Join-Path $sb.InstallDir 'app') -Recurse -Force
+        Invoke-SandboxInstall $sb -Extra @{ Uninstall = $true } | Should -Be 0
+        $s = Get-Content (Join-Path $sb.ClaudeDir 'settings.json') -Raw | ConvertFrom-Json
+        @($s.PSObject.Properties.Name) | Should -Be @('theme', 'env')
+        @($s.env.PSObject.Properties.Name) | Should -Be @('A')
+        Test-Path (Join-Path $sb.ClaudeDir '.ccl-settings-sync.json') | Should -BeFalse
+        Test-Path (Join-Path $sb.ClaudeDir 'agents/planner.md') | Should -BeFalse
+        Test-Path -LiteralPath $sb.InstallDir | Should -BeFalse
+    }
+}
+
+Describe 'Built-in unsync matches settings_sync.py (v1.0.2 #2)' -Tag 'Metamorphic' {
+    It 'gives the same settings for <Name>' -ForEach @(
+        @{ Name = 'ours only'; Doc = '{"model":"sonnet","advisorModel":"fable","modelPicker":{"options":[{"model":"sonnet","label":"Sonnet slot (main)","description":"Main chat chain via local LiteLLM"}]},"env":{"CLAUDE_CODE_GLOB_TIMEOUT_SECONDS":"120"}}'; Rec = '{"glob_timeout_added":true,"env_created":true}' }
+        @{ Name = 'user values'; Doc = '{"model":"opus","advisorModel":"x","theme":"dark","env":{"CLAUDE_CODE_GLOB_TIMEOUT_SECONDS":"120","B":"2"}}'; Rec = $null }
+        @{ Name = 'number form'; Doc = '{"env":{"CLAUDE_CODE_GLOB_TIMEOUT_SECONDS":120,"B":"2"},"model":"sonnet"}'; Rec = '{"glob_timeout_added":true,"env_created":false}' }
+        @{ Name = 'a user picker'; Doc = '{"modelPicker":{"options":[{"model":"m","label":"Mine"}]},"advisorModel":"fable"}'; Rec = $null }
+    ) {
+        $py = (Get-Command python3, python -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+        if (-not $py) { Set-ItResult -Skipped -Because 'no Python'; return }
+        $d1 = Join-Path $TestDrive ('a' + [guid]::NewGuid().ToString('N')); $d2 = Join-Path $TestDrive ('b' + [guid]::NewGuid().ToString('N'))
+        foreach ($d in $d1, $d2) {
+            New-Item -ItemType Directory -Force $d | Out-Null
+            [IO.File]::WriteAllText((Join-Path $d 'settings.json'), $Doc)
+            if ($Rec) { [IO.File]::WriteAllText((Join-Path $d '.ccl-settings-sync.json'), $Rec) }
+        }
+        & $py (Join-Path $Repo 'shared/claude/settings_sync.py') unsync --settings (Join-Path $d1 'settings.json') 2>$null
+        Invoke-CclSettingsUnsyncBuiltin -Settings (Join-Path $d2 'settings.json') | Out-Null
+        $a = Get-Content (Join-Path $d1 'settings.json') -Raw | ConvertFrom-Json | ConvertTo-Json -Depth 20 -Compress
+        $b = Get-Content (Join-Path $d2 'settings.json') -Raw | ConvertFrom-Json | ConvertTo-Json -Depth 20 -Compress
+        $b | Should -Be $a
+        (Test-Path (Join-Path $d2 '.ccl-settings-sync.json')) | Should -Be (Test-Path (Join-Path $d1 '.ccl-settings-sync.json'))
+    }
+}

@@ -2,7 +2,7 @@
 
 Status: accepted for build (issue [#61](https://github.com/Pukujan/claude-code-launcher/issues/61), task CCL-0061;
 fixes in issue [#63](https://github.com/Pukujan/claude-code-launcher/issues/63), task CCL-0063).
-Version this spec describes: `v1.0.1-windows`. The changes from `v1.0.0-windows` are listed at the end.
+Version this spec describes: `v1.0.2-windows`. The changes from earlier versions are listed at the end.
 
 ## Problem
 
@@ -15,7 +15,7 @@ any proxy on 4000 as its own, and it looks in places that only exist on Alex's P
 ## Shape
 
 A single PowerShell script, `windows/install.ps1`, attached to each GitHub release
-(`v1.0.1-windows` now). There's no zip. The script fetches the launcher files for its own tagged
+(`v1.0.2-windows` now). There's no zip. The script fetches the launcher files for its own tagged
 version, does the setup, and leaves a `claude-inferhub` command. Everything it installs lives in
 ONE folder the user picks (see "Self-contained install"), so uninstalling is deleting that folder
 plus the logon task and the optional PATH entry.
@@ -33,12 +33,12 @@ With parameters:
 ```
 
 A pinned version works the same way:
-`https://github.com/Pukujan/claude-code-launcher/releases/download/v1.0.1-windows/install.ps1`. Every published
+`https://github.com/Pukujan/claude-code-launcher/releases/download/v1.0.2-windows/install.ps1`. Every published
 release keeps its asset, so the `v1.0.0-windows` one-liner keeps working (it installs 1.0.0; run
 the `latest` one-liner over it to update). Each new Windows release is marked latest.
 
 Download-and-run also works (`powershell -ExecutionPolicy Bypass -File .\install.ps1`). If the
-repo ever goes private again, `gh release download v1.0.1-windows -R Pukujan/claude-code-launcher -p install.ps1`
+repo ever goes private again, `gh release download v1.0.2-windows -R Pukujan/claude-code-launcher -p install.ps1`
 gets the script, and the installer fetches the source through `gh` when it's logged in.
 
 ## Inputs
@@ -52,7 +52,7 @@ gets the script, and the installer fetches the source through `gh` when it's log
 | `-PortableOnly` | switch | off | Never reuse a tool already on the PC; put private copies of every tool in the folder. |
 | `-UseSystemTools` | switch | off | Also reuse a git and a Claude Code already on the PC (by default those are always private copies). |
 | `-ClaudeConfigDir` | path | `<InstallDir>\claude-config` | Claude Code's config folder for launcher sessions (`CLAUDE_CONFIG_DIR`). Only for tests and special setups; the default keeps it inside the folder. |
-| `-Ref` | string | `v1.0.1-windows` | Git tag or branch of the launcher files to fetch. |
+| `-Ref` | string | `v1.0.2-windows` | Git tag or branch of the launcher files to fetch. |
 | `-Source` | path | none | Use this local checkout instead of fetching (tests, offline). |
 | `-StartPort` | int | `4000` | First port tried for the proxy. Any TCP port, 1 to 65535; anything else is exit 2. The search never goes past 65535. |
 | `-Uninstall` | switch | off | Remove the install (see Uninstall). |
@@ -182,8 +182,8 @@ real install on `windows-latest` (both the reuse and the private-copy paths), ig
 ```json
 {
   "schema": "claude-code-launcher.install.v2",
-  "version": "1.0.1-windows",
-  "ref": "v1.0.1-windows",
+  "version": "1.0.2-windows",
+  "ref": "v1.0.2-windows",
   "port": 4000,
   "instance_id": "<32 hex chars, made once and kept across reinstalls>",
   "task_name": "claude-code-launcher-proxy",
@@ -311,14 +311,25 @@ The folder picker falls back to home when `D:\development` doesn't exist.
 `shared/claude/settings_sync.py`:
 
 - `sync(settings: dict, options: list) -> dict` returns a copy with `model = "sonnet"`,
-  `advisorModel = "fable"` and `modelPicker = {"options": options}`. Every other key is kept
-  as is. `sync(sync(s, o), o) == sync(s, o)`.
-- `unsync(settings: dict) -> dict` removes `modelPicker` when every option's description or label says
+  `advisorModel = "fable"` and `modelPicker = {"options": options}`, and sets
+  `env.CLAUDE_CODE_GLOB_TIMEOUT_SECONDS = "120"` when `env` has no such key (creating `env` if
+  needed; a value the user set is kept). Every other key is kept as is.
+  `sync(sync(s, o), o) == sync(s, o)`.
+- `sync_record(before, after, record=None) -> dict` says what a sync added:
+  `glob_timeout_added` and `env_created` (schema `claude-code-launcher.settings-sync.v1`). An
+  earlier record's `true` is kept.
+- `unsync(settings: dict, record=None) -> dict` removes `modelPicker` when every option's description or label says
   "via local LiteLLM" or "InferHub", removes `advisorModel` when it's `"fable"` and `model` when
-  it's `"sonnet"`. Everything else is kept.
-- CLI: `python settings_sync.py sync|unsync --settings PATH [--options-file FILE]`. `sync`
+  it's `"sonnet"`. It removes `env.CLAUDE_CODE_GLOB_TIMEOUT_SECONDS` only when the record says
+  sync added it and the value is still ours (`"120"` or `120`), and drops `env` only when the
+  record says sync created it and it's now empty. Without a record the timeout is kept.
+  Everything else is kept.
+- CLI: `python settings_sync.py sync|unsync --settings PATH [--options-file FILE] [--only-if-ours]`. `sync`
   creates the file (and its folder) when missing and prints `created` or `updated` or
   `unchanged` on stderr. The folder is `CLAUDE_CONFIG_DIR` when set, else `~/.claude`.
+  `sync` writes the record to `.ccl-settings-sync.json` next to `settings.json`; `unsync` uses it
+  and deletes it. With `--only-if-ours`, `unsync` changes nothing (exit 0, "no sign" on stderr)
+  unless there's proof the launcher wrote the file: the record, or our `modelPicker`.
 - An existing file that is empty (0 bytes) or holds only whitespace counts as `{}`: `sync`
   writes the launcher's keys into it, and `unsync` has nothing to remove and leaves it as it is.
 - A file that isn't valid JSON, or whose JSON isn't an object, is left untouched (exit 1).
@@ -367,7 +378,8 @@ For a proven folder:
 2. When the Claude config folder is outside `InstallDir` (a v1.0.0 install, or `-ClaudeConfigDir`):
    runs `settings_sync.py unsync`, deletes `settings.json` only if the installer created it and
    it's now empty, and removes the planner sub-agent. A config folder inside `InstallDir` simply
-   goes with it.
+   goes with it. If `app\` is gone (deleted by hand), the installer does the same cleanup with
+   its own built-in copy of the unsync rules and the planner removal (same result as the helpers).
 3. Removes `bin\` from the user PATH.
 4. Deletes `InstallDir`. Exit 0.
 
@@ -376,9 +388,15 @@ removes everything of ours it can name, and keeps the folder itself:
 
 1. Unregisters the logon task only if its command line points at this folder (`-CclHome "<InstallDir>"`).
    It doesn't kill anything by PID.
-2. Runs `settings_sync.py unsync` and removes the planner sub-agent, using the helpers in
-   `app\shared\claude\` and the venv or a system Python. `settings.json` is never deleted (the
-   installer can't show it created it). Without the helpers it warns and skips this step.
+2. Cleans `<InstallDir>\claude-config` if it's there: `settings_sync.py unsync` and the planner
+   removal (the helpers in `app\shared\claude\` with the venv or a system Python, or the
+   installer's built-in copy of the same rules when they're missing). A Claude config outside the
+   folder (`~\.claude`, or `CLAUDE_CONFIG_DIR`) is touched only with proof the launcher wrote it:
+   a settings-sync record (`.ccl-settings-sync.json` next to its `settings.json`) or our
+   `modelPicker` (the v1.0.0 marker). That is `settings_sync.py unsync --only-if-ours`. Without
+   proof it is left byte-for-byte alone. The planner is removed there only if it carries our
+   owner line or marker block. `settings.json` is never deleted (the installer can't show it
+   created it).
 3. Deletes `secrets\inferhub.env` and `secrets\tinyfish.env`, and `secrets\` if that leaves it empty.
 4. Deletes `bin\claude-inferhub.cmd` only if it's our shim (its second line starts with
    `rem claude-inferhub:`), and removes `bin\` from the user PATH.
@@ -430,7 +448,7 @@ user's window); it writes the error and returns.
    `ANTHROPIC_BASE_URL` points there.
 3. No Alex-specific path, name or secret is in `install.ps1` or used in packaged mode.
 4. CI runs every test category and publishes `install.ps1` as a build artifact.
-5. `install.ps1` is attached to the `v1.0.1-windows` release (and each later one), marked latest.
+5. `install.ps1` is attached to the `v1.0.2-windows` release (and each later one), marked latest.
 
 ## Non-goals
 
@@ -478,3 +496,17 @@ this spec: the `install.ps1` parameters, environment variables, exit codes, fold
    from v1.0.0 cleans what v1.0.0 put into `~\.claude`.
    Sessions keep issue #69's 120-second ripgrep limit, in the folder's `settings.json` and in
    the launcher's environment.
+
+## Changes in v1.0.2-windows (issue #72)
+
+1. `-Uninstall` without `install.json` no longer edits a Claude config outside the folder unless
+   there's proof the launcher wrote it (a settings-sync record or our `modelPicker`). It cleans
+   `<InstallDir>\claude-config` instead. Before, it stripped `model` and `advisorModel` from the
+   user's own `~\.claude\settings.json` (or the `CLAUDE_CONFIG_DIR` one).
+2. A normal uninstall with the Claude config outside the folder cleans it even when `app\` was
+   deleted by hand, using rules built into `install.ps1`. Before, it skipped the cleanup silently.
+3. `settings_sync.py sync` writes `.ccl-settings-sync.json` next to `settings.json`, recording
+   whether it added `env.CLAUDE_CODE_GLOB_TIMEOUT_SECONDS` and whether it created `env`. `unsync`
+   removes the timeout only when the record says sync added it (the same for `"120"` and `120`),
+   drops `env` only when sync created it and it's empty, and deletes the record. A value the user
+   set stays. New flag: `unsync --only-if-ours`. `sync()`'s docstring now names the key it adds.

@@ -1,6 +1,6 @@
 # Current Repository Checkpoint
 
-<!-- continuity:current {"active_task":"CCL-0063","active_task_file":"tasks/TASK-CCL-0063-windows-v101.md","protocol_version":"0.1.0-draft","schema":"project-continuity.current.v1"} -->
+<!-- continuity:current {"active_task":"CCL-0072","active_task_file":"tasks/TASK-CCL-0072-windows-v102.md","protocol_version":"0.1.0-draft","schema":"project-continuity.current.v1"} -->
 
 This is an as-of projection; live GitHub issues own progression. Link the owning leaf, parent ancestry and dependencies for active work.
 
@@ -22,6 +22,7 @@ Phase: Windows installer for a friend.
 
 ## Active
 
+- **CCL-0072**: Windows installer v1.0.2: uninstall never edits a Claude config it can't prove it wrote, cleanup works without `app\`, a user-set search timeout survives unsync ([issue #72](https://github.com/Pukujan/claude-code-launcher/issues/72), branch `ccl-0072-windows-v102`).
 - **CCL-0064**: every launcher key from one gitignored `.env` in the launcher folder, the IRE and Desktop env files only as a fallback ([issue #64](https://github.com/Pukujan/claude-code-launcher/issues/64), branch `ccl-0064-launcher-env`).
 
 ## Queued
@@ -35,4 +36,4 @@ None known.
 
 ## Next atomic action
 
-Publish `v1.0.1-windows` from the PR #66 merge and close #63.
+Publish `v1.0.2-windows` from the #72 PR merge, close #72 and pull main on the PC.
