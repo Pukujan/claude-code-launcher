@@ -61,6 +61,12 @@ exists of the Desktop known folder, `%USERPROFILE%\Desktop` and
 `%OneDrive%\Desktop`, and looks for the IRE `.env` next to this checkout
 before `D:\development`.
 
+Since issue #64 both scripts treat the repository's `.env` as the one key file
+when it exists: the launcher passes it as both env files, `start-litellm.ps1`
+loads it alone (label `launcher`) and skips the desktop and IRE files, which are
+only a fallback when it is missing. `-ShowEnvSources` prints the files read and
+the key names set, then exits. Packaged mode is unchanged.
+
 Since issue #51 it also loads an optional machine-local `shared\litellm\.env.local`
 (`-LocalEnvFile`, gitignored) after the two env files, forwards it in
 `-Background` mode, and applies `CCL_ENV_ALIASES` (copies an already-loaded
