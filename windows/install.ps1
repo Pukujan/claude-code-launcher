@@ -9,15 +9,18 @@
 # or, to pass options, download it first and run
 #   powershell -ExecutionPolicy Bypass -File .\install.ps1 [-InferHubKey <key>] [-TinyFishKey <key>] [-Uninstall] ...
 #
-# What it does: installs uv, git, Node with pnpm and Claude Code when they are
-# missing (official installers and winget), fetches the launcher files for its own
-# version into %LOCALAPPDATA%\claude-code-launcher\app, stores the key per user,
-# builds the LiteLLM venv with uv on Python 3.12, picks a free port from 4000 up
-# (it never takes a port another program holds), runs the proxy from a hidden
-# logon task, writes Claude Code's settings and leaves a `claude-inferhub` command.
+# What it does: asks for ONE install folder (default %USERPROFILE%\claude-code-launcher)
+# and puts everything in it: the launcher files for its own version, the keys, the
+# LiteLLM venv, logs, Claude Code's config for launcher sessions (CLAUDE_CONFIG_DIR),
+# and private copies of the tools the PC doesn't already have (uv, Python, Node, pnpm;
+# git and Claude Code always, unless -UseSystemTools). Every download is checked against
+# a pinned SHA-256; no winget, no global installers. It picks a free port from 4000 up
+# (it never takes a port another program holds), runs the proxy from a hidden logon
+# task and leaves a `claude-inferhub` command. Outside the folder it only writes the
+# logon task and (unless -NoPath) the bin\ entry in the user PATH.
 # The spec is docs/specs/windows-package.md in the repository.
 #
-# The keys are never printed or logged. Prerequisites are never uninstalled.
+# The keys are never printed or logged. Tools that were already on the PC are never removed.
 
 [CmdletBinding()]
 param(
@@ -36,7 +39,10 @@ param(
     [switch]$NoTask,
     [switch]$NoPath,
     [switch]$NoStart,
-    [switch]$NonInteractive
+    [switch]$NonInteractive,
+    [switch]$PortableOnly,
+    [switch]$UseSystemTools,
+    [string]$ClaudeConfigDir = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -46,10 +52,11 @@ $script:CclVersion = '1.0.1-windows'
 $script:CclDefaultRef = $Ref
 $script:CclRepo = 'Pukujan/claude-code-launcher'
 $script:CclTaskName = 'claude-code-launcher-proxy'
-$script:CclSchema = 'claude-code-launcher.install.v1'
+$script:CclSchema = 'claude-code-launcher.install.v2'
 $script:CclApp = 'claude-code-launcher'
 $script:CclOnWindows = ($PSVersionTable.PSEdition -eq 'Desktop') -or [bool]$IsWindows
 $script:CclLogFile = $null
+$script:CclPythonHint = $null
 # Copying the launcher files skips these names at any depth...
 $script:CclSkipAnywhere = @('.git', 'node_modules', '__pycache__', '.litellm-venv', '.venv', 'logs', '.pytest_cache',
     '.ruff_cache', '.hypothesis', 'last-picks.json', '.env.local')
@@ -211,8 +218,10 @@ function Write-CclInstallState {
         instance_id = [string]$State.instance_id
         task_name = $script:CclTaskName
         claude_settings_created = [bool]$State.claude_settings_created
+        claude_config_dir = $(if ($State.claude_config_dir) { [string]$State.claude_config_dir } else { '' })
+        tools = $(if ($null -ne $State.tools) { $State.tools } else { [ordered]@{} })
     }
-    Write-CclUtf8 -Path (Join-Path $InstallDir 'install.json') -Text (($doc | ConvertTo-Json) + "`n")
+    Write-CclUtf8 -Path (Join-Path $InstallDir 'install.json') -Text (($doc | ConvertTo-Json -Depth 6) + "`n")
 }
 
 # ---------------------------------------------------------------- ports
@@ -403,22 +412,6 @@ function Remove-CclUserPath {
     [Environment]::SetEnvironmentVariable('Path', ($parts -join ';'), 'User')
 }
 
-function Update-CclSessionPath {
-    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Internal helper of a non-interactive installer; -WhatIf is not offered.')]
-    param()
-    if (-not $script:CclOnWindows) { return }
-    $m = [Environment]::GetEnvironmentVariable('Path', 'Machine')
-    $u = [Environment]::GetEnvironmentVariable('Path', 'User')
-    $extra = @((Join-Path $env:USERPROFILE '.local\bin'), (Join-Path $env:LOCALAPPDATA 'pnpm'))
-    # Keep what this session already had (a tool the caller put on PATH) and add what
-    # the installers just wrote to the registry, without duplicates.
-    $seen = @{}
-    $parts = foreach ($p in (@($env:Path, $m, $u) -join ';').Split(';') + $extra) {
-        if ($p -and -not $seen.ContainsKey($p.TrimEnd('\').ToLowerInvariant())) { $seen[$p.TrimEnd('\').ToLowerInvariant()] = $true; $p }
-    }
-    $env:Path = @($parts) -join ';'
-}
-
 # ---------------------------------------------------------------- prerequisites
 
 function Get-CclPrereqPlan {
@@ -428,60 +421,295 @@ function Get-CclPrereqPlan {
 
 function Test-CclTool { param([string]$Name) return [bool](Get-Command $Name -ErrorAction SilentlyContinue) }
 
-function Invoke-CclDownloadedScript {
-    # Official installers are downloaded to a temp file and run with powershell -File.
-    param([string]$Url, [string]$What)
-    $tmp = Join-Path ([IO.Path]::GetTempPath()) ('ccl-' + [guid]::NewGuid().ToString('N') + '.ps1')
-    try {
-        Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $tmp
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $tmp
-        if ($LASTEXITCODE -ne 0) { throw "$What installer exited $LASTEXITCODE" }
-    } finally { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+# ---------------------------------------------------------------- self-contained tools (v1.0.1)
+# Each tool is either reused from the PC (Python 3.10-3.13, Node 18+, any uv or pnpm; git
+# and Claude Code only with -UseSystemTools) or a private copy under <InstallDir>\tools.
+# Every download is pinned by SHA-256 (Claude Code: the SHA-256 in its release manifest).
+
+$script:CclToolOrder = @('uv', 'python', 'node', 'pnpm', 'git', 'claude')
+$script:CclToolSpecs = @{
+    uv = @{ version = '0.12.23'; kind = 'zip'; exe = 'uv.exe'
+        url = 'https://github.com/astral-sh/uv/releases/download/0.12.23/uv-x86_64-pc-windows-msvc.zip'
+        sha256 = '75d05de6762778c31ee183398de7dd15093fad0ed90b1f236d8205ea5ec00c90' }
+    node = @{ version = '24.21.0'; kind = 'zip'; exe = 'node.exe'; strip = 'node-v24.21.0-win-x64'
+        url = 'https://nodejs.org/dist/v24.21.0/node-v24.21.0-win-x64.zip'
+        sha256 = '158f7685b44de51f6c0df1d153526cbcd3e1bc739a8dfc607721cef75de9e541' }
+    pnpm = @{ version = '12.9.1'; kind = 'zip'; exe = 'pnpm.exe'
+        url = 'https://github.com/pnpm/pnpm/releases/download/v12.9.1/pnpm-win32-x64.zip'
+        sha256 = '2b30f6bc53228187881aeae604cc6cedf092641df30d3be1cf4cd3d17bf630f5' }
+    # PortableGit, not MinGit: Claude Code's Bash tool needs bash.exe, which MinGit leaves out.
+    git = @{ version = '2.56.0'; kind = 'sfx'; exe = 'cmd\git.exe'; bash = 'bin\bash.exe'
+        url = 'https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.1/PortableGit-2.56.0-64-bit.7z.exe'
+        sha256 = 'eceb5e061aa90df2f69ddd3e90f0030e1b8037a7829934bc40e4be1caa1accc1' }
+    claude = @{ version = 'stable'; kind = 'claude-manifest'; exe = 'claude.exe'
+        url = 'https://downloads.claude.ai/claude-code-releases' }
+    python = @{ version = '3.12'; kind = 'uv-python' }
 }
 
-function Invoke-CclWinget {
-    param([string]$Id)
-    if (-not (Test-CclTool 'winget')) { throw "winget is not available to install $Id" }
-    & winget install --id $Id -e --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
-    if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1978335189) { throw "winget install $Id exited $LASTEXITCODE" }
+function Test-CclPythonVersion {
+    param([string]$Version)
+    if ($Version -notmatch '(\d+)\.(\d+)') { return $false }
+    return ([int]$Matches[1] -eq 3 -and [int]$Matches[2] -ge 10 -and [int]$Matches[2] -le 13)
 }
 
-function Install-CclPrereq {
-    param([string]$Name)
+function Test-CclNodeVersion {
+    param([string]$Version)
+    if ($Version -notmatch '^\s*v?(\d+)\.') { return $false }
+    return ([int]$Matches[1] -ge 18)
+}
+
+function Get-CclToolPlan {
+    # 'reuse' or 'bundle' per tool (spec: Self-contained install).
+    param([System.Collections.IDictionary]$Found, [switch]$PortableOnly, [switch]$UseSystemTools)
+    if ($null -eq $Found) { $Found = @{} }
+    $plan = [ordered]@{}
+    foreach ($n in 'python', 'node', 'uv', 'pnpm', 'git', 'claude') {
+        $f = $Found[$n]
+        $ok = [bool]($f -and $f.path)
+        if ($ok -and $n -eq 'python') { $ok = Test-CclPythonVersion -Version ([string]$f.version) }
+        if ($ok -and $n -eq 'node') { $ok = Test-CclNodeVersion -Version ([string]$f.version) }
+        if ($ok -and ($n -eq 'git' -or $n -eq 'claude')) { $ok = [bool]$UseSystemTools }
+        if ($PortableOnly) { $ok = $false }
+        $plan[$n] = $(if ($ok) { 'reuse' } else { 'bundle' })
+    }
+    return $plan
+}
+
+function Get-CclToolEnv {
+    # The variables that keep every tool's data in the folder (spec table). PATH is the
+    # list of folders to put in front of the process PATH.
+    param([string]$InstallDir, $State = $null, [string]$ClaudeConfigDir = '')
+    $t = Join-Path $InstallDir 'tools'
+    $c = Join-Path $InstallDir 'cache'
+    $cfg = $(if ($ClaudeConfigDir) { $ClaudeConfigDir } elseif ($State -and $State.claude_config_dir) { [string]$State.claude_config_dir } else { Join-Path $InstallDir 'claude-config' })
+    $e = [ordered]@{
+        UV_CACHE_DIR = Join-Path $c 'uv'
+        UV_PYTHON_INSTALL_DIR = Join-Path $t 'python'
+        UV_PYTHON_BIN_DIR = Join-Path $t 'bin'
+        UV_TOOL_BIN_DIR = Join-Path $t 'bin'
+        UV_TOOL_DIR = Join-Path $t 'uv-tools'
+        UV_INSTALL_DIR = Join-Path $t 'uv'
+        PNPM_HOME = Join-Path $t 'pnpm'
+        npm_config_store_dir = Join-Path $c 'pnpm-store'
+        npm_config_cache_dir = Join-Path $c 'pnpm'
+        npm_config_state_dir = Join-Path $c 'pnpm'
+        npm_config_cache = Join-Path $c 'npm'
+        CLAUDE_CONFIG_DIR = $cfg
+        DISABLE_AUTOUPDATER = '1'
+    }
+    $tools = $(if ($State) { $State.tools } else { $null })
+    if ($tools -and $tools.git -and $tools.git.source -eq 'bundled') {
+        $e.CLAUDE_CODE_GIT_BASH_PATH = Join-Path (Join-Path (Join-Path $t 'git') 'bin') 'bash.exe'
+    }
+    $path = @((Join-Path $t 'claude'), (Join-Path $t 'node'), (Join-Path $t 'pnpm'), (Join-Path $t 'uv'),
+        (Join-Path (Join-Path $t 'git') 'cmd'), (Join-Path $t 'bin'))
+    if ($tools) {
+        foreach ($n in 'python', 'node', 'uv', 'pnpm', 'git', 'claude') {
+            $rec = $tools.$n
+            if ($rec -and $rec.path) {
+                $d = Split-Path -Parent ([string]$rec.path)
+                if ($d -and $path -notcontains $d) { $path += $d }
+            }
+        }
+    }
+    $e.PATH = $path
+    return $e
+}
+
+function Use-CclToolEnv {
+    # Sets the variables for this process and returns what was there before (for Restore-CclToolEnv).
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Process environment only; restored by Restore-CclToolEnv.')]
+    param([System.Collections.IDictionary]$Vars)
+    $saved = @{}
+    foreach ($k in $Vars.Keys) {
+        $saved[$k] = [Environment]::GetEnvironmentVariable($k)
+        if ($k -eq 'PATH') {
+            $front = @($Vars.PATH | Where-Object { $_ })
+            $rest = @(([string]$saved[$k]).Split([IO.Path]::PathSeparator) | Where-Object { $_ -and $front -notcontains $_ })
+            [Environment]::SetEnvironmentVariable('PATH', (($front + $rest) -join [IO.Path]::PathSeparator))
+        } else {
+            [Environment]::SetEnvironmentVariable($k, [string]$Vars[$k])
+        }
+    }
+    return $saved
+}
+
+function Restore-CclToolEnv {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Process environment only.')]
+    param([System.Collections.IDictionary]$Saved)
+    if (-not $Saved) { return }
+    foreach ($k in $Saved.Keys) { [Environment]::SetEnvironmentVariable($k, $Saved[$k]) }
+}
+
+function Invoke-CclToolOutput {
+    # Runs a tool and returns its trimmed output lines, or $null when it can't run.
+    param([string]$Exe, [string[]]$ToolArgs)
     $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
     try {
-        switch ($Name) {
-            'uv' { Invoke-CclDownloadedScript -Url 'https://astral.sh/uv/install.ps1' -What 'uv' }
-            'git' { Invoke-CclWinget -Id 'Git.Git' }
-            'node' { Invoke-CclWinget -Id 'OpenJS.NodeJS.LTS' }
-            'pnpm' {
-                $done = $false
-                if (Test-CclTool 'corepack') { & corepack enable pnpm 2>&1 | Out-Null; Update-CclSessionPath; $done = Test-CclTool 'pnpm' }
-                if (-not $done) { Invoke-CclDownloadedScript -Url 'https://get.pnpm.io/install.ps1' -What 'pnpm' }
-            }
-            'claude' { Invoke-CclDownloadedScript -Url 'https://claude.ai/install.ps1' -What 'Claude Code' }
-        }
-    } finally { $ErrorActionPreference = $prev }
-    Update-CclSessionPath
+        $out = & $Exe @ToolArgs 2>$null
+        if ($LASTEXITCODE -ne 0) { return $null }
+        return @($out | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+    } catch { return $null } finally { $ErrorActionPreference = $prev }
 }
 
-function Install-CclPrereqs {
-    # Returns the tools still missing afterwards.
-    param([switch]$CheckOnly)
-    Update-CclSessionPath
-    $have = @{}
-    foreach ($t in 'uv', 'git', 'node', 'pnpm', 'claude') { $have[$t] = Test-CclTool $t }
-    $plan = @(Get-CclPrereqPlan -Have $have)
-    if ($plan.Count -eq 0) { Write-CclLog 'uv, git, Node, pnpm and Claude Code are all here.'; return @() }
-    if ($CheckOnly) {
-        Write-CclLog ('Missing (not installing, -SkipPrereqs): ' + ($plan -join ', ')) 'warn'
-        return @()
+function Find-CclSystemTools {
+    # What the PC already has: @{ name = @{ path; version } } for the tools found.
+    $found = @{}
+    $pyCode = 'import sys; print(sys.executable); print("%d.%d.%d" % sys.version_info[:3])'
+    $candidates = @()
+    if ($script:CclOnWindows -and (Test-CclTool 'py')) {
+        foreach ($v in '3.13', '3.12', '3.11', '3.10') { $candidates += , @((Get-Command py).Source, "-$v") }
     }
-    foreach ($t in $plan) {
-        Write-CclLog "Installing $t ..."
-        try { Install-CclPrereq -Name $t } catch { Write-CclLog ("$t install failed: " + $_.Exception.Message) 'warn' }
+    foreach ($n in 'python', 'python3') {
+        foreach ($c in @(Get-Command $n -CommandType Application -ErrorAction SilentlyContinue)) {
+            if ($c.Source -notlike '*\WindowsApps\*') { $candidates += , @($c.Source) }
+        }
     }
-    return @(foreach ($t in $plan) { if (-not (Test-CclTool $t)) { $t } })
+    foreach ($cand in $candidates) {
+        $exe = $cand[0]; $pre = @($cand | Select-Object -Skip 1)
+        $out = @(Invoke-CclToolOutput -Exe $exe -ToolArgs ($pre + @('-c', $pyCode)))
+        if ($out.Count -ge 2) {
+            $rec = @{ path = $out[0]; version = $out[1] }
+            if (Test-CclPythonVersion -Version $rec.version) { $found.python = $rec; break }
+            if (-not $found.python) { $found.python = $rec }
+        }
+    }
+    foreach ($n in 'node', 'uv', 'pnpm', 'git', 'claude') {
+        $c = Get-Command $n -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $c) { continue }
+        $out = @(Invoke-CclToolOutput -Exe $c.Source -ToolArgs @('--version'))
+        if ($out.Count -gt 0) { $found[$n] = @{ path = $c.Source; version = ($out[0] -replace '^(uv|git version)\s+', '') } }
+    }
+    return $found
+}
+
+function Save-CclDownload {
+    # A URL (or, for tests, a local file) into OutFile.
+    param([string]$Url, [string]$OutFile)
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $OutFile) | Out-Null
+    if ($Url -notmatch '^[a-z][a-z0-9+.-]*://') {
+        if (-not (Test-Path -LiteralPath $Url)) { throw "missing download source $Url" }
+        Copy-Item -LiteralPath $Url -Destination $OutFile -Force
+        return
+    }
+    try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
+    Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $OutFile
+}
+
+function Expand-CclZip {
+    param([string]$Zip, [string]$To)
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [IO.Compression.ZipFile]::ExtractToDirectory($Zip, $To)
+}
+
+function Install-CclPortableTool {
+    # One private tool into <InstallDir>\tools\<Name>; returns @{ path; version }. A tool
+    # already there for the same spec version is kept (no download). Nothing half-made is
+    # left behind on failure.
+    param([string]$InstallDir, [string]$Name, [System.Collections.IDictionary]$Spec)
+    $tools = Join-Path $InstallDir 'tools'
+    $dest = Join-Path $tools $Name
+    $stampPath = Join-Path $dest '.ccl-tool.json'
+    $exe = Join-Path $dest $Spec.exe
+    if ((Test-Path -LiteralPath $stampPath) -and (Test-Path -LiteralPath $exe)) {
+        try {
+            $stamp = Get-Content -LiteralPath $stampPath -Raw | ConvertFrom-Json
+            if ([string]$stamp.spec_version -eq [string]$Spec.version) { return @{ path = $exe; version = [string]$stamp.version } }
+        } catch { }
+    }
+    $url = [string]$Spec.url; $sha = [string]$Spec.sha256; $kind = [string]$Spec.kind; $version = [string]$Spec.version
+    if ($kind -eq 'claude-manifest') {
+        $platform = $(if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'win32-arm64' } else { 'win32-x64' })
+        $channel = $(if ($version -match '^\d') { $null } else { $version })
+        $v = $(if ($channel) { ([string](Invoke-RestMethod -UseBasicParsing -Uri "$url/$channel")).Trim() } else { $version })
+        if ($v -notmatch '^\d+\.\d+\.\d+') { throw "Claude Code: no version from $url/$channel" }
+        $manifest = Invoke-RestMethod -UseBasicParsing -Uri "$url/$v/manifest.json"
+        $sha = [string]$manifest.platforms.$platform.checksum
+        if (-not $sha) { throw "Claude Code: no checksum for $platform in the $v manifest" }
+        $url = "$url/$v/$platform/claude.exe"; $kind = 'file'; $version = $v
+    }
+    $dl = Join-Path (Join-Path (Join-Path $InstallDir 'cache') 'downloads') ($Name + '-' + [guid]::NewGuid().ToString('N') + '-' + (Split-Path -Leaf $url))
+    $stage = $dest + '.new'
+    try {
+        if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
+        Save-CclDownload -Url $url -OutFile $dl
+        $got = (Get-FileHash -LiteralPath $dl -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($got -ne $sha.ToLowerInvariant()) { throw "$Name download failed its SHA-256 check" }
+        New-Item -ItemType Directory -Force -Path $stage | Out-Null
+        switch ($kind) {
+            'zip' {
+                Expand-CclZip -Zip $dl -To $stage
+                if ($Spec.strip) {
+                    $inner = Join-Path $stage $Spec.strip
+                    $flat = $stage + '.flat'
+                    Move-Item -LiteralPath $inner -Destination $flat
+                    Remove-Item -LiteralPath $stage -Recurse -Force
+                    Move-Item -LiteralPath $flat -Destination $stage
+                }
+            }
+            'file' { Copy-Item -LiteralPath $dl -Destination (Join-Path $stage $Spec.exe) }
+            'sfx' {
+                $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+                try { & $dl ('-o' + $stage) '-y' 2>&1 | Out-Null; $rc = $LASTEXITCODE } finally { $ErrorActionPreference = $prev }
+                if ($rc -ne 0) { throw "$Name self-extractor exited $rc" }
+            }
+            default { throw "unknown tool kind $kind" }
+        }
+        if (-not (Test-Path -LiteralPath (Join-Path $stage $Spec.exe))) { throw "$Name has no $($Spec.exe) after unpacking" }
+        if (Test-Path -LiteralPath $dest) { Remove-Item -LiteralPath $dest -Recurse -Force }
+        Move-Item -LiteralPath $stage -Destination $dest
+        $stampText = ([ordered]@{ spec_version = [string]$Spec.version; version = $version; sha256 = $sha.ToLowerInvariant() } | ConvertTo-Json)
+        Write-CclUtf8 -Path $stampPath -Text ($stampText + "`n")
+        return @{ path = $exe; version = $version }
+    } finally {
+        Remove-Item -LiteralPath $dl -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+function Install-CclManagedPython {
+    # uv-managed CPython in tools\python (UV_PYTHON_INSTALL_DIR is set by the caller).
+    param([string]$Uv, [string]$Version)
+    $prevPref = $env:UV_PYTHON_PREFERENCE
+    $env:UV_PYTHON_PREFERENCE = 'only-managed'
+    try {
+        $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+        try {
+            & $Uv python install $Version --quiet 2>&1 | ForEach-Object { Write-CclLog ('  ' + $_) }
+            $rc = $LASTEXITCODE
+        } finally { $ErrorActionPreference = $prev }
+        if ($rc -ne 0) { throw "uv python install $Version exited $rc" }
+        $out = @(Invoke-CclToolOutput -Exe $Uv -ToolArgs @('python', 'find', $Version))
+        if ($out.Count -eq 0) { throw "uv python find $Version found nothing" }
+        $py = $out[-1]
+        if (-not (Test-Path -LiteralPath $py)) { throw "uv python find returned $py, which doesn't exist" }
+        return @{ path = $py; version = $Version }
+    } finally {
+        if ($null -eq $prevPref) { Remove-Item Env:UV_PYTHON_PREFERENCE -ErrorAction SilentlyContinue } else { $env:UV_PYTHON_PREFERENCE = $prevPref }
+    }
+}
+
+function Install-CclTools {
+    # Reuses or fetches each tool per the plan; returns the install.json `tools` record.
+    param([string]$InstallDir, [System.Collections.IDictionary]$Plan, [System.Collections.IDictionary]$Found, [System.Collections.IDictionary]$Specs)
+    $rec = [ordered]@{}
+    foreach ($n in $script:CclToolOrder) {
+        if ($Plan[$n] -eq 'reuse') {
+            $rec[$n] = [ordered]@{ source = 'reused'; path = [string]$Found[$n].path; version = [string]$Found[$n].version }
+            Write-CclLog "Using the $n already on this PC ($($Found[$n].path))."
+            continue
+        }
+        $spec = $Specs[$n]
+        if (-not $spec) { throw "no download known for $n" }
+        Write-CclLog "Setting up a private $n in the install folder ..."
+        if ($spec.kind -eq 'uv-python') {
+            $r = Install-CclManagedPython -Uv $rec.uv.path -Version ([string]$spec.version)
+        } else {
+            $r = Install-CclPortableTool -InstallDir $InstallDir -Name $n -Spec $spec
+        }
+        $rec[$n] = [ordered]@{ source = 'bundled'; path = [string]$r.path; version = [string]$r.version }
+    }
+    return $rec
 }
 
 # ---------------------------------------------------------------- launcher files
@@ -571,11 +799,17 @@ function Get-CclVenvPython {
 }
 
 function Get-CclPython {
-    # @{ Exe; Args } for running the standard-library helpers: the venv, then a working
-    # python on PATH, then uv's managed Python.
+    # @{ Exe; Args } for running the standard-library helpers: the venv, then the Python
+    # this install recorded, then a working python on PATH, then uv's managed Python.
     param([string]$InstallDir)
     $v = Get-CclVenvPython -InstallDir $InstallDir
     if ($v) { return @{ Exe = $v; Args = @() } }
+    $hint = $script:CclPythonHint
+    if (-not $hint) {
+        $st = Read-CclInstallState -InstallDir $InstallDir
+        if ($st -and $st.tools -and $st.tools.python) { $hint = [string]$st.tools.python.path }
+    }
+    if ($hint -and (Test-Path -LiteralPath $hint)) { return @{ Exe = $hint; Args = @() } }
     foreach ($n in 'python3', 'python') {
         $c = Get-Command $n -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($c) {
@@ -611,17 +845,20 @@ function Get-CclClaudeDir {
 }
 
 function Build-CclVenv {
-    param([string]$InstallDir)
-    $uv = Get-Command uv -ErrorAction SilentlyContinue | Select-Object -First 1
+    # uv venv on the recorded Python (or uv's 3.12), then the pinned requirements. The uv
+    # cache and any managed Python go to the folder through the variables set by the caller.
+    param([string]$InstallDir, [string]$Uv = '', [string]$Python = '')
+    $uv = $(if ($Uv) { @{ Source = $Uv } } else { Get-Command uv -ErrorAction SilentlyContinue | Select-Object -First 1 })
     if (-not $uv) { throw 'uv is not installed' }
+    $pyArg = $(if ($Python) { $Python } else { '3.12' })
     $venv = Join-Path $InstallDir 'venv'
     $req = Join-Path $InstallDir 'app\shared\litellm\requirements.txt'
     $ovr = Join-Path $InstallDir 'app\shared\litellm\requirements-overrides.txt'
     $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
     try {
         if (-not (Get-CclVenvPython -InstallDir $InstallDir)) {
-            Write-CclLog 'Creating the LiteLLM venv (Python 3.12) ...'
-            & $uv.Source venv --python 3.12 --quiet $venv 2>&1 | ForEach-Object { Write-CclLog ("  " + $_) }
+            Write-CclLog "Creating the LiteLLM venv (Python $pyArg) ..."
+            & $uv.Source venv --python $pyArg --quiet $venv 2>&1 | ForEach-Object { Write-CclLog ("  " + $_) }
             if ($LASTEXITCODE -ne 0) { throw "uv venv exited $LASTEXITCODE" }
         }
         $py = Get-CclVenvPython -InstallDir $InstallDir
@@ -633,12 +870,75 @@ function Build-CclVenv {
 
 # ---------------------------------------------------------------- flows
 
+function Get-CclLegacyInstallDir {
+    # Where v1.0.0 installed.
+    $base = $(if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $HOME 'AppData/Local' })
+    return (Join-Path $base 'claude-code-launcher')
+}
+
+function Get-CclSuggestedInstallDir {
+    # An existing v1.0.0 install, else %USERPROFILE%\claude-code-launcher.
+    $legacy = Get-CclLegacyInstallDir
+    if (Test-Path -LiteralPath (Join-Path $legacy 'install.json')) { return $legacy }
+    $prof = $(if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME })
+    return (Join-Path $prof 'claude-code-launcher')
+}
+
+function Get-CclTaskInstallDir {
+    # The folder the logon task points at (-CclHome "<folder>"), if there is a task.
+    if (-not (Test-CclTaskRegistered)) { return $null }
+    $t = Get-ScheduledTask -TaskName $script:CclTaskName -ErrorAction SilentlyContinue
+    foreach ($a in @($t.Actions)) { if ([string]$a.Arguments -match '-CclHome "([^"]+)"') { return $Matches[1] } }
+    return $null
+}
+
 function Resolve-CclInstallDir {
+    # For uninstall and the key changes (never asks): -InstallDir, CCL_INSTALL_DIR, the
+    # task's folder, a v1.0.0 install, else the suggestion.
     param([string]$InstallDir)
     if ($InstallDir) { return [IO.Path]::GetFullPath($InstallDir) }
     if ($env:CCL_INSTALL_DIR) { return [IO.Path]::GetFullPath($env:CCL_INSTALL_DIR) }
-    $base = $(if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $HOME 'AppData/Local' })
-    return (Join-Path $base 'claude-code-launcher')
+    $fromTask = Get-CclTaskInstallDir
+    if ($fromTask) { return $fromTask }
+    return (Get-CclSuggestedInstallDir)
+}
+
+function Test-CclInstallTarget {
+    # True when the folder may be installed into: missing, empty, or an earlier install.
+    param([string]$InstallDir)
+    if (-not (Test-Path -LiteralPath $InstallDir)) { return $true }
+    if (-not (Test-Path -LiteralPath $InstallDir -PathType Container)) { return $false }
+    if (@(Get-ChildItem -LiteralPath $InstallDir -Force).Count -eq 0) { return $true }
+    if (Test-Path -LiteralPath (Join-Path $InstallDir 'install.json')) { return $true }
+    return (Test-Path -LiteralPath (Join-Path $InstallDir 'app/windows/install.ps1'))
+}
+
+function Read-CclLocationFromPrompt {
+    param([string]$Default)
+    return (Read-Host "Install folder [$Default]")
+}
+
+function Select-CclInstallTarget {
+    # The install folder for an install: -InstallDir or CCL_INSTALL_DIR as given, else asked
+    # (the suggestion with -NonInteractive). Returns $null when it can't be used.
+    param([string]$InstallDir, [scriptblock]$LocationPrompt, [switch]$NonInteractive)
+    $given = $(if ($InstallDir) { $InstallDir } elseif ($env:CCL_INSTALL_DIR) { $env:CCL_INSTALL_DIR } else { '' })
+    if ($given -or $NonInteractive) {
+        $dir = [IO.Path]::GetFullPath($(if ($given) { $given } else { Get-CclSuggestedInstallDir }))
+        if (Test-CclInstallTarget -InstallDir $dir) { return $dir }
+        Write-CclLog "$dir already holds other files; pick an empty or new folder (or an earlier claude-inferhub install)." 'warn'
+        return $null
+    }
+    $suggest = Get-CclSuggestedInstallDir
+    for ($i = 0; $i -lt 3; $i++) {
+        $ans = [string](& $LocationPrompt $suggest)
+        $ans = $ans.Trim().Trim('"')
+        $dir = $(if ($ans) { $ans } else { $suggest })
+        try { $dir = [IO.Path]::GetFullPath($dir) } catch { Write-CclLog "'$ans' isn't a usable folder path." 'warn'; continue }
+        if (Test-CclInstallTarget -InstallDir $dir) { return $dir }
+        Write-CclLog "$dir already holds other files; pick an empty or new folder (or an earlier claude-inferhub install)." 'warn'
+    }
+    return $null
 }
 
 function Get-CclKeyErrorCode {
@@ -706,9 +1006,12 @@ function Invoke-CclUninstall {
     Stop-CclProxy -InstallDir $InstallDir
     if (Test-CclTaskRegistered) { Unregister-ScheduledTask -TaskName $script:CclTaskName -Confirm:$false -ErrorAction SilentlyContinue }
     $app = Join-Path $InstallDir 'app'
-    $claudeDir = Get-CclClaudeDir
+    # A Claude config folder inside the install goes with it; one outside (a v1.0.0 install,
+    # or -ClaudeConfigDir) gets our entries taken out.
+    $claudeDir = $(if ($state -and $state.claude_config_dir) { [string]$state.claude_config_dir } else { Get-CclClaudeDir })
+    $inside = ([IO.Path]::GetFullPath($claudeDir).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar).StartsWith($InstallDir.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar)
     $settings = Join-Path $claudeDir 'settings.json'
-    if (Test-Path -LiteralPath (Join-Path $app 'shared/claude/settings_sync.py')) {
+    if (-not $inside -and (Test-Path -LiteralPath (Join-Path $app 'shared/claude/settings_sync.py'))) {
         if (Test-Path -LiteralPath $settings) {
             $null = Invoke-CclHelper -InstallDir $InstallDir -Script (Join-Path $app 'shared/claude/settings_sync.py') -HelperArgs @('unsync', '--settings', $settings)
             if ($state -and $state.claude_settings_created) {
@@ -718,7 +1021,7 @@ function Invoke-CclUninstall {
                 } catch { }
             }
         }
-        $null = Invoke-CclHelper -InstallDir $InstallDir -Script (Join-Path $app 'shared/claude/install_planner.py') -HelperArgs @('uninstall', '--quiet')
+        $null = Invoke-CclHelper -InstallDir $InstallDir -Script (Join-Path $app 'shared/claude/install_planner.py') -HelperArgs @('uninstall', '--quiet', '--claude-dir', $claudeDir)
     }
     Remove-CclUserPath -Dir (Join-Path $InstallDir 'bin')
     $script:CclLogFile = $null
@@ -796,9 +1099,15 @@ function Invoke-CclInstall {
         [switch]$NoPath,
         [switch]$NoStart,
         [switch]$NonInteractive,
+        [switch]$PortableOnly,
+        [switch]$UseSystemTools,
+        [string]$ClaudeConfigDir = '',
         [System.Collections.IDictionary]$Environment = $null,
         [scriptblock]$KeyPrompt = { Read-CclKeyFromPrompt },
-        [scriptblock]$TinyFishPrompt = { Read-CclTinyFishKeyFromPrompt }
+        [scriptblock]$TinyFishPrompt = { Read-CclTinyFishKeyFromPrompt },
+        [scriptblock]$LocationPrompt = { param($s) Read-CclLocationFromPrompt -Default $s },
+        [scriptblock]$ToolProbe = $null,
+        [System.Collections.IDictionary]$ToolSpecs = $null
     )
     if ($null -eq $Environment) {
         $Environment = @{
@@ -806,8 +1115,9 @@ function Invoke-CclInstall {
             CCL_TINYFISH_KEY = $env:CCL_TINYFISH_KEY; TINYFISH_API_KEY = $env:TINYFISH_API_KEY
         }
     }
-    $InstallDir = Resolve-CclInstallDir -InstallDir $InstallDir
     $script:CclLogFile = $null
+    $script:CclPythonHint = $null
+    if ($Uninstall -or $ChangeKey -or $ChangeTinyFishKey) { $InstallDir = Resolve-CclInstallDir -InstallDir $InstallDir }
     if ($Uninstall) { return (Invoke-CclUninstall -InstallDir $InstallDir) }
     if ($ChangeKey) {
         return (Invoke-CclChangeKey -InstallDir $InstallDir -InferHubKey $InferHubKey -Environment $Environment -KeyPrompt $KeyPrompt -NonInteractive:$NonInteractive)
@@ -817,6 +1127,12 @@ function Invoke-CclInstall {
     }
     if ($StartPort -lt 1 -or $StartPort -gt 65535) { Write-CclLog "StartPort must be a port between 1 and 65535 (got $StartPort)." 'warn'; return 2 }
 
+    # 0. The one folder everything goes into.
+    $InstallDir = Select-CclInstallTarget -InstallDir $InstallDir -LocationPrompt $LocationPrompt -NonInteractive:$NonInteractive
+    if (-not $InstallDir) { return 2 }
+    $claudeDir = $(if ($ClaudeConfigDir) { [IO.Path]::GetFullPath($ClaudeConfigDir) } else { Join-Path $InstallDir 'claude-config' })
+    $legacyClaudeDir = Get-CclClaudeDir
+
     # 1. The keys, before anything changes on disk.
     $secretPath = Join-Path $InstallDir 'secrets\inferhub.env'
     $tinyFishPath = Join-Path $InstallDir 'secrets\tinyfish.env'
@@ -825,23 +1141,49 @@ function Invoke-CclInstall {
         $tinyFish = Resolve-CclTinyFishKey -Flag $TinyFishKey -Environment $Environment -StoredPath $tinyFishPath -Prompt $TinyFishPrompt -NonInteractive:$NonInteractive -Skip:$SkipTinyFish
     } catch { Write-CclLog $_.Exception.Message 'warn'; return (Get-CclKeyErrorCode $_) }
 
-    # 2. Prerequisites.
-    $missing = @(Install-CclPrereqs -CheckOnly:$SkipPrereqs)
-    if ($missing.Count -gt 0) {
-        Write-CclLog ('Could not install: ' + ($missing -join ', ') + '. Install them by hand and run this again.') 'warn'
-        return 3
+    # 2. Tools: reused from the PC or private copies in the folder. Every tool's data goes
+    # to the folder through these variables, for this process only.
+    $savedEnv = Use-CclToolEnv -Vars (Get-CclToolEnv -InstallDir $InstallDir -ClaudeConfigDir $claudeDir)
+    try {
+        return (Invoke-CclInstallSteps -InstallDir $InstallDir -ClaudeDir $claudeDir -LegacyClaudeDir $legacyClaudeDir -Key $key -TinyFish $tinyFish `
+            -Ref $Ref -Source $Source -StartPort $StartPort -SkipPrereqs:$SkipPrereqs -SkipVenv:$SkipVenv -NoTask:$NoTask -NoPath:$NoPath `
+            -NoStart:$NoStart -PortableOnly:$PortableOnly -UseSystemTools:$UseSystemTools -ToolProbe $ToolProbe -ToolSpecs $ToolSpecs)
+    } finally {
+        Restore-CclToolEnv -Saved $savedEnv
+        $script:CclPythonHint = $null
+    }
+}
+
+function Invoke-CclInstallSteps {
+    # Steps 2 to 8 of the install (spec: Install), with the tool variables already set.
+    param([string]$InstallDir, [string]$ClaudeDir, [string]$LegacyClaudeDir, [string]$Key, [string]$TinyFish, [string]$Ref,
+        [string]$Source, [int]$StartPort, [switch]$SkipPrereqs, [switch]$SkipVenv, [switch]$NoTask, [switch]$NoPath,
+        [switch]$NoStart, [switch]$PortableOnly, [switch]$UseSystemTools, [scriptblock]$ToolProbe, [System.Collections.IDictionary]$ToolSpecs)
+    $secretPath = Join-Path $InstallDir 'secrets\inferhub.env'
+    $tinyFishPath = Join-Path $InstallDir 'secrets\tinyfish.env'
+    New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir 'logs') | Out-Null
+    $script:CclLogFile = Join-Path $InstallDir 'logs/install.log'
+    Write-CclLog "Installing claude-inferhub $($script:CclVersion) into $InstallDir"
+    $tools = [ordered]@{}
+    if (-not $SkipPrereqs) {
+        $specs = $(if ($ToolSpecs) { $ToolSpecs } else { $script:CclToolSpecs })
+        $found = $(if ($ToolProbe) { & $ToolProbe } else { Find-CclSystemTools })
+        $plan = Get-CclToolPlan -Found $found -PortableOnly:$PortableOnly -UseSystemTools:$UseSystemTools
+        try { $tools = Install-CclTools -InstallDir $InstallDir -Plan $plan -Found $found -Specs $specs }
+        catch { Write-CclLog ('Could not set up the tools: ' + $_.Exception.Message + '. Check the network and run this again.') 'warn'; return 3 }
+        $null = Use-CclToolEnv -Vars @{ PATH = (Get-CclToolEnv -InstallDir $InstallDir -State @{ tools = $tools; claude_config_dir = $ClaudeDir }).PATH }
+        if ($tools.git -and $tools.git.source -eq 'bundled') { $env:CLAUDE_CODE_GIT_BASH_PATH = Join-Path $InstallDir 'tools\git\bin\bash.exe' }
+        $script:CclPythonHint = [string]$tools.python.path
     }
 
     # 3. Launcher files, then the key.
     foreach ($d in 'state', 'logs', 'bin', 'secrets') { New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir $d) | Out-Null }
-    $script:CclLogFile = Join-Path $InstallDir 'logs/install.log'
-    Write-CclLog "Installing claude-inferhub $($script:CclVersion) into $InstallDir"
     try { Install-CclAppFiles -InstallDir $InstallDir -Source $Source -Ref $Ref }
     catch { Write-CclLog $_.Exception.Message 'warn'; return 5 }
-    Write-CclSecret -Path $secretPath -Key $key
+    Write-CclSecret -Path $secretPath -Key $Key
     Write-CclLog 'InferHub key saved for this user.'
-    if ($tinyFish) {
-        Write-CclSecret -Path $tinyFishPath -Key $tinyFish -Name 'TINYFISH_API_KEY'
+    if ($TinyFish) {
+        Write-CclSecret -Path $tinyFishPath -Key $TinyFish -Name 'TINYFISH_API_KEY'
         Write-CclLog 'TinyFish key saved for this user.'
     } else {
         Write-CclNoTinyFishWarning
@@ -849,7 +1191,9 @@ function Invoke-CclInstall {
 
     # 4. The LiteLLM venv.
     if (-not $SkipVenv) {
-        try { Build-CclVenv -InstallDir $InstallDir } catch { Write-CclLog ('Building the venv failed: ' + $_.Exception.Message) 'warn'; return 6 }
+        $uvExe = $(if ($tools.uv) { [string]$tools.uv.path } else { '' })
+        $pyExe = $(if ($tools.python) { [string]$tools.python.path } else { '' })
+        try { Build-CclVenv -InstallDir $InstallDir -Uv $uvExe -Python $pyExe } catch { Write-CclLog ('Building the venv failed: ' + $_.Exception.Message) 'warn'; return 6 }
     }
 
     # 5. Port and install.json.
@@ -859,9 +1203,27 @@ function Invoke-CclInstall {
     $probe = { param($p) Get-CclPortState -Port $p -InstanceId $instance }   # $instance: dynamic scope
     $port = Select-CclPort -Start $StartPort -Saved $saved -Probe $probe
     if ($saved -and $port -ne $saved) { Write-CclLog "Port $saved is taken by another program; using $port." }
-    $settingsPath = Join-Path (Get-CclClaudeDir) 'settings.json'
+    $app = Join-Path $InstallDir 'app'
+    $settingsPath = Join-Path $ClaudeDir 'settings.json'
+    # Upgrading v1.0.0 (no claude_config_dir): take out what it put into the profile's Claude config.
+    if ($old -and -not $old.claude_config_dir -and $LegacyClaudeDir -and ([IO.Path]::GetFullPath($LegacyClaudeDir) -ne [IO.Path]::GetFullPath($ClaudeDir))) {
+        Write-CclLog "Moving Claude Code's launcher settings out of $LegacyClaudeDir into the install folder ..."
+        $legacySettings = Join-Path $LegacyClaudeDir 'settings.json'
+        if (Test-Path -LiteralPath $legacySettings) {
+            $rcU = Invoke-CclHelper -InstallDir $InstallDir -Script (Join-Path $app 'shared/claude/settings_sync.py') -HelperArgs @('unsync', '--settings', $legacySettings)
+            if ($rcU -eq 0 -and $old.claude_settings_created) {
+                try {
+                    $doc = Get-Content -LiteralPath $legacySettings -Raw -Encoding UTF8 | ConvertFrom-Json
+                    if (@($doc.PSObject.Properties).Count -eq 0) { Remove-Item -LiteralPath $legacySettings -Force }
+                } catch { }
+            }
+        }
+        $null = Invoke-CclHelper -InstallDir $InstallDir -Script (Join-Path $app 'shared/claude/install_planner.py') -HelperArgs @('uninstall', '--quiet', '--claude-dir', $LegacyClaudeDir)
+        $old = $null
+    }
     $created = $(if ($old) { [bool]$old.claude_settings_created } else { -not (Test-Path -LiteralPath $settingsPath) })
-    Write-CclInstallState -InstallDir $InstallDir -State @{ ref = $Ref; port = $port; instance_id = $instance; claude_settings_created = $created }
+    Write-CclInstallState -InstallDir $InstallDir -State @{ ref = $Ref; port = $port; instance_id = $instance; claude_settings_created = $created
+        claude_config_dir = $ClaudeDir; tools = $tools }
     Write-CclLog "Proxy port: $port"
 
     # 6. The claude-inferhub command.
@@ -869,12 +1231,11 @@ function Invoke-CclInstall {
     Write-CclUtf8 -Path (Join-Path $bin 'claude-inferhub.cmd') -Text ((Get-CclShimText -InstallDir $InstallDir) + "`r`n")
     if (-not $NoPath) { Add-CclUserPath -Dir $bin }
 
-    # 7. Claude Code settings and the planner sub-agent.
-    $app = Join-Path $InstallDir 'app'
+    # 7. Claude Code settings and the planner sub-agent, in the folder's Claude config.
     $rc = Invoke-CclHelper -InstallDir $InstallDir -Script (Join-Path $app 'shared/claude/settings_sync.py') -HelperArgs @('sync', '--settings', $settingsPath)
     if ($rc -eq 3) { Write-CclLog "Claude Code settings.json is read-only, so it was left untouched; clear the read-only flag and run this again to get the model picker." 'warn' }
     elseif ($rc -ne 0) { Write-CclLog 'Could not update Claude Code settings.json (left as it was).' 'warn' }
-    $null = Invoke-CclHelper -InstallDir $InstallDir -Script (Join-Path $app 'shared/claude/install_planner.py') -HelperArgs @('install', '--quiet')
+    $null = Invoke-CclHelper -InstallDir $InstallDir -Script (Join-Path $app 'shared/claude/install_planner.py') -HelperArgs @('install', '--quiet', '--claude-dir', $ClaudeDir)
 
     # 8. Logon task and the proxy.
     if (-not $NoTask) {
@@ -897,6 +1258,7 @@ $cclArgs = @{
     Uninstall = $Uninstall; ChangeKey = $ChangeKey; TinyFishKey = $TinyFishKey; SkipTinyFish = $SkipTinyFish
     ChangeTinyFishKey = $ChangeTinyFishKey; SkipPrereqs = $SkipPrereqs; SkipVenv = $SkipVenv; NoTask = $NoTask
     NoPath = $NoPath; NoStart = $NoStart; NonInteractive = $NonInteractive
+    PortableOnly = $PortableOnly; UseSystemTools = $UseSystemTools; ClaudeConfigDir = $ClaudeConfigDir
 }
 $cclCode = Invoke-CclInstall @cclArgs
 if ($PSCommandPath) { exit $cclCode }

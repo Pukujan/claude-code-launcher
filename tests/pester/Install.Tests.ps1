@@ -59,6 +59,7 @@ BeforeAll {
                 if ($f.Name -eq 'install.json' -and -not $KeepInstance) {
                     $j = Get-Content -LiteralPath $f.FullName -Raw | ConvertFrom-Json
                     $j.instance_id = '<id>'
+                    if ($j.PSObject.Properties.Name -contains 'claude_config_dir') { $j.claude_config_dir = ([string]$j.claude_config_dir).Replace($Sandbox.Root, '<root>') }
                     $out[$rel] = ($j | ConvertTo-Json -Compress)
                 } elseif ($f.Length -lt 1MB) {
                     # The sandbox root differs between sandboxes (the shim embeds it); normalise it.
@@ -885,13 +886,15 @@ Describe 'Tool versions and plan (v1.0.1 #7)' -Tag 'Spec' {
         foreach ($n in 'python', 'node', 'uv', 'pnpm', 'git', 'claude') { $plan[$n] | Should -Be 'bundle' }
     }
     It 'keeps every tool variable inside the folder for <_>' -ForEach @(0, 1, 2, 3, 4) {
-        $dir = $script:NonAsciiDirs[$_]
+        # The last part of each non-ASCII sample path, under the real temp folder (Linux pwsh has no C: drive).
+        $names = @($script:Jose, $script:Cjk, ([string][char]0x00DC + 'ber ' + [char]0x00C5 + 'se'), ('M' + [char]0x00FC + 'ller (x86) & co'), 'plain')
+        $dir = Join-Path ([IO.Path]::GetTempPath()) ($names[$_] + ' ccl')
         $e = Get-CclToolEnv -InstallDir $dir
         $e.CLAUDE_CONFIG_DIR | Should -Be (Join-Path $dir 'claude-config')
-        $e.UV_CACHE_DIR | Should -Be (Join-Path $dir 'cache/uv')
-        $e.UV_PYTHON_INSTALL_DIR | Should -Be (Join-Path $dir 'tools/python')
-        $e.npm_config_store_dir | Should -Be (Join-Path $dir 'cache/pnpm-store')
-        $e.PNPM_HOME | Should -Be (Join-Path $dir 'tools/pnpm')
+        $e.UV_CACHE_DIR | Should -Be (Join-Path (Join-Path $dir 'cache') 'uv')
+        $e.UV_PYTHON_INSTALL_DIR | Should -Be (Join-Path (Join-Path $dir 'tools') 'python')
+        $e.npm_config_store_dir | Should -Be (Join-Path (Join-Path $dir 'cache') 'pnpm-store')
+        $e.PNPM_HOME | Should -Be (Join-Path (Join-Path $dir 'tools') 'pnpm')
         $e.DISABLE_AUTOUPDATER | Should -Be '1'
     }
     It 'accepts a missing, empty or earlier-install folder and refuses any other' {
@@ -964,8 +967,9 @@ Describe 'Choosing the install folder (v1.0.1 #7)' -Tag 'Spec' {
     It 'asks for the folder, suggests %USERPROFILE%\claude-code-launcher and installs where the answer says' {
         $target = Join-Path $sb.Root ('picked ' + $script:Jose)
         $script:suggested = $null
+        $script:target = $target
         $rc = Invoke-SandboxInstall $sb -Extra @{ InstallDir = $null; InferHubKey = 'ih-x'; SkipTinyFish = $true; NonInteractive = $false
-            LocationPrompt = { param($s) $script:suggested = $s; $target }.GetNewClosure() }
+            LocationPrompt = { param($s) $script:suggested = $s; $script:target } }
         $rc | Should -Be 0
         $script:suggested | Should -Be (Join-Path $env:USERPROFILE 'claude-code-launcher')
         Test-Path -LiteralPath (Join-Path $target 'install.json') | Should -BeTrue
@@ -1147,7 +1151,7 @@ Describe 'Self-contained relations (v1.0.1 #7)' -Tag 'Metamorphic' -Skip:(-not $
             $one = Get-InstallSnapshot $sb -KeepInstance
             $tools1 = Get-TreeSnapshot (Join-Path $sb.InstallDir 'tools')
             $nd = Get-NoDownloadSpecs
-            foreach ($n in 'uv', 'node', 'pnpm', 'git', 'claude') { $nd[$n].version = $f[$n].version }
+            foreach ($n in 'uv', 'node', 'pnpm', 'git', 'claude') { $nd[$n].version = $f[$n].version; $nd[$n].exe = $f[$n].exe }
             Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-m'; SkipPrereqs = $false; PortableOnly = $true; ClaudeConfigDir = $null; ToolSpecs = $nd; ToolProbe = { @{} } } | Should -Be 0
             Compare-Snapshot $one (Get-InstallSnapshot $sb -KeepInstance) | Should -Be ''
             Compare-Snapshot $tools1 (Get-TreeSnapshot (Join-Path $sb.InstallDir 'tools')) | Should -Be ''
