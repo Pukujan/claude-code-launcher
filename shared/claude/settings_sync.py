@@ -2,10 +2,12 @@
 """Merge the launcher's keys into Claude Code's settings.json (issue #61).
 
   sync    sets model = "sonnet", advisorModel = "fable" and modelPicker.options,
-          keeping every other key as it is. Creates the file (and its folder)
-          when it is missing.
+          and adds env.CLAUDE_CODE_GLOB_TIMEOUT_SECONDS = "120" unless env already
+          has a value for it (issue #69), keeping every other key as it is.
+          Creates the file (and its folder) when it is missing.
   unsync  removes those keys again, but only when they still hold the launcher's
-          values, so a user's own choices survive an uninstall.
+          values, so a user's own choices survive an uninstall. An env left
+          empty by that is removed too.
 
 The settings file is --settings, else $CLAUDE_CONFIG_DIR/settings.json, else
 ~/.claude/settings.json. The picker options come from --options-file (a JSON
@@ -26,6 +28,10 @@ from pathlib import Path
 
 MODEL = "sonnet"
 ADVISOR = "fable"
+# Claude Code stops every ripgrep run (Grep, Glob) after this many seconds, 20 by
+# default; cold scans of big folders on Windows take longer (issue #69).
+GLOB_TIMEOUT_KEY = "CLAUDE_CODE_GLOB_TIMEOUT_SECONDS"
+GLOB_TIMEOUT = "120"
 # Descriptions the launcher writes; an option list made only of these is ours.
 OUR_MARKERS = ("via local LiteLLM", "InferHub")
 
@@ -43,6 +49,11 @@ def sync(settings: dict, options: list) -> dict:
     out["model"] = MODEL
     out["advisorModel"] = ADVISOR
     out["modelPicker"] = {"options": list(options)}
+    env = out.get("env")
+    if env is None:
+        out["env"] = {GLOB_TIMEOUT_KEY: GLOB_TIMEOUT}
+    elif isinstance(env, dict) and env.get(GLOB_TIMEOUT_KEY) in (None, ""):
+        out["env"] = {**env, GLOB_TIMEOUT_KEY: GLOB_TIMEOUT}
     return out
 
 
@@ -70,6 +81,13 @@ def unsync(settings: dict) -> dict:
         del out["advisorModel"]
     if out.get("model") == MODEL:
         del out["model"]
+    env = out.get("env")
+    if isinstance(env, dict) and env.get(GLOB_TIMEOUT_KEY) == GLOB_TIMEOUT:
+        env = {k: v for k, v in env.items() if k != GLOB_TIMEOUT_KEY}
+        if env:
+            out["env"] = env
+        else:
+            del out["env"]
     return out
 
 

@@ -12,7 +12,12 @@ import json
 
 import pytest
 
-from test_noninteractive import KINDS, base_env, box, health_port, run_launcher  # noqa: F401
+import test_noninteractive as ni
+from test_noninteractive import KINDS, base_env, run_launcher
+
+# The same fixtures as test_noninteractive.py (a sandbox with a fake claude, a health server).
+box = ni.box
+health_port = ni.health_port
 
 GLOB = "CLAUDE_CODE_GLOB_TIMEOUT_SECONDS"
 

@@ -824,6 +824,8 @@ function Invoke-CclInstall {
     $rc = Invoke-CclHelper -InstallDir $InstallDir -Script (Join-Path $app 'shared/claude/settings_sync.py') -HelperArgs @('sync', '--settings', $settingsPath)
     if ($rc -ne 0) { Write-CclLog 'Could not update Claude Code settings.json (left as it was).' 'warn' }
     $null = Invoke-CclHelper -InstallDir $InstallDir -Script (Join-Path $app 'shared/claude/install_planner.py') -HelperArgs @('install', '--quiet')
+    # settings_sync.py also gave Claude Code 120 s for ripgrep (issue #69); check its search works.
+    if (-not $SkipPrereqs) { $null = Test-CclClaudeSearch }
 
     # 8. Logon task and the proxy.
     if (-not $NoTask) {
@@ -836,6 +838,20 @@ function Invoke-CclInstall {
     }
     Write-CclLog 'All set. Open a new terminal and run: claude-inferhub'
     return 0
+}
+
+function Test-CclClaudeSearch {
+    # True when `claude doctor` reports "Search: OK", Claude Code's check of its ripgrep
+    # (issue #69). Otherwise warns with the line it printed and returns $false. Never throws.
+    [CmdletBinding()]
+    param([string]$Claude = 'claude')
+    $out = ''
+    try { $out = (& $Claude doctor 2>&1 | Out-String) } catch { $out = '' }
+    if ($out -match '(?m)^\s*Search:\s*OK\b') { return $true }
+    $line = ([regex]::Match($out, '(?m)^\s*Search:.*$')).Value.Trim()
+    $detail = $(if ($line) { " ($line)" } else { ' (no Search line; is Claude Code installed?)' })
+    Write-CclLog ("Claude Code's search check did not pass" + $detail + ". Grep and Glob need it; run 'claude doctor' to see why.") 'warn'
+    return $false
 }
 
 # ---------------------------------------------------------------- main
