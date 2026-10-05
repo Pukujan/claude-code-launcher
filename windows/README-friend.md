@@ -26,8 +26,8 @@ irm https://github.com/Pukujan/claude-code-launcher/releases/latest/download/ins
 ```
 
 That link always gets the newest release. To pin this exact version instead,
-use `irm https://github.com/Pukujan/claude-code-launcher/releases/download/v1.0.1-windows/install.ps1 | iex`. The old v1.0.0 link still works, but it installs 1.0.0,
-which has the bugs fixed in 1.0.1 (a broken `claude-inferhub` command when
+use `irm https://github.com/Pukujan/claude-code-launcher/releases/download/v1.0.2-windows/install.ps1 | iex`. The old v1.0.0 link still works, but it installs 1.0.0,
+which has the bugs fixed in 1.0.1 and 1.0.2 (a broken `claude-inferhub` command when
 your Windows user name has accents or other non-English letters, among
 others), so use the link above.
 
@@ -75,7 +75,7 @@ If you have the GitHub CLI and access to the repository, this gets the same
 file:
 
 ```powershell
-gh release download v1.0.1-windows -R Pukujan/claude-code-launcher -p install.ps1
+gh release download v1.0.2-windows -R Pukujan/claude-code-launcher -p install.ps1
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
@@ -175,9 +175,11 @@ the launcher's Claude config with it. Tools that were already on your PC stay.
 Without `-InstallDir` the uninstaller finds the folder through the logon task.
 
 If `install.json` is gone, the uninstaller can't be sure it made the folder,
-so it removes only its own pieces (the settings entries, the planner, the
-keys in `secrets\`, the command and the PATH entry), keeps the folder and
-tells you so. Delete the folder yourself if you're sure.
+so it removes only its own pieces (the settings entries and the planner in
+the folder's `claude-config`, the keys in `secrets\`, the command and the
+PATH entry), keeps the folder and tells you so. Your own Claude settings
+(`~\.claude`) are left alone unless they show the launcher wrote to them.
+Delete the folder yourself if you're sure.
 
 ## Claude Code settings.json
 

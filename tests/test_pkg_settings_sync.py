@@ -95,8 +95,10 @@ def test_cli_leaves_invalid_json_untouched(tmp_path):
 
 @pytest.mark.spec
 def test_unsync_removes_only_ours():
-    synced = S.sync({"theme": "dark", "env": {"X": "1"}}, OPTIONS)
-    assert S.unsync(synced) == {"theme": "dark", "env": {"X": "1"}}
+    src = {"theme": "dark", "env": {"X": "1"}}
+    synced = S.sync(src, OPTIONS)
+    # Since #72, unsync takes the search timeout back only with sync's record.
+    assert S.unsync(synced, S.sync_record(src, synced)) == {"theme": "dark", "env": {"X": "1"}}
 
 
 @pytest.mark.spec
@@ -141,7 +143,8 @@ def test_sync_leaves_an_env_that_is_not_an_object_alone():
 
 @pytest.mark.spec
 def test_unsync_removes_the_timeout_only_while_it_is_ours():
-    assert S.unsync(S.sync({}, OPTIONS)) == {}
+    synced = S.sync({}, OPTIONS)
+    assert S.unsync(synced, S.sync_record({}, synced)) == {}
     mine = {"env": {GLOB: "300"}}
     assert S.unsync(mine) == mine
 
@@ -166,7 +169,7 @@ def test_sync_keeps_every_user_env_value_and_unsync_restores_it(s, env):
     src = dict(s, env=env) if env else s
     out = S.sync(src, OPTIONS)
     assert out["env"] == {**env, GLOB: "120"}
-    assert S.unsync(out) == src
+    assert S.unsync(out, S.sync_record(src, out)) == src
 
 
 @pytest.mark.property
@@ -203,7 +206,8 @@ def test_sync_is_idempotent(s, adv, model):
 @settings(max_examples=200, deadline=None)
 @given(user_settings)
 def test_unsync_inverts_sync_for_settings_without_our_keys(s):
-    assert S.unsync(S.sync(s, OPTIONS)) == s
+    out = S.sync(s, OPTIONS)
+    assert S.unsync(out, S.sync_record(s, out)) == s
 
 
 @pytest.mark.property

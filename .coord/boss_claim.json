@@ -1,15 +1,15 @@
 {
   "schema_version": "claude-code-launcher.boss-claim.v1",
-  "status": "held",
-  "who_is_boss_now": "executor-claude-code-launcher",
-  "last_heartbeat": "2026-10-05T03:36:31Z",
-  "last_github_activity": "2026-10-05T03:36:31Z",
+  "status": "vacant",
+  "who_is_boss_now": null,
+  "last_heartbeat": "2026-10-05T03:45:18Z",
+  "last_github_activity": "2026-10-05T03:45:18Z",
   "claim_queue": [],
-  "recorded_at": "2026-10-05T03:36:31Z",
-  "notes": "Claimed by executor-claude-code-launcher for CCL-0072 / issue #72, the v1.0.2-windows fixes. Heartbeat renewed with every push, at most 15 minutes apart, against the 30-minute lease. Released (status vacant) in the final push before merge.",
+  "recorded_at": "2026-10-05T03:45:18Z",
+  "notes": "Released by executor-claude-code-launcher after CCL-0072 / issue #72 (v1.0.2-windows fixes) went green; the seat is vacant for the merge.",
   "lease_ttl_minutes": 30,
   "task": "CCL-0072",
   "issue": "https://github.com/Pukujan/claude-code-launcher/issues/72",
   "branch": "ccl-0072-windows-v102",
-  "phase": "red tests"
+  "phase": "released for merge"
 }

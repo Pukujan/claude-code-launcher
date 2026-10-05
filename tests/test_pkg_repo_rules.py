@@ -9,7 +9,7 @@ README = REPO / "windows" / "README-friend.md"
 CI = REPO / ".github" / "workflows" / "launcher-ci.yml"
 SPEC = REPO / "docs" / "specs" / "windows-package.md"
 ONE_LINER = "irm https://github.com/Pukujan/claude-code-launcher/releases/latest/download/install.ps1 | iex"
-PINNED = "https://github.com/Pukujan/claude-code-launcher/releases/download/v1.0.1-windows/install.ps1"
+PINNED = "https://github.com/Pukujan/claude-code-launcher/releases/download/v1.0.2-windows/install.ps1"
 
 
 def code_lines(text):
@@ -42,7 +42,7 @@ def test_installer_declares_the_spec_parameters():
     for p in ("InferHubKey", "InstallDir", "Ref", "Source", "StartPort", "Uninstall", "ChangeKey", "SkipPrereqs",
               "SkipVenv", "NoTask", "NoPath", "NoStart", "NonInteractive"):
         assert re.search(r"\$" + p + r"\b", text), p
-    assert "v1.0.1-windows" in text and "v1.0.0-windows" not in text
+    assert "v1.0.2-windows" in text and "v1.0.0-windows" not in text
     assert "--python" in text and "3.12" in text
     for p in ("PortableOnly", "UseSystemTools", "ClaudeConfigDir"):
         assert re.search(r"\$" + p + r"\b", text), p
