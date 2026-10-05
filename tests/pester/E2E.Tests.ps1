@@ -92,3 +92,93 @@ Describe 'Windows install end to end' -Tag 'E2E' -Skip:(-not $script:OnWindows) 
         { Invoke-RestMethod "http://127.0.0.1:$($st.port)/ccl/identity" -TimeoutSec 3 } | Should -Throw
     }
 }
+
+# v1.0.1 (issue #63): the shim must work from a folder whose name cmd.exe can't read in its
+# OEM code page. Installs into "ccl e2e José 测试 <guid>" (built from code points, so Windows
+# PowerShell 5.1 reads this file correctly) and runs bin\claude-inferhub.cmd through a real
+# cmd.exe with code page 437.
+Describe 'claude-inferhub.cmd from a non-ASCII folder through cmd.exe' -Tag 'E2E' -Skip:(-not $script:OnWindows) {
+    BeforeAll {
+        $script:Repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+        $script:Installer = Join-Path $Repo 'windows\install.ps1'
+        $name = 'ccl e2e Jos' + [char]0x00E9 + ' ' + [char]0x6D4B + [char]0x8BD5 + ' ' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+        $script:Root = Join-Path ([IO.Path]::GetTempPath()) $name
+        $script:InstallDir = Join-Path $Root 'install'
+        $script:ClaudeDir = Join-Path $Root 'claude'
+        $script:Shim = Join-Path $InstallDir 'bin\claude-inferhub.cmd'
+        New-Item -ItemType Directory -Force -Path $ClaudeDir | Out-Null
+        $env:CLAUDE_CONFIG_DIR = $ClaudeDir
+        $script:Log = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Installer -Source $Repo -InstallDir $InstallDir `
+            -InferHubKey 'ih-e2e-nonascii' -SkipTinyFish -StartPort 47600 -SkipPrereqs -SkipVenv -NoTask -NoPath -NoStart -NonInteractive *>&1 | Out-String
+        $script:InstallExit = $LASTEXITCODE
+        Write-Host $Log
+
+        function Invoke-ShimCmd {
+            # cmd.exe /d /c "chcp 437 >nul & "<shim>" <args>", built as one string so nothing
+            # re-quotes it. Returns exit code and output.
+            param([string]$Arguments, [hashtable]$Env = @{})
+            $psi = [Diagnostics.ProcessStartInfo]::new("$env:WINDIR\System32\cmd.exe")
+            $psi.Arguments = '/d /c "chcp 437 >nul & "' + $script:Shim + '" ' + $Arguments + '"'
+            $psi.UseShellExecute = $false
+            $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true; $psi.RedirectStandardInput = $true
+            $psi.EnvironmentVariables.Remove('CCL_HOME')
+            foreach ($k in $Env.Keys) { $psi.EnvironmentVariables[$k] = $Env[$k] }
+            $p = [Diagnostics.Process]::Start($psi)
+            $p.StandardInput.Close()
+            $errTask = $p.StandardError.ReadToEndAsync()
+            $out = $p.StandardOutput.ReadToEnd()
+            $p.WaitForExit()
+            return @{ Code = $p.ExitCode; Out = $out; Err = $errTask.Result }
+        }
+    }
+    AfterAll {
+        if (Test-Path -LiteralPath $InstallDir) {
+            try { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Installer -InstallDir $InstallDir -Uninstall -NonInteractive *>&1 | Out-Null } catch {}
+        }
+        Remove-Item Env:CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $Root) { Remove-Item -LiteralPath $Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'installs into the non-ASCII folder' { $InstallExit | Should -Be 0 }
+    It 'writes a pure-ASCII shim' {
+        @([IO.File]::ReadAllBytes($Shim) | Where-Object { $_ -ge 0x80 }).Count | Should -Be 0
+    }
+    It 'cmd.exe runs --set-tinyfish-key against the right folder' {
+        $r = Invoke-ShimCmd -Arguments '--set-tinyfish-key' -Env @{ CCL_TINYFISH_KEY = 'tf-e2e-nonascii' }
+        $r.Code | Should -Be 0 -Because ($r.Out + $r.Err)
+        [IO.File]::ReadAllText((Join-Path $InstallDir 'secrets\tinyfish.env')) | Should -Be "TINYFISH_API_KEY=tf-e2e-nonascii`n"
+        ($r.Out + $r.Err) | Should -Not -Match 'tf-e2e-nonascii'
+    }
+    It 'cmd.exe runs the launcher, which finds the install and points Claude at its port' {
+        $st = Get-Content -LiteralPath (Join-Path $InstallDir 'install.json') -Raw | ConvertFrom-Json
+        # Stand in for this install's proxy: /health/* and /ccl/identity with our instance id.
+        $l = [Net.HttpListener]::new()
+        $l.Prefixes.Add("http://127.0.0.1:$($st.port)/")
+        $l.Start()
+        $ps = [powershell]::Create()
+        $null = $ps.AddScript({
+            param($l, $id)
+            while ($l.IsListening) {
+                try { $c = $l.GetContext() } catch { break }
+                if ($c.Request.Url.AbsolutePath -eq '/ccl/identity') {
+                    $b = [Text.Encoding]::UTF8.GetBytes('{"app":"claude-code-launcher","instance":"' + $id + '"}')
+                    $c.Response.ContentType = 'application/json'
+                    $c.Response.OutputStream.Write($b, 0, $b.Length)
+                } elseif ($c.Request.Url.AbsolutePath -notlike '/health*') { $c.Response.StatusCode = 404 }
+                $c.Response.Close()
+            }
+        }).AddArgument($l).AddArgument([string]$st.instance_id)
+        $null = $ps.BeginInvoke()
+        try {
+            $r = Invoke-ShimCmd -Arguments '--non-interactive --print-env json'
+            $r.Code | Should -Be 0 -Because ($r.Out + $r.Err)
+            $doc = (@($r.Out -split "`r?`n" | Where-Object { $_.Trim() }) | Select-Object -Last 1) | ConvertFrom-Json
+            $doc.set.ANTHROPIC_BASE_URL | Should -Be "http://127.0.0.1:$($st.port)"
+        } finally { $l.Stop(); $ps.Dispose() }
+    }
+    It 'cmd.exe runs --uninstall and the folder is gone' {
+        $r = Invoke-ShimCmd -Arguments '--uninstall'
+        $r.Code | Should -Be 0 -Because ($r.Out + $r.Err)
+        Test-Path -LiteralPath $InstallDir | Should -BeFalse
+    }
+}

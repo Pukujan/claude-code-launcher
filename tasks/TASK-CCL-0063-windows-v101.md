@@ -22,3 +22,5 @@
 ## Checkpoint log
 
 - 2026-10-04 8:10 PM ET: issue #63 opened, claim taken in `.coord`.
+- 2026-10-04 8:08 PM ET: spec updated (`5c98df0`).
+- 2026-10-04 8:20 PM ET: red tests: pytest 30 failed, Pester 43 failed; the Windows E2E adds a real cmd.exe run from a non-ASCII folder.

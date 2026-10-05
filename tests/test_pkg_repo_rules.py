@@ -8,7 +8,8 @@ INSTALL = REPO / "windows" / "install.ps1"
 README = REPO / "windows" / "README-friend.md"
 CI = REPO / ".github" / "workflows" / "launcher-ci.yml"
 SPEC = REPO / "docs" / "specs" / "windows-package.md"
-ONE_LINER = "irm https://github.com/Pukujan/claude-code-launcher/releases/download/v1.0.0-windows/install.ps1 | iex"
+ONE_LINER = "irm https://github.com/Pukujan/claude-code-launcher/releases/latest/download/install.ps1 | iex"
+PINNED = "https://github.com/Pukujan/claude-code-launcher/releases/download/v1.0.1-windows/install.ps1"
 
 
 def code_lines(text):
@@ -41,7 +42,7 @@ def test_installer_declares_the_spec_parameters():
     for p in ("InferHubKey", "InstallDir", "Ref", "Source", "StartPort", "Uninstall", "ChangeKey", "SkipPrereqs",
               "SkipVenv", "NoTask", "NoPath", "NoStart", "NonInteractive"):
         assert re.search(r"\$" + p + r"\b", text), p
-    assert "v1.0.0-windows" in text
+    assert "v1.0.1-windows" in text and "v1.0.0-windows" not in text
     assert "--python" in text and "3.12" in text
     assert "https://claude.ai/install.ps1" in text
 
@@ -98,3 +99,17 @@ def test_friend_readme_explains_the_free_tinyfish_key():
     assert "agent.tinyfish.ai" in text
     assert "--set-tinyfish-key" in text
     assert "-TinyFishKey" in text
+
+
+@pytest.mark.spec
+def test_docs_show_the_latest_one_liner_and_the_pinned_url():
+    for doc in (README, REPO / "README.md", SPEC):
+        text = doc.read_text(encoding="utf-8")
+        assert ONE_LINER in text, doc
+    assert PINNED in README.read_text(encoding="utf-8")
+
+
+@pytest.mark.spec
+def test_ci_runs_the_shim_through_a_real_cmd_exe():
+    e2e = (REPO / "tests" / "pester" / "E2E.Tests.ps1").read_text(encoding="utf-8")
+    assert "cmd.exe" in e2e and "claude-inferhub.cmd" in e2e

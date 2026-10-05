@@ -78,6 +78,26 @@ BeforeAll {
         if ($s -and (Test-Path -LiteralPath $s.Root)) { Remove-Item -LiteralPath $s.Root -Recurse -Force }
     }
 
+    # Non-ASCII names built from code points, so Windows PowerShell 5.1 reading this BOM-less
+    # file in the ANSI code page still gets the right characters.
+    $script:Jose = 'Jos' + [char]0x00E9
+    $script:Cjk = [string][char]0x6D4B + [char]0x8BD5
+    $script:NonAsciiDirs = @(
+        ('C:\Users\' + $Jose + '\AppData\Local\claude-code-launcher'),
+        ('C:\Users\' + $Cjk + '\AppData\Local\claude-code-launcher'),
+        ('D:\' + [char]0x00DC + 'ber ' + [char]0x00C5 + 'se\ccl'),
+        ('C:\Users\M' + [char]0x00FC + 'ller (x86) & co\AppData\Local\claude-code-launcher'),
+        'C:\Users\plain\AppData\Local\claude-code-launcher'
+    )
+    function New-NonAsciiSandbox {
+        $s = New-Sandbox
+        $old = $s.Root
+        $root = Join-Path ([IO.Path]::GetTempPath()) ('ccl-pester-' + $script:Jose + '-' + $script:Cjk + '-' + [guid]::NewGuid().ToString('N'))
+        Remove-Item -LiteralPath $old -Recurse -Force
+        $s = @{ Root = $root; InstallDir = Join-Path $root 'install'; ClaudeDir = Join-Path $root 'home/.claude' }
+        New-Item -ItemType Directory -Force -Path $s.Root, (Split-Path $s.ClaudeDir) | Out-Null
+        return $s
+    }
     $script:GoodKeys = @('ih-abc123', 'sk-' + ('x' * 60), 'key with spaces inside', 'k=v=w', "tab`tkey", 'ümlaut-ключ-鍵', ('a' * 4096))
     $script:BadKeys = @('', '   ', "line1`nline2", "cr`rkey", "nul`0key", 'quote"key', ('a' * 4097))
 }
@@ -146,7 +166,8 @@ Describe 'Install state, shim and task' -Tag 'Spec' {
     }
     It 'shim runs the launcher with CCL_HOME and handles --set-key and --uninstall' {
         $t = Get-CclShimText -InstallDir 'X:\inst'
-        $t | Should -Match 'CCL_HOME=X:\\inst'
+        $t | Should -Match ([regex]::Escape('for %%I in ("%~dp0..") do set "CCL_HOME=%%~fI"'))
+        $t | Should -Not -Match 'X:\\inst'
         $t | Should -Match 'launch-claude-inferhub\.ps1'
         $t | Should -Match '--set-key'
         $t | Should -Match '-ChangeKey'
@@ -578,5 +599,172 @@ Describe 'TinyFish key relations' -Tag 'Metamorphic' {
             Invoke-SandboxInstall $b -Extra @{ TinyFishKey = 'tf-l'; ChangeTinyFishKey = $true } | Should -Be 0
             Compare-Snapshot (Get-InstallSnapshot $a) (Get-InstallSnapshot $b) | Should -Be ''
         } finally { Remove-Sandbox $a; Remove-Sandbox $b }
+    }
+}
+
+# ---------------------------------------------------------------- v1.0.1 (issue #63)
+
+Describe 'Shim works from any folder (v1.0.1 #1)' -Tag 'Spec' {
+    It 'is pure ASCII and holds no path for <_>' -ForEach @(0, 1, 2, 3, 4) {
+        $dir = $script:NonAsciiDirs[$_]
+        $text = Get-CclShimText -InstallDir $dir
+        foreach ($ch in $text.ToCharArray()) { [int]$ch | Should -BeLessThan 128 }
+        $text.Contains($dir) | Should -BeFalse
+        $text | Should -Match '%~dp0'
+    }
+    It 'installs a pure-ASCII shim into a non-ASCII folder and uninstalls cleanly' {
+        $sb = New-NonAsciiSandbox
+        try {
+            Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-u' } | Should -Be 0
+            $bytes = [IO.File]::ReadAllBytes((Join-Path $sb.InstallDir 'bin/claude-inferhub.cmd'))
+            @($bytes | Where-Object { $_ -ge 0x80 }).Count | Should -Be 0
+            ($bytes[0] -eq 0xEF) | Should -BeFalse
+            Invoke-SandboxInstall $sb -Extra @{ Uninstall = $true } | Should -Be 0
+            Test-Path -LiteralPath $sb.InstallDir | Should -BeFalse
+        } finally { Remove-Sandbox $sb }
+    }
+}
+
+Describe 'Shim invariants (v1.0.1 #1)' -Tag 'Property' {
+    It 'is the same text for every install folder (seed <_>)' -ForEach (1..25) {
+        $rng = [Random]::new(5000 + $_)
+        $name = -join $(for ($i = 0; $i -lt $rng.Next(1, 20); $i++) { [char]$rng.Next(0x20, 0x3000) })
+        $name = $name -replace '[\\/:*?"<>|]', '_'
+        Get-CclShimText -InstallDir ('C:\Users\' + $name + '\AppData\Local\claude-code-launcher') | Should -BeExactly (Get-CclShimText -InstallDir 'C:\x')
+    }
+}
+
+Describe 'Uninstall without install.json (v1.0.1 #2)' -Tag 'Spec' {
+    BeforeEach { $script:sb = New-Sandbox }
+    AfterEach { Remove-Sandbox $script:sb }
+
+    It 'still unsyncs settings, removes the planner, the secrets and the shim, and keeps the folder' {
+        New-Item -ItemType Directory -Force $sb.ClaudeDir | Out-Null
+        '{"theme":"dark"}' | Set-Content (Join-Path $sb.ClaudeDir 'settings.json')
+        Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-x'; TinyFishKey = 'tf-x' } | Should -Be 0
+        Remove-Item -LiteralPath (Join-Path $sb.InstallDir 'install.json')
+        $out = & { Invoke-SandboxInstall $sb -Extra @{ Uninstall = $true } } 3>&1 | Out-String
+        @($out -split "`n" | Where-Object { $_ -match '^\s*0\s*$' }).Count | Should -BeGreaterThan 0
+        $out | Should -Match 'install\.json'
+        $s = Get-Content (Join-Path $sb.ClaudeDir 'settings.json') -Raw | ConvertFrom-Json
+        @($s.PSObject.Properties.Name) | Should -Be @('theme')
+        Test-Path (Join-Path $sb.ClaudeDir 'agents/planner.md') | Should -BeFalse
+        Test-Path (Join-Path $sb.InstallDir 'secrets/inferhub.env') | Should -BeFalse
+        Test-Path (Join-Path $sb.InstallDir 'secrets/tinyfish.env') | Should -BeFalse
+        Test-Path (Join-Path $sb.InstallDir 'bin/claude-inferhub.cmd') | Should -BeFalse
+        Test-Path -LiteralPath $sb.InstallDir | Should -BeTrue
+        Test-Path (Join-Path $sb.InstallDir 'app/windows/install.ps1') | Should -BeTrue
+    }
+    It 'never deletes settings.json it cannot prove it created' {
+        Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-x' } | Should -Be 0
+        Remove-Item -LiteralPath (Join-Path $sb.InstallDir 'install.json')
+        Invoke-SandboxInstall $sb -Extra @{ Uninstall = $true } | Should -Be 0
+        $p = Join-Path $sb.ClaudeDir 'settings.json'
+        Test-Path $p | Should -BeTrue
+        $s = Get-Content $p -Raw | ConvertFrom-Json
+        $s.advisorModel | Should -BeNullOrEmpty
+        $s.modelPicker | Should -BeNullOrEmpty
+    }
+    It 'leaves a folder with none of our files exactly as it was' {
+        New-Item -ItemType Directory -Force (Join-Path $sb.InstallDir 'bin'), (Join-Path $sb.InstallDir 'secrets') | Out-Null
+        'mine' | Set-Content (Join-Path $sb.InstallDir 'notes.txt')
+        '@echo off' | Set-Content (Join-Path $sb.InstallDir 'bin/claude-inferhub.cmd')
+        'OTHER=1' | Set-Content (Join-Path $sb.InstallDir 'secrets/other.env')
+        $before = Get-InstallSnapshot $sb
+        Invoke-SandboxInstall $sb -Extra @{ Uninstall = $true } | Should -Be 0
+        Compare-Snapshot $before (Get-InstallSnapshot $sb) | Should -Be ''
+    }
+    It 'still deletes an empty folder' {
+        New-Item -ItemType Directory -Force $sb.InstallDir | Out-Null
+        Invoke-SandboxInstall $sb -Extra @{ Uninstall = $true } | Should -Be 0
+        Test-Path -LiteralPath $sb.InstallDir | Should -BeFalse
+    }
+}
+
+Describe 'Uninstall relations (v1.0.1 #2)' -Tag 'Metamorphic' {
+    It 'with or without install.json, the user''s settings.json ends up the same' {
+        $a = New-Sandbox; $b = New-Sandbox
+        try {
+            foreach ($s in $a, $b) {
+                New-Item -ItemType Directory -Force $s.ClaudeDir | Out-Null
+                '{"theme":"dark","env":{"A":"1"}}' | Set-Content (Join-Path $s.ClaudeDir 'settings.json')
+                Invoke-SandboxInstall $s -Extra @{ InferHubKey = 'ih-m' } | Should -Be 0
+            }
+            Remove-Item -LiteralPath (Join-Path $b.InstallDir 'install.json')
+            Invoke-SandboxInstall $a -Extra @{ Uninstall = $true } | Should -Be 0
+            Invoke-SandboxInstall $b -Extra @{ Uninstall = $true } | Should -Be 0
+            (Get-Content (Join-Path $a.ClaudeDir 'settings.json') -Raw) | Should -Be (Get-Content (Join-Path $b.ClaudeDir 'settings.json') -Raw)
+            Test-Path (Join-Path $b.ClaudeDir 'agents/planner.md') | Should -Be (Test-Path (Join-Path $a.ClaudeDir 'agents/planner.md'))
+        } finally { Remove-Sandbox $a; Remove-Sandbox $b }
+    }
+}
+
+Describe 'Port range (v1.0.1 #3)' -Tag 'Spec' {
+    BeforeEach { $script:sb = New-Sandbox }
+    AfterEach { Remove-Sandbox $script:sb }
+
+    It 'rejects -StartPort <_> with exit 2' -ForEach @(0, -1, 65536, 70000) {
+        Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-x'; StartPort = $_ } | Should -Be 2
+        Test-Path -LiteralPath $sb.InstallDir | Should -BeFalse
+    }
+    It 'accepts -StartPort 65535' {
+        Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-x'; StartPort = 65535 } | Should -Be 0
+        (Read-CclInstallState -InstallDir $sb.InstallDir).port | Should -Be 65535
+    }
+    It 'Select-CclPort accepts low ports such as <_>' -ForEach @(1, 80, 1023) {
+        Select-CclPort -Start $_ -Saved 0 -Probe { param($p) 'free' } | Should -Be $_
+    }
+    It 'Select-CclPort throws CCL_BAD_PORT for start <_>' -ForEach @(0, -5, 65536) {
+        { Select-CclPort -Start $_ -Saved 0 -Probe { param($p) 'free' } } | Should -Throw '*CCL_BAD_PORT*'
+    }
+    It 'Select-CclPort never probes past 65535' {
+        $script:probed = [Collections.Generic.List[int]]::new()
+        { Select-CclPort -Start 65530 -Saved 0 -Count 100 -Probe { param($p) $script:probed.Add($p); 'foreign' } } | Should -Throw '*CCL_NO_PORT*'
+        ($script:probed | Measure-Object -Maximum).Maximum | Should -Be 65535
+    }
+    It 'Select-CclPort ignores a saved port outside the range (<_>)' -ForEach @(70000, -3) {
+        $script:probed = [Collections.Generic.List[int]]::new()
+        Select-CclPort -Start 4000 -Saved $_ -Probe { param($p) $script:probed.Add($p); 'free' } | Should -Be 4000
+        $script:probed | Should -Not -Contain $_
+    }
+}
+
+Describe 'Port range invariants (v1.0.1 #3)' -Tag 'Property' {
+    It 'always returns a port in 1..65535 that is not foreign (seed <_>)' -ForEach (1..40) {
+        $rng = [Random]::new(9000 + $_)
+        $start = @(1, 2, 1023, 1024, 65400, 65535, $rng.Next(1, 65536))[$rng.Next(0, 7)]
+        $states = @{}
+        $probe = { param($p) if (-not $states.ContainsKey($p)) { $states[$p] = @('free', 'foreign', 'foreign')[$rng.Next(0, 3)] }; $states[$p] }.GetNewClosure()
+        try { $got = Select-CclPort -Start $start -Saved 0 -Count 50 -Probe $probe } catch { $_.Exception.Message | Should -Match 'CCL_NO_PORT'; return }
+        $got | Should -BeGreaterOrEqual 1
+        $got | Should -BeLessOrEqual 65535
+        $states[$got] | Should -Not -Be 'foreign'
+    }
+}
+
+Describe 'settings.json edge cases through the installer (v1.0.1 #4, #5)' -Tag 'Spec' {
+    BeforeEach { $script:sb = New-Sandbox }
+    AfterEach {
+        $p = Join-Path $script:sb.ClaudeDir 'settings.json'
+        if (Test-Path $p) { Set-ItemProperty -LiteralPath $p -Name IsReadOnly -Value $false }
+        Remove-Sandbox $script:sb
+    }
+
+    It 'treats a <Name> settings.json as {}' -ForEach @(@{ Name = 'empty'; Text = '' }, @{ Name = 'whitespace-only'; Text = "  `r`n `t" }) {
+        New-Item -ItemType Directory -Force $sb.ClaudeDir | Out-Null
+        [IO.File]::WriteAllText((Join-Path $sb.ClaudeDir 'settings.json'), $Text)
+        Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-x' } | Should -Be 0
+        (Get-Content (Join-Path $sb.ClaudeDir 'settings.json') -Raw | ConvertFrom-Json).advisorModel | Should -Be 'fable'
+    }
+    It 'leaves a read-only settings.json untouched and warns' {
+        New-Item -ItemType Directory -Force $sb.ClaudeDir | Out-Null
+        $p = Join-Path $sb.ClaudeDir 'settings.json'
+        [IO.File]::WriteAllText($p, '{"theme":"dark"}')
+        Set-ItemProperty -LiteralPath $p -Name IsReadOnly -Value $true
+        $out = & { Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-x' } } 3>&1 6>&1 | Out-String
+        [IO.File]::ReadAllText($p) | Should -Be '{"theme":"dark"}'
+        (Get-Item -LiteralPath $p).IsReadOnly | Should -BeTrue
+        $out | Should -Match 'read-only'
+        Test-Path (Join-Path $sb.InstallDir 'install.json') | Should -BeTrue
     }
 }
