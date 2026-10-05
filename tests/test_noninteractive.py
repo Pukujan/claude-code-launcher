@@ -128,6 +128,7 @@ def test_print_env_json_with_claude_ai_login(kind, box, health_port):
     assert s["ANTHROPIC_DEFAULT_FABLE_MODEL"] == "claude-fable-5"
     assert s["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == "272000"
     assert s["CLAUDE_CODE_WORKFLOWS"] == "1"
+    assert s["CLAUDE_CODE_GLOB_TIMEOUT_SECONDS"] == "120"   # issue #69
     assert "ANTHROPIC_API_KEY" not in s          # the claude.ai login stays in charge
     assert not set(s) & LEAKS                     # nothing inherited leaks through
     assert "ANTHROPIC_AUTH_TOKEN" in doc["unset"] and "ckff_api_url" in doc["unset"]

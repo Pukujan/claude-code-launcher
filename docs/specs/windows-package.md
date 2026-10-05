@@ -242,7 +242,11 @@ No window shows. It's re-registered whenever the port changes.
    `advisorModel: "fable"`, `model: "sonnet"` and the `modelPicker` options into it (below). Install
    the planner sub-agent there. When upgrading a v1.0.0 install (its `install.json` has no
    `claude_config_dir`), first remove what v1.0.0 put into `~\.claude` (`settings_sync.py unsync`
-   and the planner), so nothing of ours stays in the profile.
+   and the planner), so nothing of ours stays in the profile. The merge also sets
+   `env.CLAUDE_CODE_GLOB_TIMEOUT_SECONDS = "120"` unless the user set a value (issue #69). Then,
+   unless `-SkipPrereqs`, it runs `claude doctor` with the Claude Code in `install.json` and the
+   folder's config, and warns (never fails) when it doesn't report `Search: OK`. The check gets
+   90 seconds, so a doctor that waits for input can't hang the install.
 8. Register the logon task (unless `-NoTask`) and start the proxy (unless `-NoStart`), then
    wait until the proxy on the chosen port answers as ours.
 
@@ -470,3 +474,5 @@ this spec: the `install.ps1` parameters, environment variables, exit codes, fold
    No winget or global installers. New: `-PortableOnly`, `-UseSystemTools`, `-ClaudeConfigDir`,
    the folder prompt, `install.json` schema v2 with `tools` and `claude_config_dir`. An upgrade
    from v1.0.0 cleans what v1.0.0 put into `~\.claude`.
+   Sessions keep issue #69's 120-second ripgrep limit, in the folder's `settings.json` and in
+   the launcher's environment.

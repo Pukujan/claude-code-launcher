@@ -1254,6 +1254,12 @@ function Invoke-CclInstallSteps {
     if ($rc -eq 3) { Write-CclLog "Claude Code settings.json is read-only, so it was left untouched; clear the read-only flag and run this again to get the model picker." 'warn' }
     elseif ($rc -ne 0) { Write-CclLog 'Could not update Claude Code settings.json (left as it was).' 'warn' }
     $null = Invoke-CclHelper -InstallDir $InstallDir -Script (Join-Path $app 'shared/claude/install_planner.py') -HelperArgs @('install', '--quiet', '--claude-dir', $ClaudeDir)
+    # settings_sync.py also gave Claude Code 120 s for ripgrep (issue #69); check its search
+    # works, with the Claude Code this install uses and the folder's config (tool env is on).
+    if (-not $SkipPrereqs) {
+        $claudeExe = $(if ($tools -and $tools.claude -and $tools.claude.path) { [string]$tools.claude.path } else { 'claude' })
+        $null = Test-CclClaudeSearch -Claude $claudeExe
+    }
 
     # 8. Logon task and the proxy.
     if (-not $NoTask) {
@@ -1266,6 +1272,27 @@ function Invoke-CclInstallSteps {
     }
     Write-CclLog 'All set. Open a new terminal and run: claude-inferhub'
     return 0
+}
+
+function Test-CclClaudeSearch {
+    # True when `claude doctor` reports "Search: OK", Claude Code's check of its ripgrep
+    # (issue #69). Otherwise warns with the line it printed and returns $false. Never throws.
+    [CmdletBinding()]
+    param([string]$Claude = 'claude', [int]$TimeoutSec = 90)
+    $out = ''
+    # In a job with a time limit: doctor is a TUI and must never hang the install.
+    $job = $null
+    try {
+        $job = Start-Job -ScriptBlock { & $args[0] doctor 2>&1 | Out-String } -ArgumentList $Claude
+        if (Wait-Job -Job $job -Timeout $TimeoutSec) { $out = [string](Receive-Job -Job $job -ErrorAction SilentlyContinue | Out-String) }
+        else { Stop-Job -Job $job -ErrorAction SilentlyContinue; Write-CclLog "claude doctor did not finish in $TimeoutSec s." 'warn' }
+    } catch { $out = '' }
+    finally { if ($job) { Remove-Job -Job $job -Force -ErrorAction SilentlyContinue } }
+    if ($out -match '(?m)^\s*Search:\s*OK\b') { return $true }
+    $line = ([regex]::Match($out, '(?m)^\s*Search:.*$')).Value.Trim()
+    $detail = $(if ($line) { " ($line)" } else { ' (no Search line; is Claude Code installed?)' })
+    Write-CclLog ("Claude Code's search check did not pass" + $detail + ". Grep and Glob need it; run 'claude doctor' to see why.") 'warn'
+    return $false
 }
 
 # ---------------------------------------------------------------- main

@@ -89,13 +89,14 @@ expect "ANTHROPIC_DEFAULT_FABLE_MODEL=claude-fable-5"
 expect "ANTHROPIC_DEFAULT_HAIKU_MODEL=claude-haiku-4-5-20251001"
 expect "CLAUDE_CODE_WORKFLOWS=1"
 expect "CLAUDE_CODE_AUTO_COMPACT_WINDOW=272000"
+expect "CLAUDE_CODE_GLOB_TIMEOUT_SECONDS=120"   # ripgrep time limit (issue #69)
 grep -q "^ANTHROPIC_SMALL_FAST_MODEL=" "$T/claude-call.txt" && { echo "deprecated small-fast variable still set"; fail=1; }
 expect "ire_json: present"
 expect "ire_frontier_key: present"
 grep -q "weak_key_flag_leaked" "$T/claude-call.txt" && { echo "keyless flag reached claude (proxy only)"; fail=1; }
 grep -q "IRE: source=defaults" "$T/launcher-output.txt" || { echo "IRE status line missing"; fail=1; }
 n="$(grep -c -E '^(ANTHROPIC_|CLAUDE_CODE_|CKFF_|ckff_)' "$T/claude-call.txt")"
-[ "$n" = "9" ] || { echo "expected exactly 7 ANTHROPIC_* vars plus 2 CLAUDE_CODE_* vars and no CKFF vars, got $n"; fail=1; }
+[ "$n" = "10" ] || { echo "expected exactly 7 ANTHROPIC_* vars plus 3 CLAUDE_CODE_* vars and no CKFF vars, got $n"; fail=1; }
 grep -q '"main_inferhub_id": "cbcn/glm-5.3-flash"' "$LL/config/inferhub_seat.json" || { echo "seat main wrong"; fail=1; }
 grep -q '"advisor_inferhub_id": "cbcn/minimax-m3"' "$LL/config/inferhub_seat.json" || { echo "seat advisor wrong"; fail=1; }
 grep -q "LITELLM_MASTER_KEY" "$T/home/.config/inferhub/.env" 2>/dev/null && { echo "launcher wrote a master key"; fail=1; }

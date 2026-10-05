@@ -86,6 +86,11 @@ def test_print_env_hands_over_the_folder_config_and_claude(v2):
         # Settings go to the folder's config, never to the profile's ~/.claude.
         assert (v2["root"] / "claude-config" / "settings.json").is_file()
         assert not (v2["home"] / ".claude" / "settings.json").exists()
+        # Issue #69 in the folder layout: the 120 s ripgrep limit reaches the session and
+        # the folder's settings.json.
+        assert s["CLAUDE_CODE_GLOB_TIMEOUT_SECONDS"] == "120"
+        doc = json.loads((v2["root"] / "claude-config" / "settings.json").read_text(encoding="utf-8"))
+        assert doc["env"]["CLAUDE_CODE_GLOB_TIMEOUT_SECONDS"] == "120"
     finally:
         srv.shutdown()
 

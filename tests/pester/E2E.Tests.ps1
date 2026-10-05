@@ -160,6 +160,7 @@ Describe 'Windows install end to end with private copies of every tool' -Tag 'E2
         $script:UserPathBefore = [Environment]::GetEnvironmentVariable('Path', 'User')
         $r = Invoke-RealInstall -InstallDir $InstallDir -More @('-PortableOnly', '-InferHubKey', 'ih-e2e-portable', '-SkipTinyFish', '-StartPort', '47700', '-NoTask', '-NoStart', '-NoPath')
         $script:InstallExit = $r.Code
+        $script:InstallLog = [string]$r.Log
         Write-Host $r.Log
         $script:ProfileAfterInstall = Get-ProfileSnapshot
         $script:St = $(if (Test-Path -LiteralPath (Join-Path $InstallDir 'install.json')) { Get-Content -LiteralPath (Join-Path $InstallDir 'install.json') -Raw -Encoding UTF8 | ConvertFrom-Json })
@@ -192,6 +193,12 @@ Describe 'Windows install end to end with private copies of every tool' -Tag 'E2
         Test-Path -LiteralPath (Join-Path $InstallDir 'tools\git\bin\bash.exe') | Should -BeTrue
         (& $St.tools.claude.path --version) | Should -Match '\d+\.\d+\.\d+'
         (& $St.tools.python.path -c 'import sys; print(sys.version_info[:2])') | Should -Be '(3, 12)'
+    }
+    It "gives the private Claude Code 120 s for ripgrep and its search check passes (issue #69)" {
+        $doc = Get-Content -LiteralPath (Join-Path $InstallDir 'claude-config\settings.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+        $doc.env.CLAUDE_CODE_GLOB_TIMEOUT_SECONDS | Should -Be '120'
+        $InstallLog | Should -Not -Match "search check did not pass"
+        $InstallLog | Should -Not -Match 'claude doctor did not finish'
     }
     It 'builds the venv on the private Python' {
         $cfg = Get-Content -LiteralPath (Join-Path $InstallDir 'venv\pyvenv.cfg') -Raw -Encoding UTF8
