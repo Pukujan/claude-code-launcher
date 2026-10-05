@@ -259,6 +259,8 @@ Describe 'Install state, shim and task' -Tag 'Spec' {
         $t | Should -Match '-ChangeKey'
         $t | Should -Match '--uninstall'
         $t | Should -Match '-Uninstall'
+        # Uninstall deletes the shim itself, so the batch is left before it runs.
+        $t | Should -Match ([regex]::Escape('"--uninstall" ( (goto) 2>nul & '))
     }
     It 'task runs start-litellm hidden with -CclHome and -Port' {
         $a = Get-CclTaskArguments -InstallDir 'X:\inst' -Port 4002

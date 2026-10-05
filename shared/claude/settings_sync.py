@@ -116,6 +116,10 @@ def _write(path: Path, doc: dict) -> None:
 
 
 def main(argv=None) -> int:
+    # Paths can hold any character (a non-ASCII install folder); never crash on a narrow console.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="backslashreplace")
     ap = argparse.ArgumentParser(description="Sync the launcher's keys into Claude Code's settings.json.")
     ap.add_argument("action", choices=("sync", "unsync"))
     ap.add_argument("--settings", default=None)

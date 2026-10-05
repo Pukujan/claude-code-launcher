@@ -2,8 +2,8 @@
   "schema_version": "claude-code-launcher.boss-claim.v1",
   "status": "held",
   "who_is_boss_now": "executor-claude-code-launcher",
-  "last_heartbeat": "2026-10-05T00:43:35Z",
-  "last_github_activity": "2026-10-05T00:43:35Z",
+  "last_heartbeat": "2026-10-05T00:55:58Z",
+  "last_github_activity": "2026-10-05T00:55:58Z",
   "claim_queue": [],
   "recorded_at": "2026-10-05T00:05:57Z",
   "notes": "Claimed by executor-claude-code-launcher (grok-bot on the box) for CCL-0063 / issue #63, the v1.0.1-windows fixes. Heartbeat is renewed with every push to ccl-0063-windows-v101, at most 15 minutes apart, against the 30-minute lease. The claim is released (status vacant) in the final push before merge. A returning old boss joins the end of claim_queue.",
@@ -11,5 +11,5 @@
   "task": "CCL-0063",
   "issue": "https://github.com/Pukujan/claude-code-launcher/issues/63",
   "branch": "ccl-0063-windows-v101",
-  "phase": "merged main"
+  "phase": "fixing windows E2E findings"
 }

@@ -306,7 +306,9 @@ function Get-CclShimText {
         'for %%I in ("%~dp0..") do set "CCL_HOME=%%~fI"'
         ('if /i "%~1"=="--set-key" ( ' + $ps + ' "%CCL_HOME%\app\windows\install.ps1" -InstallDir "%CCL_HOME%" -ChangeKey & exit /b )')
         ('if /i "%~1"=="--set-tinyfish-key" ( ' + $ps + ' "%CCL_HOME%\app\windows\install.ps1" -InstallDir "%CCL_HOME%" -ChangeTinyFishKey & exit /b )')
-        ('if /i "%~1"=="--uninstall" ( ' + $ps + ' "%CCL_HOME%\app\windows\install.ps1" -InstallDir "%CCL_HOME%" -Uninstall & exit /b )')
+        # Uninstall deletes this file: "(goto) 2>nul" leaves the batch first, so cmd.exe never
+        # goes back to read a file that is gone; the rest of the line still runs.
+        ('if /i "%~1"=="--uninstall" ( (goto) 2>nul & ' + $ps + ' "%CCL_HOME%\app\windows\install.ps1" -InstallDir "%CCL_HOME%" -Uninstall )')
         ($ps + ' "%CCL_HOME%\app\windows\launch-claude-inferhub.ps1" %* & exit /b')
     ) -join "`r`n"
 }
@@ -555,7 +557,8 @@ function Invoke-CclToolOutput {
 function Find-CclSystemTools {
     # What the PC already has: @{ name = @{ path; version } } for the tools found.
     $found = @{}
-    $pyCode = 'import sys; print(sys.executable); print("%d.%d.%d" % sys.version_info[:3])'
+    # No double quotes: Windows PowerShell 5.1 drops them from native arguments.
+    $pyCode = 'import sys; print(sys.executable); print(''%d.%d.%d'' % sys.version_info[:3])'
     $candidates = @()
     if ($script:CclOnWindows -and (Test-CclTool 'py')) {
         foreach ($v in '3.13', '3.12', '3.11', '3.10') { $candidates += , @((Get-Command py).Source, "-$v") }
@@ -830,11 +833,20 @@ function Invoke-CclHelper {
     param([string]$InstallDir, [string]$Script, [string[]]$HelperArgs)
     $py = Get-CclPython -InstallDir $InstallDir
     if (-not $py) { Write-CclLog "No Python found to run $(Split-Path -Leaf $Script)" 'warn'; return 1 }
+    # UTF-8 both ways, so a non-ASCII install folder in the helper's output neither crashes
+    # Python's console encoding nor turns into mojibake in the log.
     $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    $prevIo = $env:PYTHONIOENCODING; $env:PYTHONIOENCODING = 'utf-8'
+    $prevEnc = $null
+    try { $prevEnc = [Console]::OutputEncoding; [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false) } catch { $prevEnc = $null }
     try {
         $out = & $py.Exe @($py.Args) $Script @HelperArgs 2>&1
         $rc = $LASTEXITCODE
-    } finally { $ErrorActionPreference = $prev }
+    } finally {
+        $ErrorActionPreference = $prev
+        if ($null -eq $prevIo) { Remove-Item Env:PYTHONIOENCODING -ErrorAction SilentlyContinue } else { $env:PYTHONIOENCODING = $prevIo }
+        if ($prevEnc) { try { [Console]::OutputEncoding = $prevEnc } catch { } }
+    }
     foreach ($line in @($out)) { if ("$line".Trim()) { Write-CclLog ("  " + "$line".Trim()) } }
     return $rc
 }
@@ -848,8 +860,8 @@ function Build-CclVenv {
     # uv venv on the recorded Python (or uv's 3.12), then the pinned requirements. The uv
     # cache and any managed Python go to the folder through the variables set by the caller.
     param([string]$InstallDir, [string]$Uv = '', [string]$Python = '')
-    $uv = $(if ($Uv) { @{ Source = $Uv } } else { Get-Command uv -ErrorAction SilentlyContinue | Select-Object -First 1 })
-    if (-not $uv) { throw 'uv is not installed' }
+    $uvExe = $(if ($Uv) { $Uv } else { (Get-Command uv -ErrorAction SilentlyContinue | Select-Object -First 1).Source })
+    if (-not $uvExe) { throw 'uv is not installed' }
     $pyArg = $(if ($Python) { $Python } else { '3.12' })
     $venv = Join-Path $InstallDir 'venv'
     $req = Join-Path $InstallDir 'app\shared\litellm\requirements.txt'
@@ -858,12 +870,12 @@ function Build-CclVenv {
     try {
         if (-not (Get-CclVenvPython -InstallDir $InstallDir)) {
             Write-CclLog "Creating the LiteLLM venv (Python $pyArg) ..."
-            & $uv.Source venv --python $pyArg --quiet $venv 2>&1 | ForEach-Object { Write-CclLog ("  " + $_) }
+            & $uvExe venv --python $pyArg --quiet $venv 2>&1 | ForEach-Object { Write-CclLog ("  " + $_) }
             if ($LASTEXITCODE -ne 0) { throw "uv venv exited $LASTEXITCODE" }
         }
         $py = Get-CclVenvPython -InstallDir $InstallDir
         Write-CclLog 'Installing the pinned LiteLLM (this takes a minute the first time) ...'
-        & $uv.Source pip install --quiet --python $py -r $req --override $ovr 2>&1 | ForEach-Object { Write-CclLog ("  " + $_) }
+        & $uvExe pip install --quiet --python $py -r $req --override $ovr 2>&1 | ForEach-Object { Write-CclLog ("  " + $_) }
         if ($LASTEXITCODE -ne 0) { throw "uv pip install exited $LASTEXITCODE" }
     } finally { $ErrorActionPreference = $prev }
 }
@@ -1027,7 +1039,7 @@ function Invoke-CclUninstall {
     $script:CclLogFile = $null
     if ((Get-Location).Path -like ($InstallDir + '*')) { Set-Location -LiteralPath ([IO.Path]::GetTempPath()) }
     Remove-Item -LiteralPath $InstallDir -Recurse -Force
-    Write-CclLog 'Done. uv, git, Node, pnpm and Claude Code are still installed.'
+    Write-CclLog 'Done. The private tools went with the folder; tools that were already on this PC are still installed.'
     return 0
 }
 

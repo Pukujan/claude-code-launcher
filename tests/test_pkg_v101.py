@@ -178,3 +178,17 @@ def test_a_read_only_file_never_changes_whatever_it_holds(tmp_path_factory, doc,
         assert p.read_bytes() == before
     finally:
         make_writable(p)
+
+
+# ---- helpers survive a non-ASCII install folder on a narrow console encoding (found by the Windows E2E) ----
+
+@pytest.mark.spec
+@pytest.mark.parametrize("helper,args", [("install_planner.py", ["install"]), ("settings_sync.py", ["sync"])])
+def test_helpers_print_non_ascii_paths_on_an_ascii_console(tmp_path, helper, args):
+    cfg = tmp_path / "Jos\u00e9 \u6d4b\u8bd5" / "claude-config"
+    extra = ["--claude-dir", str(cfg)] if helper == "install_planner.py" else ["--settings", str(cfg / "settings.json")]
+    env = dict(os.environ, PYTHONIOENCODING="ascii")
+    out = subprocess.run([sys.executable, str(REPO / "shared" / "claude" / helper), *args, *extra],
+                         capture_output=True, timeout=60, env=env)
+    assert out.returncode == 0, out.stderr.decode("ascii", "replace")
+    assert b"Traceback" not in out.stderr

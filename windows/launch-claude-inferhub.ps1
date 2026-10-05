@@ -45,6 +45,8 @@ if (Test-Path -LiteralPath $CclInstaller) {
 # Self-contained install (v1.0.1, install.json v2): the folder's tools, caches and Claude config
 # for this session. A v1 install.json leaves Claude's config where it was.
 $ClaudeBin = "claude"
+# The helpers print paths; a non-ASCII profile or install folder must not crash them.
+if ($Packaged -and -not $env:PYTHONIOENCODING) { $env:PYTHONIOENCODING = "utf-8" }
 $CclToolVars = $null
 $CclExtraEnvNames = @()
 if ($Packaged -and $CclState -and $CclState.claude_config_dir -and (Get-Command Get-CclToolEnv -ErrorAction SilentlyContinue)) {

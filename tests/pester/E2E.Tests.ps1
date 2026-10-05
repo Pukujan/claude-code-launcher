@@ -93,6 +93,8 @@ Describe 'Windows install end to end, reusing the runner''s tools' -Tag 'E2E' -S
             Test-Path -LiteralPath $st.tools.$n.path | Should -BeTrue -Because $n
         }
         $st.tools.uv.source | Should -Be 'reused'        # setup-uv put uv on PATH
+        $st.tools.python.source | Should -Be 'reused'    # the runner's Python 3.12
+        $st.tools.node.source | Should -Be 'reused'      # the runner's Node
         $st.tools.git.source | Should -Be 'bundled'
         $st.tools.claude.source | Should -Be 'bundled'
         $st.tools.claude.path | Should -Be (Join-Path $InstallDir 'tools\claude\claude.exe')
