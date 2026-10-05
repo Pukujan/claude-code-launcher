@@ -616,7 +616,7 @@ function Install-CclPortableTool {
     $exe = Join-Path $dest $Spec.exe
     if ((Test-Path -LiteralPath $stampPath) -and (Test-Path -LiteralPath $exe)) {
         try {
-            $stamp = Get-Content -LiteralPath $stampPath -Raw | ConvertFrom-Json
+            $stamp = Get-Content -LiteralPath $stampPath -Raw -Encoding UTF8 | ConvertFrom-Json
             if ([string]$stamp.spec_version -eq [string]$Spec.version) { return @{ path = $exe; version = [string]$stamp.version } }
         } catch { }
     }

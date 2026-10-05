@@ -167,3 +167,15 @@ def test_uv_override_gets_a_bare_file_name_on_windows():
             if "--override" in line and "pip install" in line:
                 arg = line.split("--override", 1)[1].split()[0]
                 assert arg in ("$ovrName", "$OverridesName"), f"{rel}: {line.strip()}"
+
+
+@pytest.mark.spec
+def test_windows_scripts_read_text_files_as_utf8():
+    # Windows PowerShell 5.1 reads BOM-less files as ANSI, so a non-ASCII install folder in
+    # install.json came back garbled (found by the portable E2E under a "José" folder).
+    bad = []
+    for p in sorted((REPO / "windows").rglob("*.ps1")) + [REPO / "tests/pester/E2E.Tests.ps1"]:
+        for n, line in enumerate(p.read_text(encoding="utf-8-sig").splitlines(), 1):
+            if "Get-Content" in line and "-Raw" in line and "-Encoding" not in line:
+                bad.append(f"{p.relative_to(REPO)}:{n}")
+    assert bad == []

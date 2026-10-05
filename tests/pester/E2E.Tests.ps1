@@ -86,7 +86,7 @@ Describe 'Windows install end to end, reusing the runner''s tools' -Tag 'E2E' -S
         [Environment]::GetEnvironmentVariable('Path', 'User') | Should -Be $UserPathBefore
     }
     It 'records which tools it reused and which it bundled' {
-        $st = Get-Content -LiteralPath (Join-Path $InstallDir 'install.json') -Raw | ConvertFrom-Json
+        $st = Get-Content -LiteralPath (Join-Path $InstallDir 'install.json') -Raw -Encoding UTF8 | ConvertFrom-Json
         Write-Host ($st.tools | ConvertTo-Json -Depth 4)
         foreach ($n in 'python', 'node', 'uv', 'pnpm', 'git', 'claude') {
             $st.tools.$n.source | Should -BeIn @('reused', 'bundled') -Because $n
@@ -103,29 +103,29 @@ Describe 'Windows install end to end, reusing the runner''s tools' -Tag 'E2E' -S
     It 'never prints the key' { $Log | Should -Not -BeLike "*$Key*" }
     It 'stores the TinyFish key without printing it' {
         $Log | Should -Not -BeLike "*$TfKey*"
-        (Get-Content (Join-Path $InstallDir 'secrets\tinyfish.env') -Raw) | Should -Be "TINYFISH_API_KEY=$TfKey`n"
-        Get-Content (Join-Path $InstallDir 'logs\*.log') -Raw -ErrorAction SilentlyContinue | Should -Not -BeLike "*$TfKey*"
+        (Get-Content (Join-Path $InstallDir 'secrets\tinyfish.env') -Raw -Encoding UTF8) | Should -Be "TINYFISH_API_KEY=$TfKey`n"
+        Get-Content (Join-Path $InstallDir 'logs\*.log') -Raw -Encoding UTF8 -ErrorAction SilentlyContinue | Should -Not -BeLike "*$TfKey*"
     }
     It 'skips the port held by the other LiteLLM' {
-        $port = (Get-Content (Join-Path $InstallDir 'install.json') -Raw | ConvertFrom-Json).port
+        $port = (Get-Content (Join-Path $InstallDir 'install.json') -Raw -Encoding UTF8 | ConvertFrom-Json).port
         $port | Should -Not -Be $StartPort
         $port | Should -BeGreaterThan $StartPort
     }
     It 'registers the hidden logon task with the chosen port' {
-        $port = (Get-Content (Join-Path $InstallDir 'install.json') -Raw | ConvertFrom-Json).port
+        $port = (Get-Content (Join-Path $InstallDir 'install.json') -Raw -Encoding UTF8 | ConvertFrom-Json).port
         $t = Get-ScheduledTask -TaskName 'claude-code-launcher-proxy' -ErrorAction Stop
         $t.Actions[0].Execute | Should -Match 'conhost\.exe$'
         $t.Actions[0].Arguments | Should -Match "-Port $port"
         $t.Actions[0].Arguments | Should -Not -Match $Key
     }
     It 'runs our proxy on the chosen port (identity matches)' {
-        $st = Get-Content (Join-Path $InstallDir 'install.json') -Raw | ConvertFrom-Json
+        $st = Get-Content (Join-Path $InstallDir 'install.json') -Raw -Encoding UTF8 | ConvertFrom-Json
         $r = Invoke-RestMethod "http://127.0.0.1:$($st.port)/ccl/identity" -TimeoutSec 10
         $r.app | Should -Be 'claude-code-launcher'
         $r.instance | Should -Be $st.instance_id
     }
     It 'points Claude at the chosen port in non-interactive mode and syncs the advisor' {
-        $st = Get-Content (Join-Path $InstallDir 'install.json') -Raw | ConvertFrom-Json
+        $st = Get-Content (Join-Path $InstallDir 'install.json') -Raw -Encoding UTF8 | ConvertFrom-Json
         $env:CCL_HOME = $InstallDir
         try {
             $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $InstallDir 'app\windows\launch-claude-inferhub.ps1') --non-interactive --print-env json
@@ -134,13 +134,13 @@ Describe 'Windows install end to end, reusing the runner''s tools' -Tag 'E2E' -S
         $doc.set.ANTHROPIC_BASE_URL | Should -Be "http://127.0.0.1:$($st.port)"
         $doc.set.CLAUDE_CONFIG_DIR | Should -Be (Join-Path $InstallDir 'claude-config')
         $doc.set.CCL_CLAUDE_BIN | Should -Be (Join-Path $InstallDir 'tools\claude\claude.exe')
-        (Get-Content (Join-Path $InstallDir 'claude-config\settings.json') -Raw | ConvertFrom-Json).advisorModel | Should -Be 'fable'
+        (Get-Content (Join-Path $InstallDir 'claude-config\settings.json') -Raw -Encoding UTF8 | ConvertFrom-Json).advisorModel | Should -Be 'fable'
     }
     It 'the claude-inferhub shim exists' {
         Test-Path (Join-Path $InstallDir 'bin\claude-inferhub.cmd') | Should -BeTrue
     }
     It 'uninstall removes the task, the proxy and the folder' {
-        $st = Get-Content (Join-Path $InstallDir 'install.json') -Raw | ConvertFrom-Json
+        $st = Get-Content (Join-Path $InstallDir 'install.json') -Raw -Encoding UTF8 | ConvertFrom-Json
         & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $InstallDir 'app\windows\install.ps1') -InstallDir $InstallDir -Uninstall -NonInteractive *>&1 | Out-Host
         $LASTEXITCODE | Should -Be 0
         Get-ScheduledTask -TaskName 'claude-code-launcher-proxy' -ErrorAction SilentlyContinue | Should -BeNullOrEmpty
@@ -162,7 +162,7 @@ Describe 'Windows install end to end with private copies of every tool' -Tag 'E2
         $script:InstallExit = $r.Code
         Write-Host $r.Log
         $script:ProfileAfterInstall = Get-ProfileSnapshot
-        $script:St = $(if (Test-Path -LiteralPath (Join-Path $InstallDir 'install.json')) { Get-Content -LiteralPath (Join-Path $InstallDir 'install.json') -Raw | ConvertFrom-Json })
+        $script:St = $(if (Test-Path -LiteralPath (Join-Path $InstallDir 'install.json')) { Get-Content -LiteralPath (Join-Path $InstallDir 'install.json') -Raw -Encoding UTF8 | ConvertFrom-Json })
     }
     AfterAll {
         if (Test-Path -LiteralPath $InstallDir) {
@@ -276,7 +276,7 @@ Describe 'claude-inferhub.cmd from a non-ASCII folder through cmd.exe' -Tag 'E2E
         ($r.Out + $r.Err) | Should -Not -Match 'tf-e2e-nonascii'
     }
     It 'cmd.exe runs the launcher, which finds the install and points Claude at its port' {
-        $st = Get-Content -LiteralPath (Join-Path $InstallDir 'install.json') -Raw | ConvertFrom-Json
+        $st = Get-Content -LiteralPath (Join-Path $InstallDir 'install.json') -Raw -Encoding UTF8 | ConvertFrom-Json
         # Stand in for this install's proxy: /health/* and /ccl/identity with our instance id.
         $l = [Net.HttpListener]::new()
         $l.Prefixes.Add("http://127.0.0.1:$($st.port)/")

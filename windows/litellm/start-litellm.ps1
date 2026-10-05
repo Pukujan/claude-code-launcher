@@ -60,7 +60,7 @@ if ($CclHome) {
     $CclHome = [IO.Path]::GetFullPath($CclHome)
     $installJson = Join-Path $CclHome 'install.json'
     if (-not (Test-Path -LiteralPath $installJson)) { throw "No install.json in $CclHome" }
-    $CclInstall = Get-Content -LiteralPath $installJson -Raw | ConvertFrom-Json
+    $CclInstall = Get-Content -LiteralPath $installJson -Raw -Encoding UTF8 | ConvertFrom-Json
     $VenvPath = Join-Path $CclHome 'venv'
     $LogDir = Join-Path $CclHome 'logs'
     # One proxy per install, so the PID file name never depends on the port.
