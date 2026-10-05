@@ -122,14 +122,24 @@ is not used.
 ## Keys
 
 Copy `.env.example` to `.env` in the repository root and fill in
-`INFERHUB_API_KEY`. That is the only key you need on a Mac. On the PC the
-launcher also reads `configs\.env` on your Desktop (the first
-that exists of the Desktop known folder, `%USERPROFILE%\Desktop` and
-`%OneDrive%\Desktop`) for other keys such as the web search ones, never its
-`ckff*` names, and takes the InferHub key from the first of these that
-exists: the IRE `.env` in `inference-recommendation-engine` next to this
-repository or under `D:\development`, this repository's `.env`,
-`~\.config\inferhub\.env`.
+`INFERHUB_API_KEY`, plus any web search keys you have (`TINYFISH_API_KEY`,
+`TAVILY_API_KEY`, `EXA_API_KEY`), under those standard names. That one file is
+all the launchers need.
+
+**On the PC that file is the only one read when it exists** (issue #64): the
+launcher and `start-litellm.ps1` load the repository's `.env` and then the
+per-PC settings in `shared\litellm\.env.local`, and nothing else. Only when the
+repository has no `.env` do they fall back to the old places: `configs\.env` on
+your Desktop (the first that exists of the Desktop known folder,
+`%USERPROFILE%\Desktop` and `%OneDrive%\Desktop`) for other keys such as the web
+search ones, never its `ckff*` names, and for the InferHub key the first of the
+IRE `.env` in `inference-recommendation-engine` next to this repository or under
+`D:\development`, then `~\.config\inferhub\.env`. To see which file a proxy
+start would read, run `windows\litellm\start-litellm.ps1 -ShowEnvSources`: it
+prints the files and which key names are set, never their values, and starts
+nothing. The Mac launcher reads the repository's `.env` first and then
+`~/.config/inferhub/.env`. A packaged install keeps its own keys in its install
+folder (`secrets\inferhub.env`, `secrets\tinyfish.env`) and never reads either.
 
 **There is no proxy key.** The proxy runs without a `LITELLM_MASTER_KEY` and
 listens on 127.0.0.1 only, so nothing outside the machine can reach it. Claude

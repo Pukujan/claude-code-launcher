@@ -66,7 +66,8 @@
     "acs": {
       "repo": "https://github.com/Pukujan/agent-custom-setup",
       "module": "modules/coordination/multi-agent-hotload/v0.1.0",
-      "version": "0.1.0"
+      "version": "0.1.0",
+      "revision": "38f8f52e8d210db3ce258bf911ebb560c6e0fe4c"
     },
     "pcm": {
       "repo": "https://github.com/Pukujan/project-continuity-modules",
@@ -137,7 +138,8 @@
   "ticket_links": {
     "parent_issue": null,
     "child_issues": [
-      "https://github.com/Pukujan/claude-code-launcher/issues/61"
+      "https://github.com/Pukujan/claude-code-launcher/issues/61",
+      "https://github.com/Pukujan/claude-code-launcher/issues/64"
     ],
     "notes": "Parent/child notes only; no full DAG engine."
   }

@@ -71,7 +71,8 @@ In short:
   window (`SlopSearX`; start script and logs in `%USERPROFILE%\.slopsearx`),
   and writes the chain to the proxy's machine-local env file
   `shared\litellm\.env.local` (gitignored). `start-litellm.ps1` loads that
-  file after the desktop and InferHub env files (`-LocalEnvFile` to point
+  file after the key file: the repository's `.env`, or, only when that is
+  missing, the desktop and InferHub env files (`-LocalEnvFile` to point
   elsewhere). A typical file:
 
   ```
@@ -80,9 +81,10 @@ In short:
   CCL_ENV_ALIASES=TINYFISH_API_KEY=<name in the desktop env>,TAVILY_API_KEY=<name>,EXA_API_KEY=<name>
   ```
 
-  `CCL_ENV_ALIASES` copies keys that the desktop env keeps under other names
-  to the names LiteLLM reads, so the secret stays in one file; only names go
-  in `.env.local`. `exa` is short for LiteLLM's `exa_ai`; `you` and `youcom`
+  `CCL_ENV_ALIASES` copies keys that a loaded env file keeps under other names
+  to the names LiteLLM reads; only names go in `.env.local`. With the keys in
+  the repository's `.env` under their standard names (issue #64) the line is
+  not needed. `exa` is short for LiteLLM's `exa_ai`; `you` and `youcom`
   mean `you_com`. With this chain a search goes to SlopSearX, then TinyFish
   Search (LiteLLM's `tinyfish`, free key, 30 requests/min), then ddgs, then
   You.com (LiteLLM's `you_com`; with `YOUCOM_API_KEY` unset it uses You.com's

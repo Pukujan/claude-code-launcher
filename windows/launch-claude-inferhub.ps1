@@ -76,6 +76,15 @@ $InstanceId = ""
 $VenvDir = Join-Path $LiteLLMRoot ".litellm-venv"
 $LogDir = Join-Path $LiteLLMRoot "logs"
 $LocalEnvFile = Join-Path $LiteLLMRoot ".env.local"
+# Keys (issue #64): one gitignored .env in this repository's root holds every key
+# the launcher and the proxy use. When it exists it is the only env file read
+# (plus the per-PC settings in shared\litellm\.env.local); the old places below
+# are looked at only when it is missing.
+$LauncherEnvFile = Join-Path $RepoRoot ".env"
+if (Test-Path -LiteralPath $LauncherEnvFile) {
+  $DesktopEnvFile = $LauncherEnvFile
+  $InferHubEnvFile = $LauncherEnvFile
+} else {
 # Desktop env (other keys, e.g. web search; its ckff* names are never loaded
 # while CKFF is off): first existing file wins. The real Desktop known
 # folder comes first (it may or may not be redirected into OneDrive), then
@@ -90,15 +99,15 @@ if ($env:OneDrive) { $DesktopEnvCandidates += (Join-Path $env:OneDrive "Desktop\
 $DesktopEnvFile = $DesktopEnvCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 if (-not $DesktopEnvFile) { $DesktopEnvFile = $DesktopEnvCandidates[0] }
 # InferHub env: first existing file wins (IRE .env next to this repo, IRE .env
-# under the project root, repo .env, then user config).
+# under the project root, then user config).
 $InferHubEnvCandidates = @(
   (Join-Path (Split-Path -Parent $RepoRoot) "inference-recommendation-engine\.env"),
   (Join-Path $Root "inference-recommendation-engine\.env"),
-  (Join-Path $RepoRoot ".env"),
   (Join-Path $env:USERPROFILE ".config\inferhub\.env")
 )
 $InferHubEnvFile = $InferHubEnvCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 if (-not $InferHubEnvFile) { $InferHubEnvFile = $InferHubEnvCandidates[0] }
+}
 }
 $ProxyBase = "http://127.0.0.1:$ProxyPort"
 $VenvPy = Join-Path $VenvDir "Scripts\python.exe"
@@ -164,7 +173,7 @@ function Read-EnvValue {
 function Read-LiteLLMMasterKey {
   # The proxy is keyless by default. If a LITELLM_MASTER_KEY is set, pass it
   # through; otherwise Claude Code still needs some key value, so use "local".
-  foreach ($f in @($DesktopEnvFile, $InferHubEnvFile)) {
+  foreach ($f in @(@($DesktopEnvFile, $InferHubEnvFile) | Select-Object -Unique)) {
     $key = Read-EnvValue -Path $f -Name "LITELLM_MASTER_KEY"
     if ($key) { return $key }
   }
@@ -970,7 +979,7 @@ function Apply-InferHubSeat {
     return
   }
   # reload_runtime.py reads an optional LITELLM_MASTER_KEY from these files.
-  $env:CLAUDE_IH_ENV_FILES = (@($DesktopEnvFile, $InferHubEnvFile) -join ";")
+  $env:CLAUDE_IH_ENV_FILES = (@(@($DesktopEnvFile, $InferHubEnvFile) | Select-Object -Unique) -join ";")
   $apply = Join-Path $LiteLLMRoot "scripts\apply_inferhub_seat.py"
   # --slot=name=a,b,c as one argument so Windows PowerShell 5.1 keeps it whole.
   $slotArgs = @(foreach ($slot in $SlotOrder) { "--slot=" + $slot + "=" + (@($Slots[$slot]) -join ",") })

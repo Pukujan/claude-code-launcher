@@ -23,6 +23,8 @@ Phase: Windows installer for a friend.
 
 - **CCL-0063**: v1.0.1-windows, fixes for six holdout defects ([issue #63](https://github.com/Pukujan/claude-code-launcher/issues/63), refs #61, branch `ccl-0063-windows-v101`, spec `docs/specs/windows-package.md`).
 
+- **CCL-0064**: every launcher key from one gitignored `.env` in the launcher folder, the IRE and Desktop env files only as a fallback ([issue #64](https://github.com/Pukujan/claude-code-launcher/issues/64), branch `ccl-0064-launcher-env`).
+
 ## Queued
 
 - Re-sync `windows/launch-claude-inferhub.ps1` from the PC after the pending fixes there.

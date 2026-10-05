@@ -15,6 +15,13 @@
 # into config/runtime.yaml and serves that on 127.0.0.1 only.
 # Keyless: no LITELLM_MASTER_KEY is required. If one is set in an env file it
 # is passed through and LiteLLM enforces it.
+# Keys (issue #64): outside packaged mode, the gitignored .env in the repository
+# root is the one env file when it exists. It is used when no env file is passed,
+# or when the launcher passes that same file as both -DesktopEnvFile and
+# -InferHubEnvFile; the desktop configs .env is then not read at all. Only when it
+# is missing do the old defaults apply. .env.local is still loaded last.
+# Run with -ShowEnvSources to load the env files, print which files were read
+# and which key NAMES are set (never values), and exit without starting anything.
 # Run with -Background to start a detached background process.
 # Run with -SkipSync to skip Top20 regeneration (still merges + applies seat).
 # Writes the LiteLLM PID to shared/litellm/logs/litellm.pid; stop-litellm.ps1
@@ -34,7 +41,8 @@ param(
     [string]$InferHubEnvFile = '',
     [string]$LocalEnvFile = '',
     [string]$Top20Csv = '',
-    [string]$CclHome = ''
+    [string]$CclHome = '',
+    [switch]$ShowEnvSources
 )
 
 $ErrorActionPreference = 'Stop'
@@ -81,6 +89,20 @@ $StderrLog = Join-Path $LogDir "$LogTag.err.log"
 $PythonScripts = Join-Path $LiteLLMRoot 'scripts'
 $Requirements = Join-Path $LiteLLMRoot 'requirements.txt'
 $Overrides = Join-Path $LiteLLMRoot 'requirements-overrides.txt'
+# The launcher-folder .env (issue #64): the only env file when it exists and the
+# caller passed no other file.
+$LauncherEnvFile = Join-Path $RepoRoot '.env'
+function Test-SameEnvPath([string]$a, [string]$b) {
+    if (-not $a -or -not $b) { return $false }
+    return ([IO.Path]::GetFullPath($a) -eq [IO.Path]::GetFullPath($b))
+}
+$LauncherOnly = (-not $CclHome) -and (Test-Path -LiteralPath $LauncherEnvFile) -and
+    ((-not $DesktopEnvFile) -or (Test-SameEnvPath $DesktopEnvFile $LauncherEnvFile)) -and
+    ((-not $InferHubEnvFile) -or (Test-SameEnvPath $InferHubEnvFile $LauncherEnvFile))
+if ($LauncherOnly) {
+    $DesktopEnvFile = $LauncherEnvFile
+    $InferHubEnvFile = $LauncherEnvFile
+}
 if (-not $InferHubEnvFile) { $InferHubEnvFile = Join-Path $RepoRoot '.env' }
 if (-not $LocalEnvFile) { $LocalEnvFile = Join-Path $LiteLLMRoot '.env.local' }
 if (-not $DesktopEnvFile -and -not $CclHome) {
@@ -148,11 +170,16 @@ if ($CkffEnabled) {
         [Environment]::SetEnvironmentVariable($item.Name, $null, 'Process')
     }
 }
-if ($DesktopEnvFile) {
-    Import-DotEnvFile -Path $DesktopEnvFile -Label 'desktop-configs' -SkipCkff:$skip
-}
-if ($InferHubEnvFile -ne $DesktopEnvFile) {
-    Import-DotEnvFile -Path $InferHubEnvFile -Label 'inferhub' -SkipCkff:$skip
+if ($LauncherOnly) {
+    Write-Host 'env source: the .env in the launcher folder only (desktop configs .env and IRE .env not read)'
+    Import-DotEnvFile -Path $LauncherEnvFile -Label 'launcher' -SkipCkff:$skip
+} else {
+    if ($DesktopEnvFile) {
+        Import-DotEnvFile -Path $DesktopEnvFile -Label 'desktop-configs' -SkipCkff:$skip
+    }
+    if ($InferHubEnvFile -ne $DesktopEnvFile) {
+        Import-DotEnvFile -Path $InferHubEnvFile -Label 'inferhub' -SkipCkff:$skip
+    }
 }
 if ($TinyFishEnvFile -and (Test-Path -LiteralPath $TinyFishEnvFile)) {
     Import-DotEnvFile -Path $TinyFishEnvFile -Label 'tinyfish' -SkipCkff:$skip
@@ -181,6 +208,16 @@ if (-not [string]::IsNullOrWhiteSpace($aliasSpec)) {
         [Environment]::SetEnvironmentVariable($target, $value, 'Process')
         Write-Host "env alias: $target <- $source [value not printed]"
     }
+}
+
+if ($ShowEnvSources) {
+    # Names only, never values.
+    foreach ($name in @('INFERHUB_API_KEY', 'INFERHUB_API_URL', 'LITELLM_MASTER_KEY', 'TINYFISH_API_KEY',
+                        'TAVILY_API_KEY', 'EXA_API_KEY', 'BRAVE_API_KEY', 'SERPER_API_KEY', 'YOUCOM_API_KEY')) {
+        $state = if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name, 'Process'))) { 'missing' } else { 'set' }
+        Write-Host "${name}: $state"
+    }
+    exit 0
 }
 
 # Map CKFF secrets to the names LiteLLM expects (only used when CKFF is on)
