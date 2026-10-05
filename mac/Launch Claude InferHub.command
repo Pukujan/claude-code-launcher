@@ -50,6 +50,10 @@ DEFAULT_MODEL_ID="cb/deepseek-v4.1-flash"
 SEAT_ALIAS="sonnet"
 # Claude Code's auto-compact window: GPT 6 Astra (the opus slot's first model) has 272K.
 AUTO_COMPACT_WINDOW="272000"
+# Claude Code stops every ripgrep run (Grep, Glob) after CLAUDE_CODE_GLOB_TIMEOUT_SECONDS,
+# 20 by default; big folders can take longer, so sessions get 120 unless the user set
+# their own positive whole number (issue #69).
+GLOB_TIMEOUT_DEFAULT="120"
 
 OS_NAME="$(uname -s)"
 if [ "$OS_NAME" = "Darwin" ]; then
@@ -989,6 +993,14 @@ claude_ai_logged_in() {
 # main and by the non-interactive mode.
 set_claude_env() {
   local master="$1"
+  # Read before clear_claude_env sweeps CLAUDE_CODE_* away (issue #69).
+  local glob_timeout="${CLAUDE_CODE_GLOB_TIMEOUT_SECONDS:-}"
+  glob_timeout="${glob_timeout#"${glob_timeout%%[![:space:]]*}"}"
+  glob_timeout="${glob_timeout%"${glob_timeout##*[![:space:]]}"}"
+  case "$glob_timeout" in
+    ''|*[!0-9]*|0*) glob_timeout="$GLOB_TIMEOUT_DEFAULT" ;;
+  esac
+  if [ "${#glob_timeout}" -gt 6 ]; then glob_timeout="$GLOB_TIMEOUT_DEFAULT"; fi
   clear_claude_env
   # InferHub through the local LiteLLM for this claude only. The key is the
   # optional LiteLLM master key or "local", never a CKFF key. Do NOT set ANTHROPIC_AUTH_TOKEN.
@@ -1018,6 +1030,7 @@ set_claude_env() {
   export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-haiku-4-5-20251001"   # haiku slot (an id Claude Code knows)
   export CLAUDE_CODE_AUTO_COMPACT_WINDOW="$AUTO_COMPACT_WINDOW"      # GPT 6 Astra's 272K window
   export CLAUDE_CODE_WORKFLOWS=1
+  export CLAUDE_CODE_GLOB_TIMEOUT_SECONDS="$glob_timeout"             # ripgrep time limit (issue #69)
 }
 
 # install_planner [install|uninstall]: the planner sub-agent (~/.claude/agents/planner.md,

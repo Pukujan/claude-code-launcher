@@ -146,6 +146,10 @@ $SlotInfo = @{
 }
 # Claude Code's auto-compact window: GPT 6 Astra (the opus slot's first model) has 272K.
 $AutoCompactWindow = "272000"
+# Claude Code stops every ripgrep run (Grep, Glob) after CLAUDE_CODE_GLOB_TIMEOUT_SECONDS,
+# 20 by default. Cold scans of big folders take longer on Windows (Defender scans each
+# file on first touch), so sessions get 120 unless the user set their own (issue #69).
+$GlobTimeoutDefault = "120"
 
 function Read-EnvValue {
   param([string]$Path, [string]$Name)
@@ -1047,10 +1051,20 @@ $ClaudeEnvClearNames = @(
 $ClaudeEnvSweepPrefixes = @("ANTHROPIC_", "CLAUDE_CODE_", "CKFF_", "ckff_")
 $ClaudeEnvSweepPattern = '^(ANTHROPIC_|CLAUDE_CODE_|CKFF_|ckff_)'
 
+function Resolve-GlobTimeout {
+  # The search timeout for Claude: $Value when it is a positive whole number, else the default.
+  param([string]$Value)
+  $v = $(if ($Value) { $Value.Trim() } else { "" })
+  if ($v -match '^[1-9][0-9]{0,5}$') { return $v }
+  return $GlobTimeoutDefault
+}
+
 function Initialize-ClaudeLaunchEnv {
   # Clears the inherited Anthropic/CKFF variables in this process and sets the
   # ones Claude Code needs for the local LiteLLM. Returns the auth line.
   param([string]$master, [string]$SeatAlias)
+  # Read before the CLAUDE_CODE_* sweep below removes it (issue #69).
+  $globTimeout = Resolve-GlobTimeout $env:CLAUDE_CODE_GLOB_TIMEOUT_SECONDS
   foreach ($n in $ClaudeEnvClearNames) {
     Remove-Item ("Env:" + $n) -ErrorAction SilentlyContinue
   }
@@ -1085,6 +1099,7 @@ function Initialize-ClaudeLaunchEnv {
   $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "claude-haiku-4-5-20251001"   # haiku slot (an id Claude Code knows)
   $env:CLAUDE_CODE_AUTO_COMPACT_WINDOW = $AutoCompactWindow          # GPT 6 Astra's 272K window
   $env:CLAUDE_CODE_WORKFLOWS = "1"
+  $env:CLAUDE_CODE_GLOB_TIMEOUT_SECONDS = $globTimeout               # ripgrep time limit (issue #69)
   # Do NOT set ANTHROPIC_AUTH_TOKEN (would win over API_KEY and risk CKFF).
   # Keep experimental betas ON - do not set CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS
   return $authLine

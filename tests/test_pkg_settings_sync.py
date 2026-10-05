@@ -14,7 +14,8 @@ sys.path.insert(0, str(REPO / "shared" / "claude"))
 import settings_sync as S  # noqa: E402
 
 HELPER = REPO / "shared" / "claude" / "settings_sync.py"
-OURS = {"model", "advisorModel", "modelPicker"}
+OURS = {"model", "advisorModel", "modelPicker", "env"}   # env: the search timeout (issue #69)
+GLOB = "CLAUDE_CODE_GLOB_TIMEOUT_SECONDS"
 OPTIONS = [
     {"model": "sonnet", "label": "Sonnet slot (main)", "description": "Main chat chain via local LiteLLM", "behavesAs": "claude-sonnet-5"},
     {"model": "fable", "label": "Fable slot (advisor)", "description": "Advisor chain via local LiteLLM", "behavesAs": "claude-fable-5"},
@@ -114,7 +115,67 @@ def test_cli_unsync(tmp_path):
     assert json.loads(target.read_text()) == {"theme": "dark"}
 
 
+@pytest.mark.spec
+def test_sync_adds_the_search_timeout():
+    # Claude Code kills ripgrep after 20 s by default; cold scans on Windows take longer (issue #69).
+    assert S.sync({}, OPTIONS)["env"] == {GLOB: "120"}
+
+
+@pytest.mark.spec
+def test_sync_keeps_a_search_timeout_the_user_set_and_the_rest_of_env():
+    src = {"env": {GLOB: "300", "X": "1"}}
+    out = S.sync(src, OPTIONS)
+    assert out["env"] == {GLOB: "300", "X": "1"}
+    assert src == {"env": {GLOB: "300", "X": "1"}}  # input not mutated
+
+
+@pytest.mark.spec
+def test_sync_adds_the_timeout_next_to_other_env_values():
+    assert S.sync({"env": {"X": "1"}}, OPTIONS)["env"] == {"X": "1", GLOB: "120"}
+
+
+@pytest.mark.spec
+def test_sync_leaves_an_env_that_is_not_an_object_alone():
+    assert S.sync({"env": "odd"}, OPTIONS)["env"] == "odd"
+
+
+@pytest.mark.spec
+def test_unsync_removes_the_timeout_only_while_it_is_ours():
+    assert S.unsync(S.sync({}, OPTIONS)) == {}
+    mine = {"env": {GLOB: "300"}}
+    assert S.unsync(mine) == mine
+
+
+@pytest.mark.spec
+def test_cli_adds_the_timeout_on_disk(tmp_path):
+    target = tmp_path / "settings.json"
+    target.write_text(json.dumps({"theme": "dark"}))
+    assert run("sync", "--settings", str(target)).returncode == 0
+    assert json.loads(target.read_text())["env"][GLOB] == "120"
+
+
 # ---- property ----
+
+user_env = st.dictionaries(st.text(min_size=1, max_size=12).filter(lambda k: k != GLOB), st.text(max_size=8), max_size=5)
+
+
+@pytest.mark.property
+@settings(max_examples=150, deadline=None)
+@given(user_settings, user_env)
+def test_sync_keeps_every_user_env_value_and_unsync_restores_it(s, env):
+    src = dict(s, env=env) if env else s
+    out = S.sync(src, OPTIONS)
+    assert out["env"] == {**env, GLOB: "120"}
+    assert S.unsync(out) == src
+
+
+@pytest.mark.property
+@settings(max_examples=100, deadline=None)
+@given(user_settings, st.text(min_size=1, max_size=6))
+def test_sync_never_overwrites_a_user_timeout(s, value):
+    out = S.sync(dict(s, env={GLOB: value}), OPTIONS)
+    assert out["env"][GLOB] == value
+
 
 @pytest.mark.property
 @settings(max_examples=200, deadline=None)
