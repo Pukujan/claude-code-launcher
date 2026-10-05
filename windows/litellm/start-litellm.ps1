@@ -60,7 +60,7 @@ if ($CclHome) {
     $CclHome = [IO.Path]::GetFullPath($CclHome)
     $installJson = Join-Path $CclHome 'install.json'
     if (-not (Test-Path -LiteralPath $installJson)) { throw "No install.json in $CclHome" }
-    $CclInstall = Get-Content -LiteralPath $installJson -Raw | ConvertFrom-Json
+    $CclInstall = Get-Content -LiteralPath $installJson -Raw -Encoding UTF8 | ConvertFrom-Json
     $VenvPath = Join-Path $CclHome 'venv'
     $LogDir = Join-Path $CclHome 'logs'
     # One proxy per install, so the PID file name never depends on the port.
@@ -71,6 +71,17 @@ if ($CclHome) {
     $TinyFishEnvFile = Join-Path $CclHome 'secrets\tinyfish.env'
     $LocalEnvFile = Join-Path $CclHome 'state\local.env'
     $env:CCL_INSTANCE_ID = [string]$CclInstall.instance_id
+    # Self-contained install (install.json v2): the folder's tools and caches.
+    if ($CclInstall.claude_config_dir) {
+        $cclLib = Join-Path $RepoRoot 'windows\install.ps1'
+        if (Test-Path -LiteralPath $cclLib) {
+            $env:CCL_INSTALL_LIBRARY_ONLY = '1'
+            . $cclLib
+            Remove-Item Env:CCL_INSTALL_LIBRARY_ONLY -ErrorAction SilentlyContinue
+            $ErrorActionPreference = 'Stop'
+            $null = Use-CclToolEnv -Vars (Get-CclToolEnv -InstallDir $CclHome -State $CclInstall)
+        }
+    }
 }
 $PidFile = Join-Path $LogDir "$LogTag.pid"
 $StdoutLog = Join-Path $LogDir "$LogTag.out.log"
@@ -266,7 +277,8 @@ if (-not (Test-Path -LiteralPath $VenvPath)) {
     Write-Host "Creating virtual environment at $VenvPath ..."
     # uv reports progress on stderr; under PS 5.1 + Stop that must not be fatal.
     $prevEap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-    if ($Uv) { & $Uv.Source venv --python 3.12 $VenvPath } else { python -m venv $VenvPath }
+    $VenvPython = $(if ($CclInstall -and $CclInstall.tools -and $CclInstall.tools.python -and $CclInstall.tools.python.path) { [string]$CclInstall.tools.python.path } else { '3.12' })
+    if ($Uv) { & $Uv.Source venv --python $VenvPython $VenvPath } else { python -m venv $VenvPath }
     $venvExit = $LASTEXITCODE
     $ErrorActionPreference = $prevEap
     if ($venvExit -ne 0) { throw "creating the venv failed: $venvExit" }
@@ -290,8 +302,13 @@ if ($needInstall) {
     if ($Uv) {
         # LiteLLM 1.103.0 declares starlette>=1.0.1; the working venv runs the
         # older pins in the overrides file, which uv applies with --override.
-        & $Uv.Source pip install --python $Python -r $Requirements --override $Overrides
-        $installExit = $LASTEXITCODE
+        # uv splits --override values on spaces, so run next to the file and pass its bare name.
+        $OverridesName = Split-Path -Leaf $Overrides
+        Push-Location -LiteralPath (Split-Path -Parent $Overrides)
+        try {
+            & $Uv.Source pip install --python $Python -r $Requirements --override $OverridesName
+            $installExit = $LASTEXITCODE
+        } finally { Pop-Location }
     } else {
         Write-Host 'uv not found; falling back to pip'
         # A venv made by uv has no pip, so bootstrap it first.

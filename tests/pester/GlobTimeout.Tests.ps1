@@ -36,3 +36,15 @@ Describe 'Test-CclClaudeSearch' -Tag Spec {
         Test-CclClaudeSearch -Claude (Join-Path ([IO.Path]::GetTempPath()) 'no-such-claude.ps1') -WarningAction SilentlyContinue | Should -BeFalse
     }
 }
+
+Describe 'Test-CclClaudeSearch time limit' -Tag Spec {
+    It 'gives up on a doctor that never finishes, without throwing' {
+        $dir = Join-Path ([IO.Path]::GetTempPath()) ('ccl-doctor-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+        $hang = Join-Path $dir 'hang-claude.ps1'
+        [IO.File]::WriteAllText($hang, "Start-Sleep -Seconds 60`n")
+        $t = [Diagnostics.Stopwatch]::StartNew()
+        Test-CclClaudeSearch -Claude $hang -TimeoutSec 3 -WarningAction SilentlyContinue | Should -BeFalse
+        $t.Elapsed.TotalSeconds | Should -BeLessThan 30
+    }
+}

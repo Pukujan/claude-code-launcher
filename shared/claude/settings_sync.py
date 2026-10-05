@@ -11,9 +11,14 @@
 
 The settings file is --settings, else $CLAUDE_CONFIG_DIR/settings.json, else
 ~/.claude/settings.json. The picker options come from --options-file (a JSON
-list); without it the four slot options are used. A file that is not valid
-JSON is never overwritten (exit 1). Notes go to stderr; stdout stays empty so
-the launcher's --print-env output is not disturbed. Standard library only.
+list); without it the four slot options are used. An empty or whitespace-only
+file counts as {}. A file that is not valid JSON (or not a JSON object) is never
+overwritten (exit 1), and neither is a read-only one (exit 3). Notes go to
+stderr; stdout stays empty so the launcher's --print-env output is not
+disturbed. Standard library only.
+
+Exit codes: 0 ok or unchanged, 1 invalid JSON or a write error, 2 a bad
+options file, 3 the settings file is read-only.
 
   python settings_sync.py sync|unsync [--settings PATH] [--options-file FILE]
 """
@@ -22,6 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import stat
 import sys
 import tempfile
 from pathlib import Path
@@ -100,6 +106,20 @@ def settings_path(arg: str | None, env=None) -> Path:
     return Path.home() / ".claude" / "settings.json"
 
 
+def is_read_only(path: Path) -> bool:
+    """True when the file exists and must not be changed: the read-only attribute on
+    Windows, or no owner write bit / no write access elsewhere."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return False
+    if getattr(st, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_READONLY", 0):
+        return True
+    if not st.st_mode & stat.S_IWUSR:
+        return True
+    return not os.access(path, os.W_OK)
+
+
 def _write(path: Path, doc: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(doc, indent=2, ensure_ascii=False) + "\n"
@@ -114,6 +134,10 @@ def _write(path: Path, doc: dict) -> None:
 
 
 def main(argv=None) -> int:
+    # Paths can hold any character (a non-ASCII install folder); never crash on a narrow console.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="backslashreplace")
     ap = argparse.ArgumentParser(description="Sync the launcher's keys into Claude Code's settings.json.")
     ap.add_argument("action", choices=("sync", "unsync"))
     ap.add_argument("--settings", default=None)
@@ -124,7 +148,8 @@ def main(argv=None) -> int:
     current: dict = {}
     if existed:
         try:
-            current = json.loads(path.read_text(encoding="utf-8-sig") or "{}")
+            text = path.read_text(encoding="utf-8-sig")
+            current = json.loads(text) if text.strip() else {}
         except (OSError, ValueError) as e:
             print(f"settings_sync: {path} is not valid JSON ({type(e).__name__}); left untouched", file=sys.stderr)
             return 1
@@ -151,6 +176,10 @@ def main(argv=None) -> int:
     if existed and new == current:
         print(f"settings_sync: unchanged {path}", file=sys.stderr)
         return 0
+    if existed and is_read_only(path):
+        print(f"settings_sync: {path} is read-only; left untouched. Clear the read-only flag and run again "
+              "to add the launcher's model picker and advisor.", file=sys.stderr)
+        return 3
     try:
         _write(path, new)
     except OSError as e:

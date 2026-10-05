@@ -1,8 +1,8 @@
 # TASK-CCL-0061 — one-command Windows installer for a friend
 
-<!-- continuity:task {"acceptance": ["one command (irm ... | iex) plus an InferHub key (and an optional, free TinyFish key) installs everything into %LOCALAPPDATA%\\claude-code-launcher and leaves a working claude-inferhub command", "the proxy picks a free port from 4000 up, never a port held by another program, and Claude's base URL follows it", "packaged mode reads no Alex-specific paths and the key is never printed or logged", "spec, property-based, metamorphic and Windows end-to-end tests pass in CI, and gates (with hotload_check) pass", "install.ps1 is attached to the v1.0.0-windows release"], "depends_on": [], "goal": "Ship a one-command Windows installer so a friend needs only an InferHub key.", "id": "CCL-0061", "issue_url": "https://github.com/Pukujan/claude-code-launcher/issues/61", "next_action": "After PR #62 merges: tag v1.0.0-windows on the merge commit, create the release with install.ps1 attached, check the irm URL, comment on and close issue #61.", "owner": "Alex; executor agent implements", "priority": "P1", "protocol_version": "0.1.0-draft", "schema": "project-continuity.task.v1", "status": "active", "why": "There is no installer today; the launcher assumes Alex's PC (paths, port 4000, pre-installed tools)."} -->
+<!-- continuity:task {"acceptance": ["one command (irm ... | iex) plus an InferHub key (and an optional, free TinyFish key) installs everything into %LOCALAPPDATA%\\claude-code-launcher and leaves a working claude-inferhub command", "the proxy picks a free port from 4000 up, never a port held by another program, and Claude's base URL follows it", "packaged mode reads no Alex-specific paths and the key is never printed or logged", "spec, property-based, metamorphic and Windows end-to-end tests pass in CI, and gates (with hotload_check) pass", "install.ps1 is attached to the v1.0.0-windows release"], "depends_on": [], "goal": "Ship a one-command Windows installer so a friend needs only an InferHub key.", "id": "CCL-0061", "issue_url": "https://github.com/Pukujan/claude-code-launcher/issues/61", "next_action": "None for this task; follow-up fixes are CCL-0063 (issue #63).", "owner": "Alex; executor agent implements", "priority": "P1", "protocol_version": "0.1.0-draft", "schema": "project-continuity.task.v1", "status": "completed", "why": "There is no installer today; the launcher assumes Alex's PC (paths, port 4000, pre-installed tools)."} -->
 
-- Status: active
+- Status: completed
 - Owner: Alex; executor agent implements
 - Priority: P1
 - Depends on: none
@@ -36,11 +36,11 @@ through the local proxy with all four slots and web search working, even if he a
 
 ## Acceptance criteria
 
-- [ ] one command (irm ... | iex) plus an InferHub key (and an optional, free TinyFish key) installs everything into %LOCALAPPDATA%\claude-code-launcher and leaves a working claude-inferhub command
-- [ ] the proxy picks a free port from 4000 up, never a port held by another program, and Claude's base URL follows it
-- [ ] packaged mode reads no Alex-specific paths and the key is never printed or logged
-- [ ] spec, property-based, metamorphic and Windows end-to-end tests pass in CI, and gates (with hotload_check) pass
-- [ ] install.ps1 is attached to the v1.0.0-windows release
+- [x] one command (irm ... | iex) plus an InferHub key (and an optional, free TinyFish key) installs everything into %LOCALAPPDATA%\claude-code-launcher and leaves a working claude-inferhub command
+- [x] the proxy picks a free port from 4000 up, never a port held by another program, and Claude's base URL follows it
+- [x] packaged mode reads no Alex-specific paths and the key is never printed or logged
+- [x] spec, property-based, metamorphic and Windows end-to-end tests pass in CI, and gates (with hotload_check) pass
+- [x] install.ps1 is attached to the v1.0.0-windows release
 
 ## Related records
 
@@ -55,3 +55,4 @@ through the local proxy with all four slots and web search working, even if he a
 - 2026-10-04 7:28 PM ET: Alex asked for a TinyFish key prompt. Spec updated and red tests committed (`166ad6e`): pytest 4 failed, Pester 66 failed.
 - 2026-10-04 7:31 PM ET: TinyFish key implemented; locally pytest 280 passed / 7 skipped, Pester 235 passed / 8 skipped (E2E).
 - 2026-10-04 7:40 PM ET: CI green again with the TinyFish key (Windows E2E 9 passed). Claim released; PR #62 marked ready for auto-merge.
+- 2026-10-04 7:50 PM ET: merged as `1f046f7`, released `v1.0.0-windows` with `install.ps1`, closed #61.

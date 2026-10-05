@@ -1,6 +1,6 @@
 # Current Repository Checkpoint
 
-<!-- continuity:current {"active_task":"CCL-0061","active_task_file":"tasks/TASK-CCL-0061-windows-installer.md","protocol_version":"0.1.0-draft","schema":"project-continuity.current.v1"} -->
+<!-- continuity:current {"active_task":"CCL-0063","active_task_file":"tasks/TASK-CCL-0063-windows-v101.md","protocol_version":"0.1.0-draft","schema":"project-continuity.current.v1"} -->
 
 This is an as-of projection; live GitHub issues own progression. Link the owning leaf, parent ancestry and dependencies for active work.
 
@@ -17,10 +17,10 @@ Phase: Windows installer for a friend.
 - **CCL-0006**: fallback ladder picker for main and advisor, applied live ([issue #5](https://github.com/Pukujan/claude-code-launcher/issues/5), PR #12).
 - **CCL-0013**: cx primaries in Responses mode, hand-picked ladders, picking from the Top 20 or the frontier list ([issue #13](https://github.com/Pukujan/claude-code-launcher/issues/13), PR #14).
 - **CCL-0021**: bench a model after it uses up its retries ([issue #21](https://github.com/Pukujan/claude-code-launcher/issues/21)).
+- **CCL-0061**: one-command Windows installer ([issue #61](https://github.com/Pukujan/claude-code-launcher/issues/61), PR #62, merge `1f046f7`, release `v1.0.0-windows`).
+- **CCL-0063**: Windows installer v1.0.1: the six holdout fixes, one self-contained install folder (private tools, `CLAUDE_CONFIG_DIR` inside), poppler for PDF pages, #70's ripgrep limit kept ([issue #63](https://github.com/Pukujan/claude-code-launcher/issues/63), PR #66, release `v1.0.1-windows`).
 
 ## Active
-
-- **CCL-0061**: one-command Windows installer so a friend needs only an InferHub key ([issue #61](https://github.com/Pukujan/claude-code-launcher/issues/61), branch `ccl-0061-windows-installer`, spec `docs/specs/windows-package.md`).
 
 - **CCL-0064**: every launcher key from one gitignored `.env` in the launcher folder, the IRE and Desktop env files only as a fallback ([issue #64](https://github.com/Pukujan/claude-code-launcher/issues/64), branch `ccl-0064-launcher-env`).
 
@@ -35,4 +35,4 @@ None known.
 
 ## Next atomic action
 
-PR #62 is green and set to auto-merge. After it merges, tag `v1.0.0-windows` on the merge commit, create the release with `install.ps1` attached, and close issue #61.
+Publish `v1.0.1-windows` from the PR #66 merge and close #63.

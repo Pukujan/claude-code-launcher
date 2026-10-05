@@ -170,6 +170,10 @@ def status(d: Path) -> list[str]:
 
 
 def main(argv=None) -> int:
+    # Paths can hold any character (a non-ASCII install folder); never crash on a narrow console.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="backslashreplace")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("action", choices=("install", "uninstall", "status"))
     ap.add_argument("--claude-dir", default=None)

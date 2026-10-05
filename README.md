@@ -17,12 +17,15 @@ enough.
 **Windows, one command.** In PowerShell:
 
 ```powershell
-irm https://github.com/Pukujan/claude-code-launcher/releases/download/v1.0.0-windows/install.ps1 | iex
+irm https://github.com/Pukujan/claude-code-launcher/releases/latest/download/install.ps1 | iex
 ```
 
-That installs whatever is missing (uv, Git, Node, pnpm, Claude Code), asks for
-the InferHub key and a free TinyFish Search key (skippable), puts the launcher in `%LOCALAPPDATA%\claude-code-launcher`
-and adds a `claude-inferhub` command. See
+That asks for one install folder (default `%USERPROFILE%\claude-code-launcher`) and puts
+everything in it: the launcher, LiteLLM, the keys (InferHub, plus a free TinyFish Search key,
+skippable), and private copies of the tools the PC doesn't already have (Python, Node, uv,
+pnpm; Git and Claude Code always unless `-UseSystemTools`; `-PortableOnly` reuses nothing).
+Claude Code runs with `CLAUDE_CONFIG_DIR` set to the folder's `claude-config\`, so its
+sessions and settings stay there. It adds a `claude-inferhub` command. See
 [windows/README-friend.md](windows/README-friend.md) for the details,
 `--set-key` and `--uninstall`, and [docs/specs/windows-package.md](docs/specs/windows-package.md)
 for how it works.
@@ -90,11 +93,15 @@ interactively.
 
 Passing arguments that contain double quotes (JSON) through Windows PowerShell
 5.1 loses the quotes. For tools that do that, use
-`node shared/integrations/claude-env-exec.mjs [claude args...]`. It reads the
+`node shared/integrations/claude-env-exec.mjs [claude args...]` (in a Windows install:
+`<install folder>\app\shared\integrations\claude-env-exec.mjs`; a private Node is at
+`<install folder>\tools\node\node.exe` when the PC had none). It reads the
 JSON, applies it and starts claude with the arguments exactly as given. It keeps
 the `CLAUDE_CODE_*` control variables an SDK host sets, skips the launcher for
 `--version` and `auth` probes, and passes claude's exit code back. Set
-`CCL_CLAUDE_BIN` to choose the claude executable. It also turns
+`CCL_CLAUDE_BIN` to choose the claude executable. In a Windows install the launcher's
+JSON already sets `CCL_CLAUDE_BIN` to the folder's Claude Code and `CLAUDE_CONFIG_DIR`
+to its `claude-config\`, so integrations get both without extra setup. It also turns
 `--permission-mode default` (which Paseo sends when it resumes a session that
 started in default mode) into `--permission-mode auto`; set
 `CCL_KEEP_DEFAULT_PERMISSION_MODE=1` to keep default. Other modes pass through.
