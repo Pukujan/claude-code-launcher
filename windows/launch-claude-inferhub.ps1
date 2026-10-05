@@ -42,6 +42,21 @@ if (Test-Path -LiteralPath $CclInstaller) {
   $ErrorActionPreference = "Stop"
 }
 
+# Self-contained install (v1.0.1, install.json v2): the folder's tools, caches and Claude config
+# for this session. A v1 install.json leaves Claude's config where it was.
+$ClaudeBin = "claude"
+$CclToolVars = $null
+$CclExtraEnvNames = @()
+if ($Packaged -and $CclState -and $CclState.claude_config_dir -and (Get-Command Get-CclToolEnv -ErrorAction SilentlyContinue)) {
+  $CclToolVars = Get-CclToolEnv -InstallDir $CclHome -State $CclState
+  $null = Use-CclToolEnv -Vars $CclToolVars
+  if ($CclState.tools -and $CclState.tools.claude -and $CclState.tools.claude.path -and (Test-Path -LiteralPath ([string]$CclState.tools.claude.path))) {
+    $ClaudeBin = [string]$CclState.tools.claude.path
+  }
+  $env:CCL_CLAUDE_BIN = $ClaudeBin
+  $CclExtraEnvNames = @("CLAUDE_CONFIG_DIR", "DISABLE_AUTOUPDATER", "CCL_CLAUDE_BIN", "PATH")
+}
+
 if ($Packaged) {
   $Root = $HOME
   $SecondaryRoot = $null
@@ -160,7 +175,8 @@ function Test-ClaudeAiLogin {
   # True when Claude Code is signed in with a claude.ai account (/login). Call it
   # after the Anthropic variables are cleared, so a key cannot mask the login.
   try {
-    $raw = & claude auth status --json 2>$null | Out-String
+    # `claude auth status --json`, with the install's own claude when it has one.
+    $raw = & $ClaudeBin auth status --json 2>$null | Out-String
     $st = $raw | ConvertFrom-Json
     return ($st.loggedIn -eq $true -and $st.authMethod -eq "claude.ai")
   } catch {
@@ -752,7 +768,7 @@ $UltraCodeCommit = "1870e58e2622c8946c9c7cd45483aa47d7bd5867"
 
 function Get-UltraCodeShim {
   $base = $(if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $HOME "AppData\Local" })
-  $dir = Join-Path $base "claude-code-launcher\ultracode-shim"
+  $dir = $(if ($CclToolVars) { Join-Path $CclHome "state\ultracode-shim" } else { Join-Path $base "claude-code-launcher\ultracode-shim" })
   $stamp = Join-Path $dir ".commit"
   if ((Test-Path -LiteralPath (Join-Path $dir "proxy.py")) -and (Get-Content -LiteralPath $stamp -ErrorAction SilentlyContinue) -eq $UltraCodeCommit) { return $dir }
   Write-Host ("Fetching UltraCode-Shim " + $UltraCodeCommit.Substring(0, 7) + " ...")
@@ -890,7 +906,8 @@ function Resolve-CclPackagedPort {
   $port = Select-CclPort -Start 4000 -Saved $ProxyPort -Probe $probe
   if ($port -ne $ProxyPort) {
     Write-Host ("Port " + $ProxyPort + " is taken by another program; moving the proxy to " + $port)
-    $state = @{ ref = $CclState.ref; port = $port; instance_id = $InstanceId; claude_settings_created = [bool]$CclState.claude_settings_created }
+    $state = @{ ref = $CclState.ref; port = $port; instance_id = $InstanceId; claude_settings_created = [bool]$CclState.claude_settings_created
+      claude_config_dir = $CclState.claude_config_dir; tools = $CclState.tools }   # keep what the installer recorded
     Write-CclInstallState -InstallDir $CclHome -State $state
     if (Test-CclTaskRegistered) { $null = Register-CclProxyTask -InstallDir $CclHome -Port $port }
     $script:ProxyPort = $port
@@ -1051,6 +1068,9 @@ function Initialize-ClaudeLaunchEnv {
     Remove-Item ("Env:" + $_.Name) -ErrorAction SilentlyContinue
   }
 
+  # The sweep above also removed the folder's CLAUDE_CODE_GIT_BASH_PATH; put it back.
+  if ($CclToolVars -and $CclToolVars.CLAUDE_CODE_GIT_BASH_PATH) { $env:CLAUDE_CODE_GIT_BASH_PATH = $CclToolVars.CLAUDE_CODE_GIT_BASH_PATH }
+
   # Force InferHub-via-local-LiteLLM for this Claude child only.
   $env:ANTHROPIC_BASE_URL = $ProxyBase   # http://127.0.0.1:<port>; 4000 unless packaged or CCL_PROXY_PORT
   # Key = optional LiteLLM master key, else the dummy "local" (keyless proxy). NEVER CKFF.
@@ -1146,6 +1166,11 @@ function Format-ClaudeEnv {
   param([string]$Format, $Info)
   $set = [ordered]@{}
   foreach ($e in @(Get-ChildItem Env: | Where-Object { $_.Name -match $ClaudeEnvSweepPattern } | Sort-Object Name)) { $set[$e.Name] = $e.Value }
+  # Self-contained install: the folder's Claude config, Claude Code and tools too.
+  foreach ($n in $CclExtraEnvNames) {
+    $v = [Environment]::GetEnvironmentVariable($n)
+    if ($null -ne $v) { $set[$n] = $v }
+  }
   if ($Format -eq "dotenv") {
     $lines = @("# claude-code-launcher non-interactive env. Unset these first: " + ($ClaudeEnvClearNames -join " "),
                "# and every other name starting with " + ($ClaudeEnvSweepPrefixes -join ", "))
@@ -1205,6 +1230,8 @@ function Get-CclLaunchConfig {
     VenvDir = $VenvDir
     LogDir = $LogDir
     InstanceId = $InstanceId
+    ClaudeConfigDir = $(if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $HOME ".claude" })
+    ClaudeBin = $ClaudeBin
   }
 }
 
@@ -1216,7 +1243,7 @@ if ($LauncherOptions.NonInteractive -or $LauncherOptions.Error) {
   $niResult = Invoke-NonInteractive -Options $LauncherOptions
   if ($niResult -ne "exec") { exit $niResult }
   $claudeArgs = @($LauncherOptions.Rest)
-  & claude @claudeArgs
+  & $ClaudeBin @claudeArgs
   exit $LASTEXITCODE
 }
 Resolve-CclPackagedPort
@@ -1260,7 +1287,7 @@ if ($w.Launch -eq "ultracode") {
   Invoke-UltraCode -Orch $w.UcOrch -Worker $w.UcWorker -ClaudeArgs @("--permission-mode", "bypassPermissions")
 } else {
   Write-Host "Starting Claude Code..."
-  & claude --model $seatAlias --permission-mode bypassPermissions
+  & $ClaudeBin --model $seatAlias --permission-mode bypassPermissions
 }
 Write-Host ("claude exited " + $LASTEXITCODE)
 pause
