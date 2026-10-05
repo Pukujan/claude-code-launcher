@@ -4,7 +4,7 @@
 # InferHub API key, and a free TinyFish Search key is recommended for web search
 # (https://agent.tinyfish.ai/api-keys). Run it in PowerShell:
 #
-#   irm https://github.com/Pukujan/claude-code-launcher/releases/download/v1.0.0-windows/install.ps1 | iex
+#   irm https://github.com/Pukujan/claude-code-launcher/releases/latest/download/install.ps1 | iex
 #
 # or, to pass options, download it first and run
 #   powershell -ExecutionPolicy Bypass -File .\install.ps1 [-InferHubKey <key>] [-TinyFishKey <key>] [-Uninstall] ...
@@ -23,7 +23,7 @@
 param(
     [string]$InferHubKey = '',
     [string]$InstallDir = '',
-    [string]$Ref = 'v1.0.0-windows',
+    [string]$Ref = 'v1.0.1-windows',
     [string]$Source = '',
     [int]$StartPort = 4000,
     [switch]$Uninstall,
@@ -42,7 +42,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
-$script:CclVersion = '1.0.0-windows'
+$script:CclVersion = '1.0.1-windows'
 $script:CclDefaultRef = $Ref
 $script:CclRepo = 'Pukujan/claude-code-launcher'
 $script:CclTaskName = 'claude-code-launcher-proxy'
@@ -264,7 +264,10 @@ function Get-CclPortState {
 function Select-CclPort {
     # The saved port when it is free or ours, else the lowest free-or-ours port from
     # Start. Never a foreign port.
+    # Ports are 1..65535; a saved port outside that is ignored.
     param([int]$Start, [int]$Saved = 0, [scriptblock]$Probe, [int]$Count = 100)
+    if ($Start -lt 1 -or $Start -gt 65535) { throw "CCL_BAD_PORT: $Start is not a port (1..65535)" }
+    if ($Saved -lt 1 -or $Saved -gt 65535) { $Saved = 0 }
     if ($Saved -gt 0) {
         $s = & $Probe $Saved
         if ($s -eq 'free' -or $s -eq 'ours') { return $Saved }
@@ -281,14 +284,17 @@ function Select-CclPort {
 # ---------------------------------------------------------------- shim and task
 
 function Get-CclShimText {
+    # Pure ASCII and no path inside: the shim finds its install from its own folder
+    # (%~dp0 is bin\), so non-ASCII profile folders survive cmd.exe's OEM code page.
+    # -InstallDir is accepted for old callers and ignored.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'InstallDir', Justification = 'Kept for callers; the shim no longer holds a path.')]
     param([string]$InstallDir)
-    $d = $InstallDir.TrimEnd('\', '/')
     $ps = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File'
     return @(
         '@echo off'
         'rem claude-inferhub: runs the claude-code-launcher install in this folder (made by install.ps1).'
         'setlocal'
-        ('set "CCL_HOME=' + $d + '"')
+        'for %%I in ("%~dp0..") do set "CCL_HOME=%%~fI"'
         ('if /i "%~1"=="--set-key" ( ' + $ps + ' "%CCL_HOME%\app\windows\install.ps1" -InstallDir "%CCL_HOME%" -ChangeKey & exit /b )')
         ('if /i "%~1"=="--set-tinyfish-key" ( ' + $ps + ' "%CCL_HOME%\app\windows\install.ps1" -InstallDir "%CCL_HOME%" -ChangeTinyFishKey & exit /b )')
         ('if /i "%~1"=="--uninstall" ( ' + $ps + ' "%CCL_HOME%\app\windows\install.ps1" -InstallDir "%CCL_HOME%" -Uninstall & exit /b )')
@@ -643,14 +649,58 @@ function Get-CclKeyErrorCode {
     return 2
 }
 
+function Invoke-CclPartialUninstall {
+    # install.json is missing, so the folder can't be proven ours: undo what is ours
+    # outside it (settings, planner, PATH, a task pointing here) and our own secrets and
+    # shim inside it, then keep the folder.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Internal helper of a non-interactive installer; -WhatIf is not offered.')]
+    param([string]$InstallDir)
+    Write-CclLog "$InstallDir has no install.json, so it can't be proven this installer made it. Removing only our settings, planner, secrets and shim; the folder stays." 'warn'
+    if ($script:CclOnWindows -and (Test-CclTaskRegistered)) {
+        $t = Get-ScheduledTask -TaskName $script:CclTaskName -ErrorAction SilentlyContinue
+        $args0 = (@($t.Actions) | ForEach-Object { $_.Arguments }) -join ' '
+        $d = $InstallDir.TrimEnd('\', '/')
+        if ($args0 -and $args0.ToLowerInvariant().Contains(('-CclHome "' + $d + '"').ToLowerInvariant())) {
+            Stop-ScheduledTask -TaskName $script:CclTaskName -ErrorAction SilentlyContinue
+            Unregister-ScheduledTask -TaskName $script:CclTaskName -Confirm:$false -ErrorAction SilentlyContinue
+        }
+    }
+    $app = Join-Path $InstallDir 'app'
+    $sync = Join-Path $app 'shared/claude/settings_sync.py'
+    $planner = Join-Path $app 'shared/claude/install_planner.py'
+    $settings = Join-Path (Get-CclClaudeDir) 'settings.json'
+    if (Test-Path -LiteralPath $sync) {
+        if (Test-Path -LiteralPath $settings) {
+            $rc = Invoke-CclHelper -InstallDir $InstallDir -Script $sync -HelperArgs @('unsync', '--settings', $settings)
+            if ($rc -eq 3) { Write-CclLog 'Claude Code settings.json is read-only, so it was left untouched.' 'warn' }
+        }
+    } else { Write-CclLog "No settings helper under $app; Claude Code settings.json was not changed." 'warn' }
+    if (Test-Path -LiteralPath $planner) {
+        $null = Invoke-CclHelper -InstallDir $InstallDir -Script $planner -HelperArgs @('uninstall', '--quiet')
+    } else { Write-CclLog "No planner helper under $app; the planner sub-agent was not removed." 'warn' }
+    $secrets = Join-Path $InstallDir 'secrets'
+    foreach ($f in 'inferhub.env', 'tinyfish.env') {
+        $p = Join-Path $secrets $f
+        if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Force }
+    }
+    if ((Test-Path -LiteralPath $secrets) -and @(Get-ChildItem -LiteralPath $secrets -Force).Count -eq 0) { Remove-Item -LiteralPath $secrets -Force }
+    $shim = Join-Path $InstallDir 'bin/claude-inferhub.cmd'
+    if (Test-Path -LiteralPath $shim) {
+        $lines = @(Get-Content -LiteralPath $shim -TotalCount 2 -ErrorAction SilentlyContinue)
+        if ($lines.Count -ge 2 -and $lines[1].StartsWith('rem claude-inferhub:')) { Remove-Item -LiteralPath $shim -Force }
+    }
+    Remove-CclUserPath -Dir (Join-Path $InstallDir 'bin')
+    Write-CclLog "Left $InstallDir in place; delete it yourself if you no longer need it."
+    return 0
+}
+
 function Invoke-CclUninstall {
     param([string]$InstallDir)
     $InstallDir = Resolve-CclInstallDir -InstallDir $InstallDir
     if (-not (Test-Path -LiteralPath $InstallDir)) { Write-CclLog "Nothing installed at $InstallDir."; return 0 }
     $state = Read-CclInstallState -InstallDir $InstallDir
     if (-not $state -and @(Get-ChildItem -LiteralPath $InstallDir -Force).Count -gt 0) {
-        Write-CclLog "$InstallDir has no install.json; not deleting a folder this installer didn't make." 'warn'
-        return 2
+        return (Invoke-CclPartialUninstall -InstallDir $InstallDir)
     }
     Write-CclLog "Removing claude-inferhub from $InstallDir ..."
     Stop-CclProxy -InstallDir $InstallDir
@@ -765,7 +815,7 @@ function Invoke-CclInstall {
     if ($ChangeTinyFishKey) {
         return (Invoke-CclChangeTinyFishKey -InstallDir $InstallDir -TinyFishKey $TinyFishKey -Environment $Environment -TinyFishPrompt $TinyFishPrompt -NonInteractive:$NonInteractive)
     }
-    if ($StartPort -lt 1024 -or $StartPort -gt 65000) { Write-CclLog 'StartPort must be between 1024 and 65000.' 'warn'; return 2 }
+    if ($StartPort -lt 1 -or $StartPort -gt 65535) { Write-CclLog "StartPort must be a port between 1 and 65535 (got $StartPort)." 'warn'; return 2 }
 
     # 1. The keys, before anything changes on disk.
     $secretPath = Join-Path $InstallDir 'secrets\inferhub.env'
@@ -822,7 +872,8 @@ function Invoke-CclInstall {
     # 7. Claude Code settings and the planner sub-agent.
     $app = Join-Path $InstallDir 'app'
     $rc = Invoke-CclHelper -InstallDir $InstallDir -Script (Join-Path $app 'shared/claude/settings_sync.py') -HelperArgs @('sync', '--settings', $settingsPath)
-    if ($rc -ne 0) { Write-CclLog 'Could not update Claude Code settings.json (left as it was).' 'warn' }
+    if ($rc -eq 3) { Write-CclLog "Claude Code settings.json is read-only, so it was left untouched; clear the read-only flag and run this again to get the model picker." 'warn' }
+    elseif ($rc -ne 0) { Write-CclLog 'Could not update Claude Code settings.json (left as it was).' 'warn' }
     $null = Invoke-CclHelper -InstallDir $InstallDir -Script (Join-Path $app 'shared/claude/install_planner.py') -HelperArgs @('install', '--quiet')
 
     # 8. Logon task and the proxy.

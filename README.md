@@ -17,7 +17,7 @@ enough.
 **Windows, one command.** In PowerShell:
 
 ```powershell
-irm https://github.com/Pukujan/claude-code-launcher/releases/download/v1.0.0-windows/install.ps1 | iex
+irm https://github.com/Pukujan/claude-code-launcher/releases/latest/download/install.ps1 | iex
 ```
 
 That installs whatever is missing (uv, Git, Node, pnpm, Claude Code), asks for

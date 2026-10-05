@@ -22,8 +22,14 @@ are often rate-limited and can be unreliable. You can add the key later.
 Open **PowerShell** (Start menu, type "PowerShell", Enter) and paste:
 
 ```powershell
-irm https://github.com/Pukujan/claude-code-launcher/releases/download/v1.0.0-windows/install.ps1 | iex
+irm https://github.com/Pukujan/claude-code-launcher/releases/latest/download/install.ps1 | iex
 ```
+
+That link always gets the newest release. To pin this exact version instead,
+use `irm https://github.com/Pukujan/claude-code-launcher/releases/download/v1.0.1-windows/install.ps1 | iex`. The old v1.0.0 link still works, but it installs 1.0.0,
+which has the bugs fixed in 1.0.1 (a broken `claude-inferhub` command when
+your Windows user name has accents or other non-English letters, among
+others), so use the link above.
 
 It asks for your InferHub key, then your TinyFish key (the typing is hidden
 for both; press Enter at the TinyFish one to skip it), then does the rest.
@@ -36,7 +42,7 @@ claude-inferhub
 If you would rather pass the keys up front, so nothing is asked:
 
 ```powershell
-& ([scriptblock]::Create((irm https://github.com/Pukujan/claude-code-launcher/releases/download/v1.0.0-windows/install.ps1))) -InferHubKey 'ih-your-key-here' -TinyFishKey 'your-tinyfish-key'
+& ([scriptblock]::Create((irm https://github.com/Pukujan/claude-code-launcher/releases/latest/download/install.ps1))) -InferHubKey 'ih-your-key-here' -TinyFishKey 'your-tinyfish-key'
 ```
 
 Use `-SkipTinyFish` instead of `-TinyFishKey` if you don't want one. Setting
@@ -49,7 +55,7 @@ history. The prompts don't have that problem.
 Download it, read it, then run it:
 
 ```powershell
-irm https://github.com/Pukujan/claude-code-launcher/releases/download/v1.0.0-windows/install.ps1 -OutFile install.ps1
+irm https://github.com/Pukujan/claude-code-launcher/releases/latest/download/install.ps1 -OutFile install.ps1
 notepad install.ps1
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
@@ -58,7 +64,7 @@ If you have the GitHub CLI and access to the repository, this gets the same
 file:
 
 ```powershell
-gh release download v1.0.0-windows -R Pukujan/claude-code-launcher -p install.ps1
+gh release download v1.0.1-windows -R Pukujan/claude-code-launcher -p install.ps1
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
@@ -106,7 +112,8 @@ Running the install command again updates the launcher and keeps your key.
 
 The proxy listens on `127.0.0.1` only, starting at port 4000. If something
 else already uses 4000 (another LiteLLM, for example), the installer picks
-the next free port and remembers it in `install.json`. It never takes over or
+the next free port and remembers it in `install.json`. `-StartPort` picks a
+different first port; any port from 1 to 65535 works. It never takes over or
 stops a program it didn't start. Before Claude Code connects, the launcher
 checks that the proxy on that port really is this install's.
 
@@ -130,13 +137,26 @@ claude-inferhub --uninstall
 or, if the command is gone:
 
 ```powershell
-& ([scriptblock]::Create((irm https://github.com/Pukujan/claude-code-launcher/releases/download/v1.0.0-windows/install.ps1))) -Uninstall
+& ([scriptblock]::Create((irm https://github.com/Pukujan/claude-code-launcher/releases/latest/download/install.ps1))) -Uninstall
 ```
 
 This stops the proxy (only the one it started), removes the logon task, the
 PATH entry, the model list and planner it added to Claude Code's settings, and
 the install folder. Your other Claude Code settings stay. uv, Git, Node, pnpm
 and Claude Code stay installed, since you may use them for other things.
+
+If `install.json` is gone, the uninstaller can't be sure it made the folder,
+so it removes only its own pieces (the settings entries, the planner, the
+keys in `secrets\`, the command and the PATH entry), keeps the folder and
+tells you so. Delete the folder yourself if you're sure.
+
+## Claude Code settings.json
+
+The installer adds the model list and advisor to `~\.claude\settings.json`.
+An empty file is treated as `{}`. It never touches a file that isn't valid
+JSON, or one marked read-only; it warns and carries on, and the rest of the
+install still works. Clear the read-only flag and run the installer again if
+you want the model picker.
 
 ## If something goes wrong
 
