@@ -199,7 +199,10 @@ Describe 'Windows install end to end with private copies of every tool' -Tag 'E2
         $v | Should -Match 'pdftoppm version 26\.'
     }
     It 'renders a PDF page with the private pdftoppm, as Claude Code''s Read does' {
-        $pdf = Join-Path $Root 'one-page.pdf'
+        # A plain folder for the PDF: this checks the tool, not poppler's handling of file names.
+        $work = Join-Path $E2EBase ('ccl-pdf-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        New-Item -ItemType Directory -Force -Path $work | Out-Null
+        $pdf = Join-Path $work 'one-page.pdf'
         $objs = @('<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
             '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 72 72] >>')
         $sb = [Text.StringBuilder]::new('%PDF-1.4' + "`n"); $offs = @()
@@ -210,10 +213,12 @@ Describe 'Windows install end to end with private copies of every tool' -Tag 'E2
         [void]$sb.Append("trailer`n<< /Size 4 /Root 1 0 R >>`nstartxref`n$x`n%%EOF`n")
         [IO.File]::WriteAllText($pdf, $sb.ToString(), [Text.Encoding]::ASCII)
         $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-        & $St.tools.poppler.path -png -r 36 -f 1 -l 1 $pdf (Join-Path $Root 'page') 2>&1 | Out-Null
+        $msg = & $St.tools.poppler.path -png -r 36 -f 1 -l 1 $pdf (Join-Path $work 'page') 2>&1 | Out-String
         $rc = $LASTEXITCODE; $ErrorActionPreference = $prev
+        Write-Host "pdftoppm exit $rc $msg"
         $rc | Should -Be 0
-        @(Get-ChildItem -LiteralPath $Root -Filter 'page*.png').Count | Should -Be 1
+        @(Get-ChildItem -LiteralPath $work -Filter 'page*.png').Count | Should -Be 1
+        Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
     }
     It "gives the private Claude Code 120 s for ripgrep and its search check passes (issue #69)" {
         $doc = Get-Content -LiteralPath (Join-Path $InstallDir 'claude-config\settings.json') -Raw -Encoding UTF8 | ConvertFrom-Json

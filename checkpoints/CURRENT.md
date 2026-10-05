@@ -18,10 +18,9 @@ Phase: Windows installer for a friend.
 - **CCL-0013**: cx primaries in Responses mode, hand-picked ladders, picking from the Top 20 or the frontier list ([issue #13](https://github.com/Pukujan/claude-code-launcher/issues/13), PR #14).
 - **CCL-0021**: bench a model after it uses up its retries ([issue #21](https://github.com/Pukujan/claude-code-launcher/issues/21)).
 - **CCL-0061**: one-command Windows installer ([issue #61](https://github.com/Pukujan/claude-code-launcher/issues/61), PR #62, merge `1f046f7`, release `v1.0.0-windows`).
+- **CCL-0063**: Windows installer v1.0.1: the six holdout fixes, one self-contained install folder (private tools, `CLAUDE_CONFIG_DIR` inside), poppler for PDF pages, #70's ripgrep limit kept ([issue #63](https://github.com/Pukujan/claude-code-launcher/issues/63), PR #66, release `v1.0.1-windows`).
 
 ## Active
-
-- **CCL-0063**: v1.0.1-windows, fixes for six holdout defects ([issue #63](https://github.com/Pukujan/claude-code-launcher/issues/63), refs #61, branch `ccl-0063-windows-v101`, spec `docs/specs/windows-package.md`).
 
 - **CCL-0064**: every launcher key from one gitignored `.env` in the launcher folder, the IRE and Desktop env files only as a fallback ([issue #64](https://github.com/Pukujan/claude-code-launcher/issues/64), branch `ccl-0064-launcher-env`).
 
@@ -36,4 +35,4 @@ None known.
 
 ## Next atomic action
 
-Update the spec for the six defects in #63, then commit red tests before the fixes.
+Publish `v1.0.1-windows` from the PR #66 merge and close #63.
