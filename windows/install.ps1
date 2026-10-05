@@ -875,8 +875,14 @@ function Build-CclVenv {
         }
         $py = Get-CclVenvPython -InstallDir $InstallDir
         Write-CclLog 'Installing the pinned LiteLLM (this takes a minute the first time) ...'
-        & $uvExe pip install --quiet --python $py -r $req --override $ovr 2>&1 | ForEach-Object { Write-CclLog ("  " + $_) }
-        if ($LASTEXITCODE -ne 0) { throw "uv pip install exited $LASTEXITCODE" }
+        # uv splits --override values on spaces, so run next to the file and pass its bare name.
+        $ovrName = Split-Path -Leaf $ovr
+        Push-Location -LiteralPath (Split-Path -Parent $ovr)
+        try {
+            & $uvExe pip install --quiet --python $py -r $req --override $ovrName 2>&1 | ForEach-Object { Write-CclLog ("  " + $_) }
+            $rc = $LASTEXITCODE
+        } finally { Pop-Location }
+        if ($rc -ne 0) { throw "uv pip install exited $rc" }
     } finally { $ErrorActionPreference = $prev }
 }
 

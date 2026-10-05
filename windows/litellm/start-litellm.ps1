@@ -302,8 +302,13 @@ if ($needInstall) {
     if ($Uv) {
         # LiteLLM 1.103.0 declares starlette>=1.0.1; the working venv runs the
         # older pins in the overrides file, which uv applies with --override.
-        & $Uv.Source pip install --python $Python -r $Requirements --override $Overrides
-        $installExit = $LASTEXITCODE
+        # uv splits --override values on spaces, so run next to the file and pass its bare name.
+        $OverridesName = Split-Path -Leaf $Overrides
+        Push-Location -LiteralPath (Split-Path -Parent $Overrides)
+        try {
+            & $Uv.Source pip install --python $Python -r $Requirements --override $OverridesName
+            $installExit = $LASTEXITCODE
+        } finally { Pop-Location }
     } else {
         Write-Host 'uv not found; falling back to pip'
         # A venv made by uv has no pip, so bootstrap it first.

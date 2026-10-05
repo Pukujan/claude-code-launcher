@@ -194,7 +194,7 @@ Describe 'Windows install end to end with private copies of every tool' -Tag 'E2
         (& $St.tools.python.path -c 'import sys; print(sys.version_info[:2])') | Should -Be '(3, 12)'
     }
     It 'builds the venv on the private Python' {
-        $cfg = Get-Content -LiteralPath (Join-Path $InstallDir 'venv\pyvenv.cfg') -Raw
+        $cfg = Get-Content -LiteralPath (Join-Path $InstallDir 'venv\pyvenv.cfg') -Raw -Encoding UTF8
         $cfg | Should -Match ([regex]::Escape((Join-Path $InstallDir 'tools\python')))
         Test-Path -LiteralPath (Join-Path $InstallDir 'cache\uv') | Should -BeTrue
         & (Join-Path $InstallDir 'venv\Scripts\python.exe') -c 'import litellm' | Out-Null

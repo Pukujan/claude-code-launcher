@@ -155,3 +155,15 @@ def test_ci_e2e_runs_real_installs_and_snapshots_the_profile():
     helper = re.search(r"function Invoke-RealInstall \{.*?\n    \}", e2e, re.S)
     assert helper and "SkipPrereqs" not in helper.group(0)
     assert e2e.count("Invoke-RealInstall") >= 3
+
+
+@pytest.mark.spec
+def test_uv_override_gets_a_bare_file_name_on_windows():
+    # uv splits --override values on spaces (clap value_delimiter), so a full path under a
+    # folder like "D:\a b\install" turns into two missing files. Found by the Windows E2E.
+    for rel in ("windows/install.ps1", "windows/litellm/start-litellm.ps1"):
+        text = (REPO / rel).read_text(encoding="utf-8-sig")
+        for line in text.splitlines():
+            if "--override" in line and "pip install" in line:
+                arg = line.split("--override", 1)[1].split()[0]
+                assert arg in ("$ovrName", "$OverridesName"), f"{rel}: {line.strip()}"
