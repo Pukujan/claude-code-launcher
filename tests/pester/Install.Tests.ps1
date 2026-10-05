@@ -1305,7 +1305,9 @@ Describe 'Built-in unsync matches settings_sync.py (v1.0.2 #2)' -Tag 'Metamorphi
             [IO.File]::WriteAllText((Join-Path $d 'settings.json'), $Doc)
             if ($Rec) { [IO.File]::WriteAllText((Join-Path $d '.ccl-settings-sync.json'), $Rec) }
         }
-        & $py (Join-Path $Repo 'shared/claude/settings_sync.py') unsync --settings (Join-Path $d1 'settings.json') 2>$null
+        # The helper reports on stderr; Windows PowerShell turns that into an error under Stop.
+        $sync = Join-Path $Repo 'shared/claude/settings_sync.py'
+        & { $ErrorActionPreference = 'Continue'; & $py $sync unsync --settings (Join-Path $d1 'settings.json') 2>&1 | Out-Null }
         Invoke-CclSettingsUnsyncBuiltin -Settings (Join-Path $d2 'settings.json') | Out-Null
         $a = Get-Content (Join-Path $d1 'settings.json') -Raw | ConvertFrom-Json | ConvertTo-Json -Depth 20 -Compress
         $b = Get-Content (Join-Path $d2 'settings.json') -Raw | ConvertFrom-Json | ConvertTo-Json -Depth 20 -Compress
