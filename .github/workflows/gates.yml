@@ -79,9 +79,16 @@ jobs:
         run: |
           set -euo pipefail
           git clone --quiet https://github.com/Pukujan/agent-custom-setup.git "$VALIDATION_ROOT/acs"
-          git -C "$VALIDATION_ROOT/acs" checkout --quiet 3a381eba11c6262c702f5d696878c371342e859a
+          git -C "$VALIDATION_ROOT/acs" checkout --quiet 38f8f52e8d210db3ce258bf911ebb560c6e0fe4c
           "$VALIDATION_ROOT/venv/bin/python" "$VALIDATION_ROOT/acs/modules/coordination/multi-agent-hotload/v0.1.0/scripts/hotload_check.py" \
             --root "$VALIDATION_ROOT/acs/modules/coordination/multi-agent-hotload/v0.1.0" \
             --assignment "$GITHUB_WORKSPACE/.coord/assignment.json" \
             --cgm-root "$VALIDATION_ROOT/cgm" \
             --adopter-root "$GITHUB_WORKSPACE"
+
+      - name: Check dev root layout (ACS dev_root_check)
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$VALIDATION_ROOT/venv/bin/python" "$VALIDATION_ROOT/acs/modules/coordination/multi-agent-hotload/v0.1.0/scripts/dev_root_check.py" \
+            --dev-root "$(dirname "$GITHUB_WORKSPACE")"

@@ -60,7 +60,8 @@
     "acs": {
       "repo": "https://github.com/Pukujan/agent-custom-setup",
       "module": "modules/coordination/multi-agent-hotload/v0.1.0",
-      "version": "0.1.0"
+      "version": "0.1.0",
+      "revision": "38f8f52e8d210db3ce258bf911ebb560c6e0fe4c"
     },
     "pcm": {
       "repo": "https://github.com/Pukujan/project-continuity-modules",
