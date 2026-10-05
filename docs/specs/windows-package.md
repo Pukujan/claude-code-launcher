@@ -1,7 +1,8 @@
 # Spec: one-command Windows installer
 
-Status: accepted for build (issue [#61](https://github.com/Pukujan/claude-code-launcher/issues/61), task CCL-0061).
-Version this spec describes: `v1.0.0-windows`.
+Status: accepted for build (issue [#61](https://github.com/Pukujan/claude-code-launcher/issues/61), task CCL-0061;
+fixes in issue [#63](https://github.com/Pukujan/claude-code-launcher/issues/63), task CCL-0063).
+Version this spec describes: `v1.0.1-windows`. The changes from `v1.0.0-windows` are listed at the end.
 
 ## Problem
 
@@ -13,24 +14,29 @@ any proxy on 4000 as its own, and it looks in places that only exist on Alex's P
 
 ## Shape
 
-A single PowerShell script, `windows/install.ps1`, attached to the GitHub release
-`v1.0.0-windows`. There's no zip. The script fetches the launcher files for its own tagged
+A single PowerShell script, `windows/install.ps1`, attached to each GitHub release
+(`v1.0.1-windows` now). There's no zip. The script fetches the launcher files for its own tagged
 version, does the setup, and leaves a `claude-inferhub` command on the user's PATH.
 
-Main path (the repo is public):
+Main path (the repo is public). `latest` always points at the newest Windows release:
 
 ```powershell
-irm https://github.com/Pukujan/claude-code-launcher/releases/download/v1.0.0-windows/install.ps1 | iex
+irm https://github.com/Pukujan/claude-code-launcher/releases/latest/download/install.ps1 | iex
 ```
 
 With parameters:
 
 ```powershell
-& ([scriptblock]::Create((irm https://github.com/Pukujan/claude-code-launcher/releases/download/v1.0.0-windows/install.ps1))) -InferHubKey <key>
+& ([scriptblock]::Create((irm https://github.com/Pukujan/claude-code-launcher/releases/latest/download/install.ps1))) -InferHubKey <key>
 ```
 
+A pinned version works the same way:
+`https://github.com/Pukujan/claude-code-launcher/releases/download/v1.0.1-windows/install.ps1`. Every published
+release keeps its asset, so the `v1.0.0-windows` one-liner keeps working (it installs 1.0.0; run
+the `latest` one-liner over it to update). Each new Windows release is marked latest.
+
 Download-and-run also works (`powershell -ExecutionPolicy Bypass -File .\install.ps1`). If the
-repo ever goes private again, `gh release download v1.0.0-windows -R Pukujan/claude-code-launcher -p install.ps1`
+repo ever goes private again, `gh release download v1.0.1-windows -R Pukujan/claude-code-launcher -p install.ps1`
 gets the script, and the installer fetches the source through `gh` when it's logged in.
 
 ## Inputs
@@ -41,9 +47,9 @@ gets the script, and the installer fetches the source through `gh` when it's log
 |---|---|---|---|
 | `-InferHubKey` | string | none | The InferHub API key. Wins over every other source. |
 | `-InstallDir` | path | `$env:CCL_INSTALL_DIR`, else `%LOCALAPPDATA%\claude-code-launcher` | Where everything goes. |
-| `-Ref` | string | `v1.0.0-windows` | Git tag or branch of the launcher files to fetch. |
+| `-Ref` | string | `v1.0.1-windows` | Git tag or branch of the launcher files to fetch. |
 | `-Source` | path | none | Use this local checkout instead of fetching (tests, offline). |
-| `-StartPort` | int | `4000` | First port tried for the proxy. |
+| `-StartPort` | int | `4000` | First port tried for the proxy. Any TCP port, 1 to 65535; anything else is exit 2. The search never goes past 65535. |
 | `-Uninstall` | switch | off | Remove the install (see Uninstall). |
 | `-ChangeKey` | switch | off | Replace the stored key only, then restart the proxy if it runs. |
 | `-TinyFishKey` | string | none | The TinyFish Search API key (free). Wins over every other TinyFish source. |
@@ -95,15 +101,15 @@ key is exit 2 and checked before anything changes on disk.
 | `state\local.env` | Optional per-user proxy settings (e.g. `CCL_WEB_SEARCH_CHAIN`). Never created by the installer, never removed by a reinstall. |
 | `venv\` | The LiteLLM venv, built with `uv venv --python 3.12` and the pinned requirements. |
 | `logs\` | Proxy logs and PID file. |
-| `bin\claude-inferhub.cmd` | The launch command. `bin\` is added to the user PATH once. |
+| `bin\claude-inferhub.cmd` | The launch command. `bin\` is added to the user PATH once. Pure ASCII and holds no path: it finds the install folder from its own location (see below). |
 
 `install.json` (schema `claude-code-launcher.install.v1`):
 
 ```json
 {
   "schema": "claude-code-launcher.install.v1",
-  "version": "1.0.0-windows",
-  "ref": "v1.0.0-windows",
+  "version": "1.0.1-windows",
+  "ref": "v1.0.1-windows",
   "port": 4000,
   "instance_id": "<32 hex chars, made once and kept across reinstalls>",
   "task_name": "claude-code-launcher-proxy",
@@ -116,7 +122,11 @@ Nothing else in `install.json`. It never holds the key.
 ### `claude-inferhub` command
 
 `claude-inferhub [launcher options] [-- claude args]` runs
-`app\windows\launch-claude-inferhub.ps1` with `CCL_HOME` set. Extra verbs:
+`app\windows\launch-claude-inferhub.ps1` with `CCL_HOME` set to the install folder. The shim
+works that folder out from its own location (`for %%I in ("%~dp0..") do set "CCL_HOME=%%~fI"`), so
+the file holds no path at all and is pure ASCII. cmd.exe reads `.cmd` files in the console's OEM
+code page, so a path written into the file would break for a profile like `C:\Users\José`; this
+way it works for any folder name, and the install folder can even be moved. Extra verbs:
 
 | Command | Does |
 |---|---|
@@ -161,7 +171,9 @@ Running install twice leaves the same state as running it once. (State means eve
 
 ### Port choice and "is it ours"
 
-The proxy answers `GET /ccl/identity` (loopback only) with
+The proxy answers `GET /ccl/identity` only to loopback callers (`ccl_identity.is_loopback`:
+any address in `127.0.0.0/8`, `::1`, those addresses written v4-mapped such as
+`::ffff:127.0.0.2`, bracketed or with an IPv6 zone, and `localhost`) with
 `{"app": "claude-code-launcher", "instance": "<CCL_INSTANCE_ID or empty>"}`.
 
 A port's state is one of:
@@ -171,8 +183,9 @@ A port's state is one of:
 - `foreign`: anything else listening (another LiteLLM, any other program).
 
 `Select-CclPort -Start <int> -Saved <int> -Probe <scriptblock> [-Count 100]` returns the saved port
-if its state is `free` or `ours`. Otherwise it returns the lowest port in `Start..Start+Count-1`
-whose state is `free` or `ours`, and throws if there's none. It never returns a `foreign` port.
+if it's a valid port (1 to 65535) and its state is `free` or `ours`. Otherwise it returns the lowest
+port in `Start..min(Start+Count-1, 65535)` whose state is `free` or `ours`, and throws
+`CCL_NO_PORT` if there's none. A `Start` outside 1 to 65535 throws `CCL_BAD_PORT`. It never returns a `foreign` port.
 The launcher runs it on every packaged launch, so if another program takes our port later, it
 moves to a new free port, saves it, re-registers the task and points Claude at it.
 
@@ -212,8 +225,19 @@ The folder picker falls back to home when `D:\development` doesn't exist.
   it's `"sonnet"`. Everything else is kept.
 - CLI: `python settings_sync.py sync|unsync --settings PATH [--options-file FILE]`. `sync`
   creates the file (and its folder) when missing and prints `created` or `updated` or
-  `unchanged` on stderr. A settings file that isn't valid JSON is left untouched (exit 1).
-  The folder is `CLAUDE_CONFIG_DIR` when set, else `~/.claude`.
+  `unchanged` on stderr. The folder is `CLAUDE_CONFIG_DIR` when set, else `~/.claude`.
+- An existing file that is empty (0 bytes) or holds only whitespace counts as `{}`: `sync`
+  writes the launcher's keys into it, and `unsync` has nothing to remove and leaves it as it is.
+- A file that isn't valid JSON, or whose JSON isn't an object, is left untouched (exit 1).
+- A read-only file is never changed or replaced: the read-only attribute on Windows, or no
+  owner write bit / no write access on Linux and macOS. The helper prints
+  `settings_sync: <path> is read-only; left untouched` and exits 3. This is checked only
+  when there's something to change, so an unchanged read-only file is still exit 0.
+- Exit codes: `0` ok or unchanged, `1` not valid JSON or a write error, `2` a bad options file,
+  `3` read-only.
+
+The installer, the launcher and the uninstaller treat a nonzero exit as a warning: they print
+it, leave the file alone and carry on (the install still exits 0).
 
 The launcher calls `sync` on every interactive launch and in non-interactive mode (including
 `--print-env`, which is what Paseo uses), with nothing written to stdout.
@@ -241,13 +265,32 @@ stored state.
 
 ### Uninstall
 
-`install.ps1 -Uninstall` (or `claude-inferhub --uninstall`):
+`install.ps1 -Uninstall` (or `claude-inferhub --uninstall`). The folder counts as **proven** ours
+when it has a readable `install.json`, or is empty.
+
+For a proven folder:
 
 1. Stops our proxy (by the PID file in `logs\`, never by port) and unregisters the task.
 2. Runs `settings_sync.py unsync`; deletes `settings.json` only if the installer created it and
    it's now empty. Removes the planner sub-agent.
 3. Removes `bin\` from the user PATH.
-4. Deletes `InstallDir`.
+4. Deletes `InstallDir`. Exit 0.
+
+For a folder that exists but isn't proven (no `install.json`, not empty), the uninstaller still
+removes everything of ours it can name, and keeps the folder itself:
+
+1. Unregisters the logon task only if its command line points at this folder (`-CclHome "<InstallDir>"`).
+   It doesn't kill anything by PID.
+2. Runs `settings_sync.py unsync` and removes the planner sub-agent, using the helpers in
+   `app\shared\claude\` and the venv or a system Python. `settings.json` is never deleted (the
+   installer can't show it created it). Without the helpers it warns and skips this step.
+3. Deletes `secrets\inferhub.env` and `secrets\tinyfish.env`, and `secrets\` if that leaves it empty.
+4. Deletes `bin\claude-inferhub.cmd` only if it's our shim (its second line starts with
+   `rem claude-inferhub:`), and removes `bin\` from the user PATH.
+5. Leaves the folder and everything else in it, warns that it was kept because nothing proves
+   the installer made it, and exits 0.
+
+A folder that doesn't exist is exit 0 with "nothing installed".
 
 uv, git, Node, pnpm and Claude Code stay. Install, then uninstall, then install gives the same
 state as a fresh install, except for a new `instance_id`.
@@ -267,7 +310,7 @@ With `CCL_INSTALL_LIBRARY_ONLY=1`, dot-sourcing `install.ps1` defines these and 
 | `Get-CclPortState -Port <int> -InstanceId <string>` | `free`, `ours` or `foreign`. |
 | `Select-CclPort -Start <int> -Saved <int> -Probe <scriptblock> [-Count <int>]` | As described under Port choice. |
 | `Get-CclPrereqPlan -Have <IDictionary>` | The tools to install, in order (`uv`, `git`, `node`, `pnpm`, `claude`), for the ones whose value is false. |
-| `Get-CclShimText -InstallDir <path>` | The text of `bin\claude-inferhub.cmd`. |
+| `Get-CclShimText [-InstallDir <path>]` | The text of `bin\claude-inferhub.cmd`: pure ASCII, the same for every install folder (`-InstallDir` is accepted and ignored). |
 | `Get-CclTaskArguments -InstallDir <path> -Port <int>` | The logon task's argument string. Never contains the key. |
 | `Invoke-CclInstall` / `Invoke-CclUninstall` | The install and uninstall flows. Take the script's parameters and return an exit code. For tests `Invoke-CclInstall` also takes `-Environment <IDictionary>` (instead of the process environment), `-KeyPrompt` and `-TinyFishPrompt` (scriptblocks instead of the masked prompts). |
 
@@ -287,7 +330,7 @@ user's window); it writes the error and returns.
    `ANTHROPIC_BASE_URL` points there.
 3. No Alex-specific path, name or secret is in `install.ps1` or used in packaged mode.
 4. CI runs every test category and publishes `install.ps1` as a build artifact.
-5. `install.ps1` is attached to the `v1.0.0-windows` release.
+5. `install.ps1` is attached to the `v1.0.1-windows` release (and each later one), marked latest.
 
 ## Non-goals
 
@@ -311,3 +354,19 @@ Hidden holdout tests are written by another owner outside the repo, against the 
 this spec: the `install.ps1` parameters, environment variables, exit codes, folder layout,
 `install.json` schema, `claude-inferhub` verbs, the TinyFish key handling, `/ccl/identity`, `Select-CclPort`,
 `Get-CclLaunchConfig`, `settings_sync.py`, and `chain_from_env`.
+
+## Changes in v1.0.1-windows (issue #63)
+
+1. The shim holds no path and is pure ASCII; it finds the install folder from `%~dp0`. Before,
+   it held the full path as UTF-8 without a BOM, which cmd.exe misread for non-ASCII profiles.
+2. `-Uninstall` without `install.json` cleans up settings, the planner, the secrets and the shim,
+   and keeps the folder (exit 0). Before, it stopped at once with exit 2.
+3. `-StartPort` accepts 1 to 65535 (was an undocumented 1024 to 65000), and `Select-CclPort`
+   stays inside that range.
+4. An empty settings.json counts as `{}`, the same as a whitespace-only one (whitespace-only was
+   exit 1 before).
+5. A read-only settings.json is left untouched (exit 3 from the helper, a warning from the
+   installer). Before, it was replaced.
+6. `is_loopback` accepts all of `127.0.0.0/8`, `::1` and v4-mapped loopback (it only knew
+   `127.0.0.1`, `::1`, `::ffff:127.0.0.1` and `localhost`).
+7. The documented one-liner uses `releases/latest/download/install.ps1`.
