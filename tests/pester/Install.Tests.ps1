@@ -1209,3 +1209,30 @@ Describe 'Poppler in a real sandbox install' -Tag 'Spec' -Skip:(-not $script:Pos
         Test-Path -LiteralPath (Join-Path $sb.InstallDir 'tools/poppler') | Should -BeFalse
     }
 }
+
+
+Describe 'Remove-CclTree' -Tag 'Spec' {
+    It 'retries when a file vanishes mid-delete and the folder ends up gone' {
+        $d = Join-Path $TestDrive ('rt-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force -Path (Join-Path $d 'logs') | Out-Null
+        'x' | Set-Content (Join-Path $d 'logs/litellm.pid')
+        $script:rmCalls = 0
+        Mock Start-Sleep { }
+        Mock Remove-Item {
+            $script:rmCalls++
+            if ($script:rmCalls -eq 1) { throw [Management.Automation.ItemNotFoundException]::new('An object at the specified path litellm.pid does not exist.') }
+            [IO.Directory]::Delete($LiteralPath, $true)
+        }
+        Remove-CclTree -Path $d
+        $script:rmCalls | Should -Be 2
+        Test-Path -LiteralPath $d | Should -BeFalse
+    }
+    It 'throws when the folder can''t be deleted' {
+        $d = Join-Path $TestDrive ('rt-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force -Path $d | Out-Null
+        Mock Start-Sleep { }
+        Mock Remove-Item { throw [IO.IOException]::new('in use') }
+        { Remove-CclTree -Path $d -Tries 3 } | Should -Throw
+        Should -Invoke Remove-Item -Times 3 -Exactly
+    }
+}
