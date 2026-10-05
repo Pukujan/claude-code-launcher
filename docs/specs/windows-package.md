@@ -123,9 +123,11 @@ Every tool the launcher needs, and all of their data, lives in the folder:
 | pnpm | `pnpm` is on PATH | `tools\pnpm\` (standalone `pnpm.exe` from the official release) |
 | git | `-UseSystemTools` and `git` is on PATH | `tools\git\` (Git for Windows PortableGit; MinGit has no `bash.exe`, which Claude Code needs) |
 | Claude Code | `-UseSystemTools` and `claude` is on PATH | `tools\claude\claude.exe` (the native build from `downloads.claude.ai`, stable channel, checked against its manifest SHA-256) |
+| poppler (`pdftoppm`) | `pdftoppm` is on PATH and prints its version | `tools\poppler\` (the official poppler-windows release zip; `Library\bin\` goes on the session PATH so Claude Code's Read can render PDF pages) |
 
 Every download is checked against a pinned SHA-256 (Claude Code: the manifest's). A failed or
-mismatched download is exit 3 and leaves no half-extracted tool. Winget and the global installers
+mismatched download is exit 3 and leaves no half-extracted tool, except for poppler: without it
+only PDF page reading is missing, so a failed poppler download warns and the install goes on. Winget and the global installers
 are never used, and nothing is added to the PATH except the optional `bin\`.
 
 Whether a tool is reused or private doesn't change where data goes. The installer and every

@@ -93,6 +93,8 @@ folder's `bin\`.
   instead. Add `-PortableOnly` to never use anything from the PC. Every
   download is checked against a fixed SHA-256 before it's unpacked.
   `install.json` records which tools were reused and which are private.
+  Poppler's `pdftoppm` (so Claude Code can read PDF pages) is set up the same
+  way: reused if it's already on your PATH, otherwise a private copy.
 - **The launcher**, in the folder:
   - `app\` holds the launcher files
   - `venv\` holds LiteLLM

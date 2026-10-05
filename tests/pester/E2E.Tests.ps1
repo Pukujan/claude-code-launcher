@@ -88,7 +88,7 @@ Describe 'Windows install end to end, reusing the runner''s tools' -Tag 'E2E' -S
     It 'records which tools it reused and which it bundled' {
         $st = Get-Content -LiteralPath (Join-Path $InstallDir 'install.json') -Raw -Encoding UTF8 | ConvertFrom-Json
         Write-Host ($st.tools | ConvertTo-Json -Depth 4)
-        foreach ($n in 'python', 'node', 'uv', 'pnpm', 'git', 'claude') {
+        foreach ($n in 'python', 'node', 'uv', 'pnpm', 'git', 'claude', 'poppler') {
             $st.tools.$n.source | Should -BeIn @('reused', 'bundled') -Because $n
             Test-Path -LiteralPath $st.tools.$n.path | Should -BeTrue -Because $n
         }
@@ -179,7 +179,7 @@ Describe 'Windows install end to end with private copies of every tool' -Tag 'E2
     }
     It 'bundles every tool inside the folder' {
         Write-Host ($St.tools | ConvertTo-Json -Depth 4)
-        foreach ($n in 'python', 'node', 'uv', 'pnpm', 'git', 'claude') {
+        foreach ($n in 'python', 'node', 'uv', 'pnpm', 'git', 'claude', 'poppler') {
             $St.tools.$n.source | Should -Be 'bundled' -Because $n
             ([string]$St.tools.$n.path).StartsWith($InstallDir) | Should -BeTrue -Because $n
             Test-Path -LiteralPath $St.tools.$n.path | Should -BeTrue -Because $n
@@ -193,6 +193,27 @@ Describe 'Windows install end to end with private copies of every tool' -Tag 'E2
         Test-Path -LiteralPath (Join-Path $InstallDir 'tools\git\bin\bash.exe') | Should -BeTrue
         (& $St.tools.claude.path --version) | Should -Match '\d+\.\d+\.\d+'
         (& $St.tools.python.path -c 'import sys; print(sys.version_info[:2])') | Should -Be '(3, 12)'
+        $St.tools.poppler.path | Should -Be (Join-Path $InstallDir 'tools\poppler\Library\bin\pdftoppm.exe')
+        $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+        $v = (& $St.tools.poppler.path -v 2>&1 | Out-String); $ErrorActionPreference = $prev
+        $v | Should -Match 'pdftoppm version 26\.'
+    }
+    It 'renders a PDF page with the private pdftoppm, as Claude Code''s Read does' {
+        $pdf = Join-Path $Root 'one-page.pdf'
+        $objs = @('<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+            '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 72 72] >>')
+        $sb = [Text.StringBuilder]::new('%PDF-1.4' + "`n"); $offs = @()
+        for ($i = 0; $i -lt $objs.Count; $i++) { $offs += $sb.Length; [void]$sb.Append(("{0} 0 obj`n{1}`nendobj`n" -f ($i + 1), $objs[$i])) }
+        $x = $sb.Length
+        [void]$sb.Append("xref`n0 4`n0000000000 65535 f `n")
+        foreach ($o in $offs) { [void]$sb.Append(('{0:D10} 00000 n `n' -f $o)) }
+        [void]$sb.Append("trailer`n<< /Size 4 /Root 1 0 R >>`nstartxref`n$x`n%%EOF`n")
+        [IO.File]::WriteAllText($pdf, $sb.ToString(), [Text.Encoding]::ASCII)
+        $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+        & $St.tools.poppler.path -png -r 36 -f 1 -l 1 $pdf (Join-Path $Root 'page') 2>&1 | Out-Null
+        $rc = $LASTEXITCODE; $ErrorActionPreference = $prev
+        $rc | Should -Be 0
+        @(Get-ChildItem -LiteralPath $Root -Filter 'page*.png').Count | Should -Be 1
     }
     It "gives the private Claude Code 120 s for ripgrep and its search check passes (issue #69)" {
         $doc = Get-Content -LiteralPath (Join-Path $InstallDir 'claude-config\settings.json') -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -216,6 +237,9 @@ Describe 'Windows install end to end with private copies of every tool' -Tag 'E2
         $doc.set.CLAUDE_CONFIG_DIR | Should -Be (Join-Path $InstallDir 'claude-config')
         $doc.set.CCL_CLAUDE_BIN | Should -Be $St.tools.claude.path
         $doc.set.DISABLE_AUTOUPDATER | Should -Be '1'
+        $doc.set.CLAUDE_CODE_GLOB_TIMEOUT_SECONDS | Should -Be '120'
+        $p = $(if ($doc.set.PATH) { [string]$doc.set.PATH } else { [string]$doc.set.Path })
+        ($p -split ';') | Should -Contain (Join-Path $InstallDir 'tools\poppler\Library\bin')
         Test-Path -LiteralPath (Join-Path $InstallDir 'claude-config\settings.json') | Should -BeTrue
     }
     It 'uninstall deletes the folder and the profile is still untouched' {

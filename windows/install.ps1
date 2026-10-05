@@ -428,7 +428,10 @@ function Test-CclTool { param([string]$Name) return [bool](Get-Command $Name -Er
 # and Claude Code only with -UseSystemTools) or a private copy under <InstallDir>\tools.
 # Every download is pinned by SHA-256 (Claude Code: the SHA-256 in its release manifest).
 
-$script:CclToolOrder = @('uv', 'python', 'node', 'pnpm', 'git', 'claude')
+$script:CclToolOrder = @('uv', 'python', 'node', 'pnpm', 'git', 'claude', 'poppler')
+# Tools the install goes on without: a failure only warns (Claude Code's Read then can't
+# render PDF pages, nothing else breaks).
+$script:CclOptionalTools = @('poppler')
 $script:CclToolSpecs = @{
     uv = @{ version = '0.12.23'; kind = 'zip'; exe = 'uv.exe'
         url = 'https://github.com/astral-sh/uv/releases/download/0.12.23/uv-x86_64-pc-windows-msvc.zip'
@@ -446,6 +449,10 @@ $script:CclToolSpecs = @{
     claude = @{ version = 'stable'; kind = 'claude-manifest'; exe = 'claude.exe'
         url = 'https://downloads.claude.ai/claude-code-releases' }
     python = @{ version = '3.12'; kind = 'uv-python' }
+    # pdftoppm for Claude Code's Read on PDF pages. The official Windows build of poppler.
+    poppler = @{ version = '26.09.0-0'; kind = 'zip'; exe = 'Library\bin\pdftoppm.exe'; strip = 'poppler-26.09.0'
+        url = 'https://github.com/oschwartz10612/poppler-windows/releases/download/v26.09.0-0/Release-26.09.0-0.zip'
+        sha256 = '7a6f256a0ddf7536182246a5733331bf4677cbcc34f4663774947ad34556c8d0' }
 }
 
 function Test-CclPythonVersion {
@@ -465,7 +472,7 @@ function Get-CclToolPlan {
     param([System.Collections.IDictionary]$Found, [switch]$PortableOnly, [switch]$UseSystemTools)
     if ($null -eq $Found) { $Found = @{} }
     $plan = [ordered]@{}
-    foreach ($n in 'python', 'node', 'uv', 'pnpm', 'git', 'claude') {
+    foreach ($n in 'python', 'node', 'uv', 'pnpm', 'git', 'claude', 'poppler') {
         $f = $Found[$n]
         $ok = [bool]($f -and $f.path)
         if ($ok -and $n -eq 'python') { $ok = Test-CclPythonVersion -Version ([string]$f.version) }
@@ -504,9 +511,9 @@ function Get-CclToolEnv {
         $e.CLAUDE_CODE_GIT_BASH_PATH = Join-Path (Join-Path (Join-Path $t 'git') 'bin') 'bash.exe'
     }
     $path = @((Join-Path $t 'claude'), (Join-Path $t 'node'), (Join-Path $t 'pnpm'), (Join-Path $t 'uv'),
-        (Join-Path (Join-Path $t 'git') 'cmd'), (Join-Path $t 'bin'))
+        (Join-Path (Join-Path $t 'git') 'cmd'), (Join-Path $t 'bin'), (Join-Path (Join-Path (Join-Path $t 'poppler') 'Library') 'bin'))
     if ($tools) {
-        foreach ($n in 'python', 'node', 'uv', 'pnpm', 'git', 'claude') {
+        foreach ($n in 'python', 'node', 'uv', 'pnpm', 'git', 'claude', 'poppler') {
             $rec = $tools.$n
             if ($rec -and $rec.path) {
                 $d = Split-Path -Parent ([string]$rec.path)
@@ -582,6 +589,13 @@ function Find-CclSystemTools {
         if (-not $c) { continue }
         $out = @(Invoke-CclToolOutput -Exe $c.Source -ToolArgs @('--version'))
         if ($out.Count -gt 0) { $found[$n] = @{ path = $c.Source; version = ($out[0] -replace '^(uv|git version)\s+', '') } }
+    }
+    # pdftoppm prints its version to stderr; being on PATH and running is enough.
+    $pp = Get-Command pdftoppm -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($pp) {
+        $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+        try { $txt = (& $pp.Source -v 2>&1 | Out-String) } catch { $txt = '' } finally { $ErrorActionPreference = $prev }
+        if ($txt -match 'pdftoppm version\s+(\S+)') { $found.poppler = @{ path = $pp.Source; version = $Matches[1] } }
     }
     return $found
 }
@@ -703,12 +717,22 @@ function Install-CclTools {
             continue
         }
         $spec = $Specs[$n]
-        if (-not $spec) { throw "no download known for $n" }
+        $optional = $script:CclOptionalTools -contains $n
+        if (-not $spec) {
+            if ($optional) { continue }
+            throw "no download known for $n"
+        }
         Write-CclLog "Setting up a private $n in the install folder ..."
-        if ($spec.kind -eq 'uv-python') {
-            $r = Install-CclManagedPython -Uv $rec.uv.path -Version ([string]$spec.version)
-        } else {
-            $r = Install-CclPortableTool -InstallDir $InstallDir -Name $n -Spec $spec
+        try {
+            if ($spec.kind -eq 'uv-python') {
+                $r = Install-CclManagedPython -Uv $rec.uv.path -Version ([string]$spec.version)
+            } else {
+                $r = Install-CclPortableTool -InstallDir $InstallDir -Name $n -Spec $spec
+            }
+        } catch {
+            if (-not $optional) { throw }
+            Write-CclLog ("Could not set up $n (" + $_.Exception.Message + "); Claude Code can't read PDF pages until pdftoppm is on PATH. Run the installer again to retry.") 'warn'
+            continue
         }
         $rec[$n] = [ordered]@{ source = 'bundled'; path = [string]$r.path; version = [string]$r.version }
     }

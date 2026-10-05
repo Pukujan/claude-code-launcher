@@ -179,3 +179,14 @@ def test_windows_scripts_read_text_files_as_utf8():
             if "Get-Content" in line and "-Raw" in line and "-Encoding" not in line:
                 bad.append(f"{p.relative_to(REPO)}:{n}")
     assert bad == []
+
+
+@pytest.mark.spec
+def test_installer_bundles_poppler_for_pdf_pages():
+    # Claude Code's Read needs pdftoppm for PDF pages; the installer sets up poppler.
+    text = (REPO / "windows/install.ps1").read_text(encoding="utf-8-sig")
+    m = re.search(r"poppler = @\{[^}]*url = '([^']+)'[^}]*sha256 = '([0-9a-f]{64})'", text, re.S)
+    assert m, "no pinned poppler spec"
+    assert m.group(1).startswith("https://github.com/oschwartz10612/poppler-windows/releases/download/")
+    docs = (REPO / "docs/specs/windows-package.md").read_text(encoding="utf-8")
+    assert "pdftoppm" in docs

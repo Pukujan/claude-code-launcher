@@ -138,6 +138,7 @@ esac
             node = [ordered]@{ 'node-v0-fake/node.exe' = "#!/bin/sh`necho v24.21.0`n" }
             pnpm = [ordered]@{ 'pnpm.exe' = "#!/bin/sh`necho 12.9.1`n" }
             git = [ordered]@{ 'cmd/git.exe' = "#!/bin/sh`necho git version 2.56.0`n"; 'bin/bash.exe' = "#!/bin/sh`nexit 0`n" }
+            poppler = [ordered]@{ 'poppler-0-fake/Library/bin/pdftoppm.exe' = "#!/bin/sh`necho 'pdftoppm version 26.09.0' >&2`n" }
         }
         Add-Type -AssemblyName System.IO.Compression.FileSystem
         $specs = @{}
@@ -158,6 +159,7 @@ esac
         $specs.node.exe = 'node.exe'; $specs.node.strip = 'node-v0-fake'
         $specs.pnpm.exe = 'pnpm.exe'
         $specs.git.exe = 'cmd/git.exe'; $specs.git.bash = 'bin/bash.exe'
+        $specs.poppler.exe = 'Library/bin/pdftoppm.exe'; $specs.poppler.strip = 'poppler-0-fake'
         $claude = Join-Path $Dir 'claude.exe'
         [IO.File]::WriteAllText($claude, "#!/bin/sh`necho '2.1.285 (Claude Code)'`n")
         & chmod +x $claude
@@ -175,6 +177,7 @@ esac
         }
         $s.claude.kind = 'file'
         $s.python = @{ version = '3.12'; kind = 'uv-python' }
+        $s.poppler = @{ version = 'x'; url = (Join-Path ([IO.Path]::GetTempPath()) ('ccl-missing-' + [guid]::NewGuid().ToString('N'))); sha256 = ('0' * 64); kind = 'zip'; exe = 'Library/bin/pdftoppm.exe' }
         return $s
     }
 
@@ -1043,7 +1046,7 @@ Describe 'Self-contained install with private tools (v1.0.1 #7)' -Tag 'Spec' -Sk
         $st = Read-CclInstallState -InstallDir $sb.InstallDir
         $st.schema | Should -Be 'claude-code-launcher.install.v2'
         $st.claude_config_dir | Should -Be (Join-Path $sb.InstallDir 'claude-config')
-        foreach ($n in 'python', 'node', 'uv', 'pnpm', 'git', 'claude') {
+        foreach ($n in 'python', 'node', 'uv', 'pnpm', 'git', 'claude', 'poppler') {
             $st.tools.$n.source | Should -Be 'bundled' -Because $n
             ([string]$st.tools.$n.path).StartsWith($sb.InstallDir) | Should -BeTrue -Because $n
             Test-Path -LiteralPath $st.tools.$n.path | Should -BeTrue -Because $n
@@ -1100,11 +1103,11 @@ Describe 'Self-contained install reusing the PC''s tools (v1.0.1 #7)' -Tag 'Spec
     }
     It 'with -UseSystemTools and everything found, downloads nothing' {
         $found = @{ python = $pyFound; node = @{ path = '/n'; version = 'v22.0.0' }; uv = @{ path = '/u'; version = '1' }; pnpm = @{ path = '/p'; version = '1' }
-            git = @{ path = '/g'; version = '2.56.0' }; claude = @{ path = '/c'; version = '2.1.0' } }
+            git = @{ path = '/g'; version = '2.56.0' }; claude = @{ path = '/c'; version = '2.1.0' }; poppler = @{ path = '/pp/pdftoppm'; version = '24.08.0' } }
         $rc = Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-x'; SkipPrereqs = $false; UseSystemTools = $true; ClaudeConfigDir = $null; ToolSpecs = (Get-NoDownloadSpecs); ToolProbe = { $found }.GetNewClosure() }
         $rc | Should -Be 0
         $st = Read-CclInstallState -InstallDir $sb.InstallDir
-        foreach ($n in 'python', 'node', 'uv', 'pnpm', 'git', 'claude') { $st.tools.$n.source | Should -Be 'reused' -Because $n }
+        foreach ($n in 'python', 'node', 'uv', 'pnpm', 'git', 'claude', 'poppler') { $st.tools.$n.source | Should -Be 'reused' -Because $n }
         @(Get-ChildItem -LiteralPath (Join-Path $sb.InstallDir 'tools') -Force -ErrorAction SilentlyContinue).Count | Should -Be 0
     }
 }
@@ -1153,10 +1156,56 @@ Describe 'Self-contained relations (v1.0.1 #7)' -Tag 'Metamorphic' -Skip:(-not $
             $one = Get-InstallSnapshot $sb -KeepInstance
             $tools1 = Get-TreeSnapshot (Join-Path $sb.InstallDir 'tools')
             $nd = Get-NoDownloadSpecs
-            foreach ($n in 'uv', 'node', 'pnpm', 'git', 'claude') { $nd[$n].version = $f[$n].version; $nd[$n].exe = $f[$n].exe }
+            foreach ($n in 'uv', 'node', 'pnpm', 'git', 'claude', 'poppler') { $nd[$n].version = $f[$n].version; $nd[$n].exe = $f[$n].exe }
             Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-m'; SkipPrereqs = $false; PortableOnly = $true; ClaudeConfigDir = $null; ToolSpecs = $nd; ToolProbe = { @{} } } | Should -Be 0
             Compare-Snapshot $one (Get-InstallSnapshot $sb -KeepInstance) | Should -Be ''
             Compare-Snapshot $tools1 (Get-TreeSnapshot (Join-Path $sb.InstallDir 'tools')) | Should -Be ''
         } finally { Remove-Sandbox $sb }
+    }
+}
+
+
+Describe 'Poppler for PDF pages (pdftoppm)' -Tag 'Spec' {
+    It 'reuses a pdftoppm already on the PC and bundles it otherwise' {
+        (Get-CclToolPlan -Found @{ poppler = @{ path = '/usr/bin/pdftoppm'; version = '24.02.0' } }).poppler | Should -Be 'reuse'
+        (Get-CclToolPlan -Found @{}).poppler | Should -Be 'bundle'
+        (Get-CclToolPlan -Found @{ poppler = @{ path = '/usr/bin/pdftoppm'; version = '24.02.0' } } -PortableOnly).poppler | Should -Be 'bundle'
+    }
+    It 'pins the official poppler-windows release zip by SHA-256' {
+        $s = $script:CclToolSpecs.poppler
+        $s.url | Should -Match '^https://github\.com/oschwartz10612/poppler-windows/releases/download/'
+        $s.sha256 | Should -Match '^[0-9a-f]{64}$'
+        $s.exe | Should -Be 'Library\bin\pdftoppm.exe'
+        $script:CclToolOrder | Should -Contain 'poppler'
+    }
+    It 'puts the private poppler bin, or the reused pdftoppm folder, on the PATH the launcher sets' {
+        $dir = Join-Path ([IO.Path]::GetTempPath()) 'ccl poppler'
+        $front = @((Get-CclToolEnv -InstallDir $dir).PATH)
+        $front | Should -Contain (Join-Path (Join-Path (Join-Path (Join-Path $dir 'tools') 'poppler') 'Library') 'bin')
+        $st = [pscustomobject]@{ claude_config_dir = (Join-Path $dir 'claude-config'); tools = [pscustomobject]@{ poppler = [pscustomobject]@{ source = 'reused'; path = (Join-Path (Join-Path ([IO.Path]::GetTempPath()) 'pp bin') 'pdftoppm.exe'); version = '24' } } }
+        @((Get-CclToolEnv -InstallDir $dir -State $st).PATH) | Should -Contain (Join-Path ([IO.Path]::GetTempPath()) 'pp bin')
+    }
+}
+
+Describe 'Poppler in a real sandbox install' -Tag 'Spec' -Skip:(-not $script:PosixHost) {
+    BeforeEach { $script:sb = New-Sandbox; $script:pyFound = Get-HostPythonFound }
+    AfterEach { Remove-Sandbox $script:sb }
+    It 'unpacks the private pdftoppm into tools\poppler and it runs' {
+        $fake = New-FakeToolSpecs -Dir (Join-Path $sb.Root 'dl')
+        Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-x'; SkipPrereqs = $false; PortableOnly = $true; ClaudeConfigDir = $null; ToolSpecs = $fake; ToolProbe = { @{} } } | Should -Be 0
+        $st = Read-CclInstallState -InstallDir $sb.InstallDir
+        $st.tools.poppler.path | Should -Be (Join-Path $sb.InstallDir 'tools/poppler/Library/bin/pdftoppm.exe')
+        (& $st.tools.poppler.path -v 2>&1 | Out-String) | Should -Match 'pdftoppm version'
+    }
+    It 'a poppler download that fails only warns; the rest of the install goes on' {
+        $found = @{ python = $pyFound; node = @{ path = '/n'; version = 'v22.0.0' }; uv = @{ path = '/u'; version = '1' }; pnpm = @{ path = '/p'; version = '1' }
+            git = @{ path = '/g'; version = '2.56.0' }; claude = @{ path = '/c'; version = '2.1.0' } }
+        $specs = Get-NoDownloadSpecs
+        $specs.poppler = @{ version = 'x'; url = (Join-Path $sb.Root 'no-such.zip'); sha256 = ('0' * 64); kind = 'zip'; exe = 'Library/bin/pdftoppm.exe' }
+        $rc = Invoke-SandboxInstall $sb -Extra @{ InferHubKey = 'ih-x'; SkipPrereqs = $false; UseSystemTools = $true; ClaudeConfigDir = $null; ToolSpecs = $specs; ToolProbe = { $found }.GetNewClosure() }
+        $rc | Should -Be 0
+        $st = Read-CclInstallState -InstallDir $sb.InstallDir
+        $st.tools.PSObject.Properties.Name | Should -Not -Contain 'poppler'
+        Test-Path -LiteralPath (Join-Path $sb.InstallDir 'tools/poppler') | Should -BeFalse
     }
 }
