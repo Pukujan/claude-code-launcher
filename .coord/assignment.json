@@ -131,7 +131,8 @@
   "ticket_links": {
     "parent_issue": null,
     "child_issues": [
-      "https://github.com/Pukujan/claude-code-launcher/issues/61"
+      "https://github.com/Pukujan/claude-code-launcher/issues/61",
+      "https://github.com/Pukujan/claude-code-launcher/issues/64"
     ],
     "notes": "Parent/child notes only; no full DAG engine."
   }
