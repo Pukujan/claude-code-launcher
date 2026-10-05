@@ -209,7 +209,7 @@ Describe 'Windows install end to end with private copies of every tool' -Tag 'E2
         for ($i = 0; $i -lt $objs.Count; $i++) { $offs += $sb.Length; [void]$sb.Append(("{0} 0 obj`n{1}`nendobj`n" -f ($i + 1), $objs[$i])) }
         $x = $sb.Length
         [void]$sb.Append("xref`n0 4`n0000000000 65535 f `n")
-        foreach ($o in $offs) { [void]$sb.Append(('{0:D10} 00000 n `n' -f $o)) }
+        foreach ($o in $offs) { [void]$sb.Append(("{0:D10} 00000 n `n" -f $o)) }
         [void]$sb.Append("trailer`n<< /Size 4 /Root 1 0 R >>`nstartxref`n$x`n%%EOF`n")
         [IO.File]::WriteAllText($pdf, $sb.ToString(), [Text.Encoding]::ASCII)
         $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'

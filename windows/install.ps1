@@ -339,6 +339,18 @@ function Test-CclTaskRegistered {
     return [bool](Get-ScheduledTask -TaskName $script:CclTaskName -ErrorAction SilentlyContinue)
 }
 
+function Remove-CclTree {
+    # Deletes a folder, retrying while files in it come and go (the proxy that was just stopped
+    # can still remove its own PID file mid-walk). Throws when the folder is still there.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Internal helper of a non-interactive installer; -WhatIf is not offered.')]
+    param([string]$Path, [int]$Tries = 5)
+    for ($i = 1; $i -le $Tries; $i++) {
+        if (-not (Test-Path -LiteralPath $Path)) { return }
+        try { Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop; return }
+        catch { if ($i -eq $Tries -and (Test-Path -LiteralPath $Path)) { throw } ; Start-Sleep -Milliseconds 500 }
+    }
+}
+
 function Stop-CclProxy {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Internal helper of a non-interactive installer; -WhatIf is not offered.')]
     # Stops only our proxy: the task, then the PID in logs\litellm.pid (with its children).
@@ -1068,7 +1080,7 @@ function Invoke-CclUninstall {
     Remove-CclUserPath -Dir (Join-Path $InstallDir 'bin')
     $script:CclLogFile = $null
     if ((Get-Location).Path -like ($InstallDir + '*')) { Set-Location -LiteralPath ([IO.Path]::GetTempPath()) }
-    Remove-Item -LiteralPath $InstallDir -Recurse -Force
+    Remove-CclTree -Path $InstallDir
     Write-CclLog 'Done. The private tools went with the folder; tools that were already on this PC are still installed.'
     return 0
 }
