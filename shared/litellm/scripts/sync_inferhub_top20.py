@@ -48,8 +48,14 @@ def build_yaml(rows: list[dict], api_base: str, source: Path) -> str:
         eligible = str(row.get("recommendation_eligible", "")).lower() == "true"
         mid = primary_model_id(row.get("model_ids", ""))
         name = f"ih/{mid}"
-        cost = row.get("supply_weighted_median_cost_usdc_per_1m") or ""
-        note = f"IRE Top20 #{rank} {family}; eligible={eligible}"
+        # Price on the best route's cheapest listed ask (IRE issue #94): that is
+        # the price of the route this row names. An older CSV carrying only the
+        # supply blend still generates, on the blend.
+        ask_in = row.get("best_route_min_ask_in_usdc_per_1m") or ""
+        ask_out = row.get("best_route_min_ask_out_usdc_per_1m") or ""
+        cost_in = ask_in or row.get("supply_weighted_median_cost_usdc_per_1m") or ""
+        basis = "best-route ask" if ask_in else "supply blend"
+        note = f"IRE Top20 #{rank} {family}; eligible={eligible}; price basis: {basis}, USD per 1M tokens"
         lines.append(f"  - model_name: {yaml_escape(name)}")
         lines.append("    litellm_params:")
         lines.append(f"      model: openai/{mid}")
@@ -57,10 +63,11 @@ def build_yaml(rows: list[dict], api_base: str, source: Path) -> str:
         lines.append("      api_key: os.environ/INFERHUB_API_KEY")
         lines.append("    model_info:")
         lines.append(f"      description: {yaml_escape(note)}")
-        if cost:
+        for key, raw in (("input_cost_per_token", cost_in), ("output_cost_per_token", ask_out)):
+            if not raw:
+                continue
             try:
-                per_token = float(cost) / 1_000_000.0
-                lines.append(f"      input_cost_per_token: {per_token}")
+                lines.append(f"      {key}: {float(raw) / 1_000_000.0}")
             except ValueError:
                 pass
         lines.append("")

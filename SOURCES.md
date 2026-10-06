@@ -144,7 +144,7 @@ under `~/litellm`. It is gone; these parts now live in `mac/`:
 | `shared/litellm/scripts/merge_litellm_config.py` | `Pukujan/litellm-ckff-ops` | `scripts/merge_litellm_config.py` | `de69e68` | `b77190bb7060c57fbb567bd8fd22af321fa2740add5c566e9b9cff625a1871e2` | strips `openai/responses/` too |
 | `shared/litellm/sitecustomize.py` | `Pukujan/litellm-ckff-ops` | `sitecustomize.py` | `de69e68` | `bf627afc9bc610ecea7d633a62fb34c9145e3076efaf969be22a1ea47651d8d3` | ladder scope |
 | `shared/litellm/scripts/reload_runtime.py` | `Pukujan/litellm-ckff-ops` | `scripts/reload_runtime.py` | `f04adc8` | `6d177c687e7509196162c0bc9eaf1c01fea42f0af70eaa876e96f563d7ebbfaa` | yes; checked against `de69e68` (`d858f9a9…`), kept |
-| `shared/litellm/scripts/sync_inferhub_top20.py` | `Pukujan/litellm-ckff-ops` | `scripts/sync_inferhub_top20.py` | `f04adc8` | `0f5a52d8706ef588d722d2bfd3d0bdcb7eb394b94833a372859be51b1aa66b64` | default CSV only; checked against `de69e68` (`0254c188…`), kept |
+| `shared/litellm/scripts/sync_inferhub_top20.py` | `Pukujan/litellm-ckff-ops` | `scripts/sync_inferhub_top20.py` | `f04adc8` | `0f5a52d8706ef588d722d2bfd3d0bdcb7eb394b94833a372859be51b1aa66b64` | default CSV only; price read/write ported from `fcc2de7` (`5235de06…`); checked against `de69e68` (`0254c188…`), kept |
 
 **CKFF off (litellm-ckff-ops PR #44, `768c9df`).** `scripts/provider_switch.py`
 and `config/providers.yaml` are copied unchanged from `768c9df`, except that
@@ -218,7 +218,14 @@ Local edits kept on top of `de69e68` (diff against upstream shows only these):
   of a hardcoded Desktop path. With no master key it calls the reload endpoint
   without an `Authorization` header.
 - `sync_inferhub_top20.py` (kept from `f04adc8`): the default CSV is
-  `config/top20-builtin.csv`.
+  `config/top20-builtin.csv`. The price read and write are the `fcc2de7`
+  version (IRE #94): the row's `best_route_min_ask_in/out_usdc_per_1m` are read
+  first and both `input_cost_per_token` and `output_cost_per_token` are
+  written, with the supply blend as the fallback for a CSV that predates the
+  ask columns. Nothing else reads these fields: the role fallbacks come from
+  `inferhub_fallbacks.yaml`'s own `models:` block (vendor/cost/eligible), and
+  the generated file is used only for the `model_name` to route map, so the
+  fallback chains are untouched.
 
 Written here, not copied: `shared/litellm/bench_after_retries.py`, which
 benches a seat or rung once it has used up its retries. LiteLLM 1.103.0's own
