@@ -29,3 +29,31 @@ downstream shifts.
 - 2026-10-05: issue #76 opened. Branch `ccl-0073-ire-price-basis` cut from `main`.
 - 2026-10-05: ask columns wired through `parse_top20`, `_top20_from_csv`, `cap_price` and `format_row`; the four built-in artifacts refreshed to IRE's current Top 20; the bundle grew a `freshness` field with a 7-day stale warning.
 - 2026-10-05: `tests/test_ladder.py` 35/35, the three affected files 73 pass with only the known Windows-only `test_cache_dir_per_platform` failure; full-suite failure set identical to the HEAD baseline (23 each); `ruff check .` clean.
+
+### 2026-10-06 01:17:43 UTC — executor-claude-code-launcher
+
+<!-- continuity:checkpoint {"agent":"executor-claude-code-launcher","blocked":["none"],"changed":["shared/ire/ire_fetch.py, shared/ire/defaults.json, shared/ladder/inputs.py, shared/ladder/ladder.py","shared/litellm/config/top20-builtin.csv, windows/launch-claude-inferhub.ps1, mac/Launch Claude InferHub.command","tests/test_ladder.py, tests/test_ire_fetch.py, tests/test_top20_tables.py, tasks/TASK-CCL-0073-ire-price-basis.md, checkpoints/CURRENT.md"],"completed":["Wired IRE's two ask columns through the launcher: parse_top20 and _top20_from_csv read best_route_min_ask_in/out_usdc_per_1m, cap_price judges the $0.10 cap on the output ask then the input ask then the blend, and format_row prints both.","Refreshed all four built-in picker tables to IRE's current Top 20, dropping the rows IRE gated for thin supply including Muse Spark 1.3 Contributor.","Added a freshness field with a 7-day stale warning for bundles served from cache or the built-in tables.","Updated the tests for the new ask basis and the refreshed table order."],"decisions":["no new decisions"],"evidence":["Full-suite failure set identical to the HEAD baseline (23 each, all machine-environment failures), so this change adds none; ruff check . clean; staged blobs are LF and the PowerShell file keeps its UTF-8 BOM."],"next_action":"Open the #76 pull request for ccl-0073-ire-price-basis with auto-merge, then mark #76 done after the gates pass.","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"CCL-0073","timestamp":"2026-10-06T01:17:43Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"a935d099881f3669558b9fffbef65a82a8d698cc8e80caf4e834c245c3bc650a","request_id":"3fb65b4229b643be93da571009c85ecc","schema":"project-continuity.checkpoint-operation.v1","task_id":"CCL-0073"} -->
+
+Completed:
+- Wired IRE's two ask columns through the launcher: parse_top20 and _top20_from_csv read best_route_min_ask_in/out_usdc_per_1m, cap_price judges the $0.10 cap on the output ask then the input ask then the blend, and format_row prints both.
+- Refreshed all four built-in picker tables to IRE's current Top 20, dropping the rows IRE gated for thin supply including Muse Spark 1.3 Contributor.
+- Added a freshness field with a 7-day stale warning for bundles served from cache or the built-in tables.
+- Updated the tests for the new ask basis and the refreshed table order.
+
+Evidence:
+- Full-suite failure set identical to the HEAD baseline (23 each, all machine-environment failures), so this change adds none; ruff check . clean; staged blobs are LF and the PowerShell file keeps its UTF-8 BOM.
+
+Decisions:
+- no new decisions
+
+Changed:
+- shared/ire/ire_fetch.py, shared/ire/defaults.json, shared/ladder/inputs.py, shared/ladder/ladder.py
+- shared/litellm/config/top20-builtin.csv, windows/launch-claude-inferhub.ps1, mac/Launch Claude InferHub.command
+- tests/test_ladder.py, tests/test_ire_fetch.py, tests/test_top20_tables.py, tasks/TASK-CCL-0073-ire-price-basis.md, checkpoints/CURRENT.md
+
+Blocked/uncertain:
+- none
+
+Next:
+- Open the #76 pull request for ccl-0073-ire-price-basis with auto-merge, then mark #76 done after the gates pass.
