@@ -612,7 +612,7 @@ def main(argv=None) -> int:
     ap.add_argument("--cache-dir", type=Path, default=None, help="override the cache folder")
     ap.add_argument("--out", type=Path, default=None, help="write the JSON here instead of stdout")
     ap.add_argument("--table-out", type=Path, default=None,
-                    help="also write rank|name|id|eligible|cost lines (the Mac picker table)")
+                    help="also write rank|name|id|eligible|in|out lines (the Mac picker table)")
     ap.add_argument("--top20-csv", type=Path, default=None,
                     help="also write the Top 20 as a CSV for sync_inferhub_top20.py")
     a = ap.parse_args(argv)
