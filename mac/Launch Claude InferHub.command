@@ -84,23 +84,23 @@ OVERRIDES="$(cat "$OVR_FILE" 2>/dev/null)"
 MODELS='1|DeepSeek V4.1 Flash|cb/deepseek-v4.1-flash|true|0.00015|0.0006
 2|MiniMax M3|cbcn/minimax-m3|true|0.0003|0.0012
 3|GLM 5.3 Flash|cbcn/glm-5.3-flash|true|0.00015|0.0005
-4|DeepSeek V4 Flash|cbcn/deepseek-v4-flash|false|0.00308|0.00924
-5|GPT 5.6 Luna|cx/gpt-5.6-luna|true|0.0042|0.0252
+4|DeepSeek V4 Flash|cbcn/deepseek-v4-flash|false|0.0033|0.0099
+5|GPT 5.6 Luna|cx/gpt-5.6-luna|false|0.0042|0.0252
 6|Qwen3.8 Flash|ali/qwen3.8-flash|true|0.00015|0.00047
-7|DeepSeek V4 Pro|cbcn/deepseek-v4-pro|false|0.00924|0.02772
-8|Kimi K2.7 Code|ali/kimi-k2.7-code|false|0.0133|0.056
+7|DeepSeek V4 Pro|cbcn/deepseek-v4-pro|false|0.0099|0.0297
+8|Kimi K2.7 Code|ali/kimi-k2.7-code|false|0.01425|0.06
 9|Qwen3.8 Max 0902|ali/qwen3.8-max-0902|false|0.01|0.03
 10|GLM 5.3|cbcn/glm-5.3|true|0.0014|0.0044
-11|Gemini 3.8 Flash|ag/gemini-3.8-flash-high|false|0.0015|0.0075
+11|MiMo V2.5|ocg/mimo-v2.5|true|0.014|0.028
 12|Gemini 3.7 Flash|ag/gemini-3.7-flash-high|false|0.0015|0.0075
 13|MiniMax M2.7|mm/MiniMax-M2.7|false|0.0003|0.0012
 14|Gemini 3.6 Flash|ag/gemini-3.6-flash-high|false|0.0015|0.0075
-15|MiMo V2.5|ocg/mimo-v2.5|true|0.014|0.028
+15|Kimi K2.6|cbcn/kimi-k2.6|false|0.01425|0.06
 16|GLM 5.2|ali/glm-5.2|true|0.0014|0.0044
-17|Kimi K2.6|cbcn/kimi-k2.6|false|0.0133|0.056
-18|GPT 6 Luna|cb/gpt-6-luna|false|0.0021|0.0105
-19|Qwen3.8 Omni Flash|alicn/qwen3.8-omni-flash|false|0.00015|0.00047
-20|Hy4 Preview|cb/hy4-preview|false|0.011676|0.035014'
+17|GPT 6 Luna|cb/gpt-6-luna|false|0.0021|0.0105
+18|Qwen3.8 Omni Flash|alicn/qwen3.8-omni-flash|false|0.00015|0.00047
+19|Claude Sonnet 4.6|ag/|false|0.003|0.015
+20|Muse Spark 1.3 Contributor|cmc/meta/muse-spark-1.3-contributor|false|0.05|0.1'
 
 MODEL_COUNT="$(printf '%s\n' "$MODELS" | grep -c '|')"
 

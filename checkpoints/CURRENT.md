@@ -1,12 +1,12 @@
 # Current Repository Checkpoint
 
-<!-- continuity:current {"active_task":"CCL-0074","active_task_file":"tasks/TASK-CCL-0074-ccl-0074-revendor-ask-prices.md","protocol_version":"0.1.0-draft","schema":"project-continuity.current.v1"} -->
+<!-- continuity:current {"active_task":"CCL-0075","active_task_file":"tasks/TASK-CCL-0075-ire-top20-refresh.md","protocol_version":"0.1.0-draft","schema":"project-continuity.current.v1"} -->
 
 This is an as-of projection; live GitHub issues own progression. Link the owning leaf, parent ancestry and dependencies for active work.
 
 ## Program state
 
-Phase: the launcher's vendored generator prices from the ask like the picker does.
+Phase: the launcher's built-in picker tables track IRE's current Top 20.
 
 ## Completed
 
@@ -22,10 +22,11 @@ Phase: the launcher's vendored generator prices from the ask like the picker doe
 - **CCL-0072**: Windows installer v1.0.2: uninstall never edits a Claude config it can't prove it wrote, cleanup works without `app\`, a user-set search timeout survives unsync ([issue #72](https://github.com/Pukujan/claude-code-launcher/issues/72)).
 - **CCL-0064**: every launcher key from one gitignored `.env` in the launcher folder, the IRE and Desktop env files only as a fallback ([issue #64](https://github.com/Pukujan/claude-code-launcher/issues/64)).
 - **CCL-0073**: the picker and the bundle show the cheapest well-supplied ask (rank-1 DeepSeek V4.1 Flash at 0.00015 in / 0.0006 out, not the 0.022 blend), the four built-in tables are refreshed to IRE's current Top 20, and an old list warns once it is past 7 days ([issue #76](https://github.com/Pukujan/claude-code-launcher/issues/76), PR #79, merge `c8e45b3`).
+- **CCL-0074**: the launcher's vendored `sync_inferhub_top20.py` prices each generated `ih/` deployment from its best route's ask, writes both the input and output cost, and names the basis, so rank 1 comes out at 1.5e-10 in and 6e-10 out ([issue #80](https://github.com/Pukujan/claude-code-launcher/issues/80), PR #81, merge `a534be9`).
 
 ## Active
 
-- **CCL-0074**: the launcher's vendored `sync_inferhub_top20.py` reads the row's ask pair first, writes both costs, and names the basis, so the `ih/` deployments match the picker ([issue #80](https://github.com/Pukujan/claude-code-launcher/issues/80), branch `ccl-0074-revendor-ask-prices`).
+- **CCL-0075**: the four built-in picker tables are refreshed to IRE's current Top 20, so the offline fallback marks GPT 5.6 Luna not eligible, drops Gemini 3.8 Flash and Hy4 Preview, and adds the model 4.6 and Muse Spark 1.3 Contributor ([issue #84](https://github.com/Pukujan/claude-code-launcher/issues/84), branch `ccl-0075-ire-top20-refresh`).
 
 ## Queued
 
@@ -37,4 +38,4 @@ None known.
 
 ## Next atomic action
 
-Publish the `ccl-0074-revendor-ask-prices` PR for #80 with auto-merge, then confirm the generated `ih/` deployments read `1.5e-10` in and `6e-10` out for rank 1.
+Publish the `ccl-0075-ire-top20-refresh` PR for #84 with auto-merge, then confirm the four tables read IRE's current Top 20 and close #84.

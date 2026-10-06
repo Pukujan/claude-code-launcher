@@ -84,11 +84,11 @@ class Defaults(unittest.TestCase):
 
     def test_blocked_vendor_dropped(self):
         self.assertEqual(L.default_ladder(self.b, "main", "cb/deepseek-v4.1-flash", ["cbcn"]),
-                         ["ali/qwen3.8-flash", "cx/gpt-5.6-luna"])
+                         ["ali/qwen3.8-flash", "ocg/mimo-v2.5"])
 
     def test_never_more_than_three_and_only_cheap_eligible(self):
         b = dict(self.b, ladders={"main": {"fallbacks": [
-            "ali/glm-5.2", "ag/gemini-3.8-flash-high", "ali/qwen3.8-flash", "cbcn/minimax-m3",
+            "ali/glm-5.2", "ag/gemini-3.7-flash-high", "ali/qwen3.8-flash", "cbcn/minimax-m3",
             "cbcn/deepseek-v4-flash", "cbcn/glm-5.3-flash"]}})
         lad = L.default_ladder(b, "main", "cb/deepseek-v4.1-flash")
         self.assertEqual(lad, ["ali/glm-5.2", "ali/qwen3.8-flash", "cbcn/minimax-m3"])
@@ -166,11 +166,11 @@ class Picker(unittest.TestCase):
                 m["price_out"] = 0.5
         ids = [c["id"] for c in L.catalog(b) if c["id"] != "cb/deepseek-v4.1-flash"]
         out = io.StringIO()
-        it = iter([f"{ids.index('ali/glm-5.2') + 1} {ids.index('ag/gemini-3.8-flash-high') + 1}"])
+        it = iter([f"{ids.index('ali/glm-5.2') + 1} {ids.index('ag/gemini-3.7-flash-high') + 1}"])
         res = L.prompt_ladder(b, "main", "cb/deepseek-v4.1-flash", (), inp=lambda _: next(it), out=out)
-        self.assertEqual(res, {"fallbacks": ["ali/glm-5.2", "ag/gemini-3.8-flash-high"], "source": "picked"})
+        self.assertEqual(res, {"fallbacks": ["ali/glm-5.2", "ag/gemini-3.7-flash-high"], "source": "picked"})
         self.assertIn("warning: ali/glm-5.2 costs over $0.10 per 1M", out.getvalue())
-        self.assertIn("warning: ag/gemini-3.8-flash-high is gated", out.getvalue())
+        self.assertIn("warning: ag/gemini-3.7-flash-high is gated", out.getvalue())
 
     def test_hand_picks_sharing_a_vendor_are_honored(self):
         ids = self.ids()
@@ -251,10 +251,10 @@ class HandPickedSharedVendors(unittest.TestCase):
             # main hand-picks a cbcn rung; advisor then picks a cbcn primary and a cb rung by hand
             choose("main", "cb/deepseek-v4.1-flash", str(cat.index("cbcn/deepseek-v4-flash") + 1))
             cat_a = [c["id"] for c in L.catalog(I.builtin_inputs()) if c["id"] != "cbcn/glm-5.3-flash"]
-            r = choose("advisor", "cbcn/glm-5.3-flash", str(cat_a.index("cb/hy4-preview") + 1))
+            r = choose("advisor", "cbcn/glm-5.3-flash", str(cat_a.index("cb/gpt-6-luna") + 1))
             state = json.loads(st.read_text())
         self.assertEqual(state["main"]["fallbacks"], ["cbcn/deepseek-v4-flash"])
-        self.assertEqual(state["advisor"]["fallbacks"], ["cb/hy4-preview"])
+        self.assertEqual(state["advisor"]["fallbacks"], ["cb/gpt-6-luna"])
         self.assertIn("shares vendor 'cb/'", r.stderr)
 
 
