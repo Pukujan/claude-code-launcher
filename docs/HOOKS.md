@@ -95,6 +95,25 @@ In short:
   usable logs `<source> gave 0 usable results ...`. Run the setup
   with `-Uninstall` to remove the task; the proxy needs a restart to pick up a
   changed chain.
+
+  The setup also turns off SlopSearX engines that cannot answer from a home PC
+  (issue #82). It writes `ENGINE_<NAME>_ENABLED=false` into the start script
+  for `-DisableEngines`, which defaults to `google,reddit,duckduckgo,brave`:
+  - Google sends a JavaScript wall.
+  - Reddit answers 403 without OAuth.
+  - Brave needs an API key.
+  - DuckDuckGo timed out at connect, which added 10 s to every query.
+
+  Pass `-DisableEngines ''` to keep every engine.
+
+  Results also depend on two SlopSearX fixes tracked in magnus919/SlopSearX#674:
+  - a Wikipedia User-Agent that Wikimedia accepts (it answered 403 before),
+  - a Bing engine, the only keyless general web engine that answered from Alex's PC.
+
+  Until upstream merges them, `-Repo https://github.com/Pukujan/SlopSearX.git
+  -Ref ccl-fixes` installs a fork branch that carries both. An existing
+  checkout's `origin` is repointed to `-Repo`. Re-running the setup rewrites the
+  start script and restarts the task.
 - **Haiku slot max_tokens floor.** WebFetch summaries go to the haiku slot with a
   small `max_tokens`; reasoning models could spend all of it thinking and send
   back nothing. `shared/litellm/fast_min_tokens.py` raises `max_tokens` to 4096
