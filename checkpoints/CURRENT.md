@@ -1,12 +1,12 @@
 # Current Repository Checkpoint
 
-<!-- continuity:current {"active_task":"CCL-0073","active_task_file":"tasks/TASK-CCL-0073-ire-price-basis.md","protocol_version":"0.1.0-draft","schema":"project-continuity.current.v1"} -->
+<!-- continuity:current {"active_task":"CCL-0074","active_task_file":"tasks/TASK-CCL-0074-ccl-0074-revendor-ask-prices.md","protocol_version":"0.1.0-draft","schema":"project-continuity.current.v1"} -->
 
 This is an as-of projection; live GitHub issues own progression. Link the owning leaf, parent ancestry and dependencies for active work.
 
 ## Program state
 
-Phase: launcher picker reads IRE's live ask columns.
+Phase: the launcher's vendored generator prices from the ask like the picker does.
 
 ## Completed
 
@@ -21,10 +21,11 @@ Phase: launcher picker reads IRE's live ask columns.
 - **CCL-0063**: Windows installer v1.0.1: the six holdout fixes, one self-contained install folder (private tools, `CLAUDE_CONFIG_DIR` inside), poppler for PDF pages, #70's ripgrep limit kept ([issue #63](https://github.com/Pukujan/claude-code-launcher/issues/63), PR #66, release `v1.0.1-windows`).
 - **CCL-0072**: Windows installer v1.0.2: uninstall never edits a Claude config it can't prove it wrote, cleanup works without `app\`, a user-set search timeout survives unsync ([issue #72](https://github.com/Pukujan/claude-code-launcher/issues/72)).
 - **CCL-0064**: every launcher key from one gitignored `.env` in the launcher folder, the IRE and Desktop env files only as a fallback ([issue #64](https://github.com/Pukujan/claude-code-launcher/issues/64)).
+- **CCL-0073**: the picker and the bundle show the cheapest well-supplied ask (rank-1 DeepSeek V4.1 Flash at 0.00015 in / 0.0006 out, not the 0.022 blend), the four built-in tables are refreshed to IRE's current Top 20, and an old list warns once it is past 7 days ([issue #76](https://github.com/Pukujan/claude-code-launcher/issues/76), PR #79, merge `c8e45b3`).
 
 ## Active
 
-- **CCL-0073**: the picker and the bundle show the cheapest well-supplied ask (rank-1 DeepSeek V4.1 Flash at 0.00015 in / 0.0006 out, not the 0.022 blend), the four built-in tables are refreshed to IRE's current Top 20, and an old list warns once it is past 7 days ([issue #76](https://github.com/Pukujan/claude-code-launcher/issues/76), branch `ccl-0073-ire-price-basis`).
+- **CCL-0074**: the launcher's vendored `sync_inferhub_top20.py` reads the row's ask pair first, writes both costs, and names the basis, so the `ih/` deployments match the picker ([issue #80](https://github.com/Pukujan/claude-code-launcher/issues/80), branch `ccl-0074-revendor-ask-prices`).
 
 ## Queued
 
@@ -36,4 +37,4 @@ None known.
 
 ## Next atomic action
 
-Publish the `ccl-0073-ire-price-basis` PR for #76 with auto-merge, then confirm the four built-in artifacts still agree and close #76.
+Publish the `ccl-0074-revendor-ask-prices` PR for #80 with auto-merge, then confirm the generated `ih/` deployments read `1.5e-10` in and `6e-10` out for rank 1.
