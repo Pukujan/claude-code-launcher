@@ -37,7 +37,7 @@ done
 echo "== model table =="
 check "20 built-in models" "$MODEL_COUNT" "20"
 check "rank 1 id" "$(model_field 1 3)" "cb/deepseek-v4.1-flash"
-check "rank 20 id" "$(model_field 20 3)" "cb/hy4-preview"
+check "rank 20 id" "$(model_field 20 3)" "cmc/meta/muse-spark-1.3-contributor"
 check "resolve by number" "$(resolve_model 10)" "10"
 check "resolve by id" "$(resolve_model cbcn/minimax-m3)" "2"
 if resolve_model 21 >/dev/null; then bad "rejects 21"; else ok "rejects 21"; fi
