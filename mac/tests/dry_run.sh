@@ -8,7 +8,7 @@
 # throwaway HOME. First mac/setup.sh installs everything (fake InferHub key on
 # stdin) and writes claude-acs without starting the proxy. Then claude-acs runs
 # the launcher with the picker answers piped in: folder 3 (second subfolder),
-# confirm, main 2 (GLM 5.3 Flash), advisor 10 (MiniMax M3). No
+# confirm, main 3 (GLM 5.3 Flash), advisor 2 (MiniMax M3). No
 # LITELLM_MASTER_KEY is set, so the proxy runs keyless. CCL_IRE_OFFLINE=1 keeps
 # shared/ire on its built-in table: since issue #61 it would otherwise try an
 # anonymous GitHub fetch, and the picker numbers below depend on that table.
@@ -73,7 +73,7 @@ grep -qF "$LAUNCHER" "$SHIM" || { echo "claude-acs does not point at this checko
 run_env "$BASH_BIN" "$REPO/mac/setup.sh" --check > "$T/check-output.txt" 2>&1
 grep -q "ok  claude-acs" "$T/check-output.txt" || { echo "setup.sh --check does not see claude-acs"; fail=1; }
 grep -q "fake-inferhub-key" "$T/check-output.txt" && { echo "setup.sh --check printed the key"; fail=1; }
-printf '3\ny\n2\n10\n' | run_env "$BASH_BIN" "$SHIM" > "$T/launcher-output.txt" 2>&1
+printf '3\ny\n3\n2\n' | run_env "$BASH_BIN" "$SHIM" > "$T/launcher-output.txt" 2>&1
 echo "launcher exit: $?"
 cat "$T/claude-call.txt" 2>/dev/null || { echo "mock claude never ran"; tail -40 "$T/launcher-output.txt"; tail -40 "$T/home/.local/state/claude-inferhub/launcher.log" 2>/dev/null; exit 1; }
 expect() { grep -qxF "$1" "$T/claude-call.txt" || { echo "MISSING: $1"; fail=1; }; }
@@ -108,7 +108,7 @@ if grep -rq fake-inferhub-key "$T/launcher-output.txt" "$LL/logs" "$T/home/.loca
 fi
 # With a claude.ai login and a keyless proxy, no key at all: the login stays the
 # active credential (Artifacts need it) and traffic still goes to the proxy.
-printf '3\ny\n2\n10\n' | run_env env MOCK_CLAUDE_OUT="$T/claude-call-login.txt" MOCK_CLAUDE_AUTH=claude.ai \
+printf '3\ny\n3\n2\n' | run_env env MOCK_CLAUDE_OUT="$T/claude-call-login.txt" MOCK_CLAUDE_AUTH=claude.ai \
   "$BASH_BIN" "$SHIM" > "$T/launcher-login-output.txt" 2>&1
 if [ -f "$T/claude-call-login.txt" ]; then
   grep -q '^ANTHROPIC_API_KEY=' "$T/claude-call-login.txt" && { echo "API key set despite a claude.ai login"; fail=1; }

@@ -37,15 +37,15 @@ done
 echo "== model table =="
 check "20 built-in models" "$MODEL_COUNT" "20"
 check "rank 1 id" "$(model_field 1 3)" "cb/deepseek-v4.1-flash"
-check "rank 20 id" "$(model_field 20 3)" "ali/kimi-k2.7-code"
+check "rank 20 id" "$(model_field 20 3)" "cb/hy4-preview"
 check "resolve by number" "$(resolve_model 10)" "10"
-check "resolve by id" "$(resolve_model cbcn/minimax-m3)" "10"
+check "resolve by id" "$(resolve_model cbcn/minimax-m3)" "2"
 if resolve_model 21 >/dev/null; then bad "rejects 21"; else ok "rejects 21"; fi
 check "auto-compact window" "$AUTO_COMPACT_WINDOW" "272000"
 
 echo "== live IRE table =="
 IRE_TABLE="$SCRATCH/table.txt"
-printf '1|Model A|cb/model-a|true|0.010\n2|Model B|ali/model-b|false|\n' > "$IRE_TABLE"
+printf '1|Model A|cb/model-a|true|0.010|0.030\n2|Model B|ali/model-b|false||\n' > "$IRE_TABLE"
 saved="$MODELS"
 load_ire_table
 check "live table replaces the built-in one" "$MODEL_COUNT" "2"

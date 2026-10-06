@@ -116,27 +116,28 @@ $VenvPy = Join-Path $VenvDir "Scripts\python.exe"
 
 # HOOK(ire-models): the picker table. It matches shared\litellm\config\top20-builtin.csv
 # (tests\test_top20_tables.py checks that). An IRE fetch can replace these rows.
+# Cost is the best route's cheapest input ask, CostOut its output ask, both USDC per 1M tokens.
 $Models = @(
-  @{ Rank = 1;  Name = "DeepSeek V4.1 Flash";        Id = "cb/deepseek-v4.1-flash";              Eligible = $true;  Cost = "0.022" }
-  @{ Rank = 2;  Name = "GLM 5.3 Flash";              Id = "cbcn/glm-5.3-flash";                  Eligible = $true;  Cost = "0.033" }
-  @{ Rank = 3;  Name = "Gemini 3.8 Flash";           Id = "ag/gemini-3.8-flash-high";            Eligible = $false; Cost = "0.066" }
-  @{ Rank = 4;  Name = "DeepSeek V4 Flash";          Id = "cbcn/deepseek-v4-flash";              Eligible = $true;  Cost = "0.047" }
-  @{ Rank = 5;  Name = "DeepSeek V4 Pro 0813";       Id = "ali/deepseek-v4-pro-0813";            Eligible = $false; Cost = "0.083" }
-  @{ Rank = 6;  Name = "Qwen3.8 Max 0902";           Id = "ali/qwen3.8-max-0902";                Eligible = $false; Cost = "0.078" }
-  @{ Rank = 7;  Name = "Qwen3.8 Flash";              Id = "ali/qwen3.8-flash";                   Eligible = $true;  Cost = "0.008" }
-  @{ Rank = 8;  Name = "Muse Spark 1.3 Contributor"; Id = "cmc/meta/muse-spark-1.3-contributor"; Eligible = $false; Cost = "0.040" }
-  @{ Rank = 9;  Name = "GPT 5.6 Luna";               Id = "cx/gpt-5.6-luna";                     Eligible = $false; Cost = "0.040" }
-  @{ Rank = 10; Name = "MiniMax M3";                 Id = "cbcn/minimax-m3";                     Eligible = $true;  Cost = "0.052" }
-  @{ Rank = 11; Name = "DeepSeek V4 Flash 0731";     Id = "ali/deepseek-v4-flash-0731";          Eligible = $false; Cost = "0.091" }
-  @{ Rank = 12; Name = "Gemini 3.7 Flash";           Id = "ag/gemini-3.7-flash-high";            Eligible = $false; Cost = "0.077" }
-  @{ Rank = 13; Name = "Gemini 3.6 Flash";           Id = "ag/gemini-3.6-flash-high";            Eligible = $false; Cost = "0.081" }
-  @{ Rank = 14; Name = "DeepSeek V4 Pro";            Id = "cbcn/deepseek-v4-pro";                Eligible = $true;  Cost = "0.138" }
-  @{ Rank = 15; Name = "GLM 5.2";                    Id = "ali/glm-5.2";                         Eligible = $true;  Cost = "0.181" }
-  @{ Rank = 16; Name = "Hy4 Preview";                Id = "cb/hy4-preview";                      Eligible = $false; Cost = "0.077" }
-  @{ Rank = 17; Name = "Muse Spark 1.2 Contributor"; Id = "cmc/meta/muse-spark-1.2-contributor"; Eligible = $false; Cost = "0.029" }
-  @{ Rank = 18; Name = "Qwen 3.8 Max";               Id = "ali/qwen3.8-max";                     Eligible = $true;  Cost = "0.170" }
-  @{ Rank = 19; Name = "GLM 5.3";                    Id = "cbcn/glm-5.3";                        Eligible = $true;  Cost = "0.267" }
-  @{ Rank = 20; Name = "Kimi K2.7 Code";             Id = "ali/kimi-k2.7-code";                  Eligible = $true;  Cost = "0.156" }
+  @{ Rank = 1;  Name = "DeepSeek V4.1 Flash"; Id = "cb/deepseek-v4.1-flash";   Eligible = $true;  Cost = "0.00015";  CostOut = "0.0006" }
+  @{ Rank = 2;  Name = "MiniMax M3";          Id = "cbcn/minimax-m3";          Eligible = $true;  Cost = "0.0003";   CostOut = "0.0012" }
+  @{ Rank = 3;  Name = "GLM 5.3 Flash";       Id = "cbcn/glm-5.3-flash";       Eligible = $true;  Cost = "0.00015";  CostOut = "0.0005" }
+  @{ Rank = 4;  Name = "DeepSeek V4 Flash";   Id = "cbcn/deepseek-v4-flash";   Eligible = $false; Cost = "0.00308";  CostOut = "0.00924" }
+  @{ Rank = 5;  Name = "GPT 5.6 Luna";        Id = "cx/gpt-5.6-luna";          Eligible = $true;  Cost = "0.0042";   CostOut = "0.0252" }
+  @{ Rank = 6;  Name = "Qwen3.8 Flash";       Id = "ali/qwen3.8-flash";        Eligible = $true;  Cost = "0.00015";  CostOut = "0.00047" }
+  @{ Rank = 7;  Name = "DeepSeek V4 Pro";     Id = "cbcn/deepseek-v4-pro";     Eligible = $false; Cost = "0.00924";  CostOut = "0.02772" }
+  @{ Rank = 8;  Name = "Kimi K2.7 Code";      Id = "ali/kimi-k2.7-code";       Eligible = $false; Cost = "0.0133";   CostOut = "0.056" }
+  @{ Rank = 9;  Name = "Qwen3.8 Max 0902";    Id = "ali/qwen3.8-max-0902";     Eligible = $false; Cost = "0.01";     CostOut = "0.03" }
+  @{ Rank = 10; Name = "GLM 5.3";             Id = "cbcn/glm-5.3";             Eligible = $true;  Cost = "0.0014";   CostOut = "0.0044" }
+  @{ Rank = 11; Name = "Gemini 3.8 Flash";    Id = "ag/gemini-3.8-flash-high"; Eligible = $false; Cost = "0.0015";   CostOut = "0.0075" }
+  @{ Rank = 12; Name = "Gemini 3.7 Flash";    Id = "ag/gemini-3.7-flash-high"; Eligible = $false; Cost = "0.0015";   CostOut = "0.0075" }
+  @{ Rank = 13; Name = "MiniMax M2.7";        Id = "mm/MiniMax-M2.7";          Eligible = $false; Cost = "0.0003";   CostOut = "0.0012" }
+  @{ Rank = 14; Name = "Gemini 3.6 Flash";    Id = "ag/gemini-3.6-flash-high"; Eligible = $false; Cost = "0.0015";   CostOut = "0.0075" }
+  @{ Rank = 15; Name = "MiMo V2.5";           Id = "ocg/mimo-v2.5";            Eligible = $true;  Cost = "0.014";    CostOut = "0.028" }
+  @{ Rank = 16; Name = "GLM 5.2";             Id = "ali/glm-5.2";              Eligible = $true;  Cost = "0.0014";   CostOut = "0.0044" }
+  @{ Rank = 17; Name = "Kimi K2.6";           Id = "cbcn/kimi-k2.6";           Eligible = $false; Cost = "0.0133";   CostOut = "0.056" }
+  @{ Rank = 18; Name = "GPT 6 Luna";          Id = "cb/gpt-6-luna";            Eligible = $false; Cost = "0.0021";   CostOut = "0.0105" }
+  @{ Rank = 19; Name = "Qwen3.8 Omni Flash";  Id = "alicn/qwen3.8-omni-flash"; Eligible = $false; Cost = "0.00015";  CostOut = "0.00047" }
+  @{ Rank = 20; Name = "Hy4 Preview";         Id = "cb/hy4-preview";           Eligible = $false; Cost = "0.011676"; CostOut = "0.035014" }
 )
 # Frontier picks (IRE frontier list, InferHub routes, not CKFF) offered under the
 # Top 20 in the slot steps. Cost is the input price per 1M tokens.
@@ -351,7 +352,8 @@ function Select-FromList {
 function Format-OldModelLine {
   param($m, [string]$Star = " ")
   $tag = $(if ($m.Eligible) { "eligible" } else { "gated" })
-  "{0}{1,2}  {2,-28} {3,-42} {4}  ~{5}/Mtok" -f $Star, $m.Rank, $m.Name, $m.Id, $tag, $m.Cost
+  $out = $(if ($m.CostOut) { " (out ~" + $m.CostOut + "/Mtok)" } else { "" })
+  "{0}{1,2}  {2,-28} {3,-42} {4}  ~{5}/Mtok{6}" -f $Star, $m.Rank, $m.Name, $m.Id, $tag, $m.Cost, $out
 }
 
 function Get-LastPicksPath {

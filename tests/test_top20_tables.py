@@ -9,9 +9,10 @@ from conftest import LITELLM, REPO
 def windows_rows():
     text = (REPO / "windows" / "launch-claude-inferhub.ps1").read_text(encoding="utf-8-sig")
     pat = re.compile(
-        r'@\{ Rank = (\d+);\s+Name = "([^"]+)";\s+Id = "([^"]+)";\s+Eligible = \$(true|false);\s+Cost = "([^"]+)" \}'
+        r'@\{ Rank = (\d+);\s+Name = "([^"]+)";\s+Id = "([^"]+)";\s+Eligible = \$(true|false);'
+        r'\s+Cost = "([^"]+)";\s+CostOut = "([^"]+)" \}'
     )
-    return [(int(r), n, i, e, c) for r, n, i, e, c in pat.findall(text)]
+    return [(int(r), n, i, e, c, co) for r, n, i, e, c, co in pat.findall(text)]
 
 
 def mac_rows():
@@ -19,16 +20,19 @@ def mac_rows():
     block = re.search(r"^MODELS='(.*?)'", text, re.S | re.M).group(1)
     out = []
     for line in block.strip().splitlines():
-        r, n, i, e, c = line.split("|")
-        out.append((int(r), n, i, e, c))
+        r, n, i, e, c, co = line.split("|")
+        out.append((int(r), n, i, e, c, co))
     return out
 
 
 def csv_rows():
+    # The pickers show the best route's cheapest listed asks, so the CSV's ask
+    # columns (IRE issue #94) are what must match them, not the supply blend.
     with (LITELLM / "config" / "top20-builtin.csv").open(newline="", encoding="utf-8") as f:
         return [
-            (int(r["recommendation_rank"]), r["model_family"], r["model_ids"],
-             r["recommendation_eligible"], r["supply_weighted_median_cost_usdc_per_1m"])
+            (int(r["recommendation_rank"]), r["model_family"],
+             r["model_ids"].split(";")[0].strip(), r["recommendation_eligible"],
+             r["best_route_min_ask_in_usdc_per_1m"], r["best_route_min_ask_out_usdc_per_1m"])
             for r in csv.DictReader(f)
         ]
 

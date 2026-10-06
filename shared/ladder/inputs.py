@@ -73,7 +73,18 @@ def retry_settings(base: dict | None = None) -> dict:
 PRICE_CAP = 0.10  # docs/INFERHUB-API-SETUP.md in IRE: under $0.10 per 1M is "effectively free"
 
 
+def _num(raw):
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 def _top20_from_csv(path: Path) -> list:
+    # Each row's first id is the launcher's curated route for that family: the id
+    # the fixed fallback chains name, which keeps the built-in snapshot compatible
+    # with the launcher's config. It is not necessarily IRE's own first listed id;
+    # IRE's live list carries its own ids and wins when the fetch succeeds.
     rows = []
     with path.open(encoding="utf-8-sig", newline="") as fh:
         for r in csv.DictReader(fh):
@@ -81,13 +92,15 @@ def _top20_from_csv(path: Path) -> list:
             rank = r.get("recommendation_rank") or r.get("rank")
             if not ids or not rank:
                 continue
-            try:
-                cost = float(r.get("supply_weighted_median_cost_usdc_per_1m") or "")
-            except ValueError:
-                cost = None
+            # The price the picker shows is the best route's cheapest listed ask
+            # (IRE issue #94); the blend stays beside it for older tables.
+            blend = _num(r.get("supply_weighted_median_cost_usdc_per_1m"))
+            ask_in = _num(r.get("best_route_min_ask_in_usdc_per_1m"))
             rows.append({"rank": int(rank), "name": (r.get("model_family") or "").strip(),
                          "eligible": str(r.get("recommendation_eligible", "true")).strip().lower() == "true",
-                         "cost_per_mtok": cost, "ids": ids})
+                         "cost_per_mtok": ask_in if ask_in is not None else blend,
+                         "price_in": ask_in, "price_out": _num(r.get("best_route_min_ask_out_usdc_per_1m")),
+                         "blend_per_mtok": blend, "ids": ids})
     rows.sort(key=lambda x: x["rank"])
     return rows
 

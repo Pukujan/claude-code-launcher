@@ -64,7 +64,9 @@ DEFAULT_TIMEOUT = 5.0
 CACHE_NAME = "ire-cache.json"
 KEYS = ("source", "top20", "price_policy", "ladders", "retries", "cooldown_s")
 # Optional extras: always present in the output, may be empty.
-EXTRA_KEYS = ("frontier",)
+EXTRA_KEYS = ("frontier", "freshness")
+# A list older than this (days) is worth a warning: IRE regenerates daily.
+STALE_AFTER_DAYS = 7
 
 POLICY_RE = re.compile(
     r"below\s*\**\s*\$\s*([0-9]+(?:\.[0-9]+)?)\s*(?:USDC|USD)?\s*per\s*1\s*(?:million|M)\s*tokens",
@@ -221,6 +223,42 @@ def _cost(v):
         return None
 
 
+def _fmt_price(v) -> str:
+    """A price for the picker tables: no trailing zeros, empty when unknown."""
+    return "" if v is None else f"{float(v):g}"
+
+
+def _parse_utc(text) -> dt.datetime | None:
+    """A UTC datetime from an IRE timestamp ("...Z" or a bare date), or None."""
+    if not isinstance(text, str) or not text.strip():
+        return None
+    try:
+        stamp = dt.datetime.fromisoformat(text.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return stamp if stamp.tzinfo else stamp.replace(tzinfo=dt.timezone.utc)
+
+
+def freshness(as_of, now: dt.datetime | None = None) -> dict:
+    """How old a list is: {"as_of", "age_days", "stale"}. Never raises: an
+    unreadable timestamp gives age_days None and stale False, so a bad or
+    missing freshness source can never block a launch."""
+    now = now or dt.datetime.now(dt.timezone.utc)
+    when = _parse_utc(as_of)
+    if when is None:
+        return {"as_of": None, "age_days": None, "stale": False}
+    age = max(0, (now - when).days)
+    return {"as_of": when.strftime("%Y-%m-%dT%H:%M:%SZ"), "age_days": age,
+            "stale": age > STALE_AFTER_DAYS}
+
+
+def _stale_warning(fresh: dict, source: str) -> None:
+    """One stderr line when a list is old, naming its age and where it came from."""
+    if fresh.get("stale") and fresh.get("age_days") is not None:
+        log(f"WARNING: the IRE list is {fresh['age_days']} days old (source={source}"
+            f"{', as of ' + fresh['as_of'] if fresh.get('as_of') else ''}); IRE may have newer picks")
+
+
 def parse_top20(text: str) -> list[dict]:
     rows = []
     for r in csv.DictReader(io.StringIO(text)):
@@ -228,13 +266,22 @@ def parse_top20(text: str) -> list[dict]:
         ids = [x.strip() for x in (r.get("model_ids") or "").split(";") if x.strip()]
         if not rank.isdigit() or not ids:
             continue
+        # The price the launcher shows is the best route's cheapest listed ask
+        # (IRE issue #94), not the supply-weighted blend of the average seller.
+        # The blend stays as a second field, and older CSVs without the ask
+        # columns fall back to it.
+        ask_in = _cost(r.get("best_route_min_ask_in_usdc_per_1m"))
+        blend = _cost(r.get("supply_weighted_median_cost_usdc_per_1m"))
         rows.append({
             "rank": int(rank),
             "name": (r.get("model_family") or "").strip(),
             "vendor": (r.get("vendor") or "").strip(),
             "eligible": (r.get("recommendation_eligible") or "true").strip().lower() == "true",
             "gate_reasons": [g.strip() for g in (r.get("gate_reasons") or "").split(";") if g.strip()],
-            "cost_per_mtok": _cost(r.get("supply_weighted_median_cost_usdc_per_1m")),
+            "cost_per_mtok": ask_in if ask_in is not None else blend,
+            "price_in": ask_in,
+            "price_out": _cost(r.get("best_route_min_ask_out_usdc_per_1m")),
+            "blend_per_mtok": blend,
             "ids": ids,
         })
     rows.sort(key=lambda x: x["rank"])
@@ -365,6 +412,8 @@ def load_defaults() -> dict:
     doc["source"] = "defaults"
     out = {k: doc[k] for k in KEYS}
     out["frontier"] = list(doc.get("frontier") or [])
+    # The built-in tables are a dated snapshot; its age is the snapshot date.
+    out["freshness"] = freshness(doc.get("_as_of"))
     return out
 
 
@@ -408,7 +457,8 @@ def fetch_live(gh: GitHub, repo: str = IRE_REPO, ref: str = IRE_REF) -> tuple[di
         policy = defaults["price_policy"]
     else:
         policy = price_policy(cap, f"{POLICY_PATH}@{sha[:10]}")
-    bundle = dict(defaults, source="live", top20=top20, price_policy=policy)
+    bundle = dict(defaults, source="live", top20=top20, price_policy=policy,
+                  freshness=freshness(now_utc()))
     picks_text = gh.file(repo, PICKS_PATH, sha)
     if picks_text is not None:
         try:
@@ -475,6 +525,7 @@ def read_cache(directory: Path) -> dict | None:
         record = json.loads((directory / CACHE_NAME).read_text(encoding="utf-8"))
         bundle = dict(record["bundle"], source="cache")
         bundle.setdefault("frontier", [])  # caches written before the frontier key
+        bundle.setdefault("freshness", {})  # caches written before the freshness key
         record["bundle"] = validate(bundle)
         return record
     except (OSError, ValueError, KeyError, TypeError, AttributeError, json.JSONDecodeError):
@@ -508,32 +559,49 @@ def get_recommendations(offline: bool = False, timeout: float = DEFAULT_TIMEOUT,
             why = f"{e} (auth from {where})"
     record = read_cache(directory)
     if record:
+        # The age of a cached copy is when it was fetched, not when this run is.
+        bundle = dict(record["bundle"], freshness=freshness(record.get("fetched_at")))
         log(f"source=cache  IRE @{str(record.get('source_sha'))[:10]} fetched {record.get('fetched_at')}"
             f"  (GitHub skipped: {why})")
-        return record["bundle"]
+        _stale_warning(bundle["freshness"], "cache")
+        return bundle
     log(f"source=defaults  built-in picks  (GitHub skipped: {why}; no cache yet)")
-    return validate(load_defaults())
+    bundle = validate(load_defaults())
+    _stale_warning(bundle["freshness"], "defaults")
+    return bundle
 
 
 def top20_csv(bundle: dict) -> str:
-    """The bundle's Top 20 in the CSV shape sync_inferhub_top20.py reads."""
+    """The bundle's Top 20 with IRE's price columns plus the blend, in the shape
+    sync_inferhub_top20.py and other column-name readers expect. The best-route
+    asks are the basis; the blend is kept beside them, and an older list with no
+    ask columns leaves them empty so a reader falls back to the blend."""
     buf = io.StringIO()
     w = csv.writer(buf, lineterminator="\n")
     w.writerow(["recommendation_rank", "model_family", "vendor", "recommendation_eligible",
-                "supply_weighted_median_cost_usdc_per_1m", "model_ids"])
+                "supply_weighted_median_cost_usdc_per_1m",
+                "best_route_min_ask_in_usdc_per_1m", "best_route_min_ask_out_usdc_per_1m",
+                "model_ids"])
     for r in bundle["top20"]:
         w.writerow([r["rank"], r["name"], r.get("vendor", ""), "true" if r["eligible"] else "false",
-                    "" if r.get("cost_per_mtok") is None else r["cost_per_mtok"], ";".join(r["ids"])])
+                    _fmt_price(r.get("blend_per_mtok")), _fmt_price(r.get("price_in")),
+                    _fmt_price(r.get("price_out")), ";".join(r["ids"])])
     return buf.getvalue()
 
 
 def shell_table(bundle: dict) -> str:
-    """rank|name|id|eligible|cost lines for the Mac picker (first InferHub id per row)."""
+    """rank|name|id|eligible|in|out lines for the Mac picker (first InferHub id per
+    row). The two prices are the best route's cheapest listed asks per 1M tokens;
+    a list with no ask columns leaves them empty so a reader falls back to the blend."""
     lines = []
     for r in bundle["top20"]:
         name = r["name"].replace("|", "/").replace("\n", " ") or r["ids"][0]
-        cost = "" if r.get("cost_per_mtok") is None else f"{r['cost_per_mtok']:.3f}"
-        lines.append(f"{r['rank']}|{name}|{r['ids'][0]}|{'true' if r['eligible'] else 'false'}|{cost}")
+        # An older list with no ask columns shows the blend in the input slot.
+        in_p = r.get("price_in")
+        if in_p is None:
+            in_p = r.get("cost_per_mtok")
+        lines.append(f"{r['rank']}|{name}|{r['ids'][0]}|{'true' if r['eligible'] else 'false'}|"
+                     f"{_fmt_price(in_p)}|{_fmt_price(r.get('price_out'))}")
     return "\n".join(lines) + "\n"
 
 
@@ -544,7 +612,7 @@ def main(argv=None) -> int:
     ap.add_argument("--cache-dir", type=Path, default=None, help="override the cache folder")
     ap.add_argument("--out", type=Path, default=None, help="write the JSON here instead of stdout")
     ap.add_argument("--table-out", type=Path, default=None,
-                    help="also write rank|name|id|eligible|cost lines (the Mac picker table)")
+                    help="also write rank|name|id|eligible|in|out lines (the Mac picker table)")
     ap.add_argument("--top20-csv", type=Path, default=None,
                     help="also write the Top 20 as a CSV for sync_inferhub_top20.py")
     a = ap.parse_args(argv)
