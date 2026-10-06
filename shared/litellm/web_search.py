@@ -22,7 +22,16 @@ Scraped engines refuse requests now and then (rate limits), so a single engine
 is never trusted. Results are cached for a few minutes. When every backend
 fails, this raises instead of returning an empty list, so Claude Code sees
 "Search failed: ..." with the reasons rather than a silent results=[].
+
+Claude Code counts a search only when the answer carries Anthropic's native
+server_tool_use + web_search_tool_result blocks ("Did N searches"). LiteLLM
+1.103.0 answers the search-only request without a model but swaps the native
+tool for litellm_web_search first, so it sent text only and every search read
+"Did 0 searches" (issue #77). install_native_blocks() puts the native tool
+back for that answer, adds usage.server_tool_use.web_search_requests, and
+streams the blocks the way Anthropic does.
 """
+import json
 import asyncio
 import os
 import re
@@ -220,9 +229,143 @@ async def run_search(query, max_results, *, chain, orig=None, ddgs=None, kwargs=
     return SearchResponse(results=results, object="search")
 
 
+# --- Native blocks for Claude Code's search-only request (issue #77) ---
+
+# Set by LiteLLM's websearch_interception pre-request hook when the client sent
+# an Anthropic-native web_search_* tool.
+EMIT_NATIVE_FLAG = "_websearch_interception_emit_native_blocks"
+NATIVE_SEARCH_TOOL = {"type": "web_search_20250305", "name": "web_search"}
+
+
+def add_search_usage(resp):
+    """Set usage.server_tool_use.web_search_requests to the number of
+    web_search_tool_result blocks that hold results (error blocks count 0)."""
+    n = sum(1 for b in resp.get("content") or []
+            if isinstance(b, dict) and b.get("type") == "web_search_tool_result" and isinstance(b.get("content"), list))
+    usage = dict(resp.get("usage") or {})
+    stu = dict(usage.get("server_tool_use") or {})
+    stu["web_search_requests"] = n
+    usage["server_tool_use"] = stu
+    resp["usage"] = usage
+    return resp
+
+
+def _clean_server_tool_queries(resp):
+    for b in resp.get("content") or []:
+        if isinstance(b, dict) and b.get("type") == "server_tool_use" and isinstance(b.get("input"), dict):
+            q = b["input"].get("query")
+            if isinstance(q, str):
+                b["input"] = {**b["input"], "query": clean_query(q)}
+    return resp
+
+
+def _sse(event):
+    return f"event: {event['type']}\ndata: {json.dumps(event)}\n\n".encode()
+
+
+def sse_chunks(resp):
+    """The whole answer as Anthropic SSE events. server_tool_use starts with an
+    empty input and gets it as one input_json_delta (as Anthropic streams it);
+    web_search_tool_result arrives whole in its content_block_start; usage,
+    with server_tool_use, rides on message_delta as well as message_start."""
+    usage = resp.get("usage") or {}
+    out = [_sse({"type": "message_start", "message": {
+        "id": resp.get("id"), "type": "message", "role": resp.get("role", "assistant"), "model": resp.get("model"),
+        "content": [], "stop_reason": None, "stop_sequence": None,
+        "usage": {**usage, "output_tokens": 0}}})]
+    for i, b in enumerate(resp.get("content") or []):
+        kind = b.get("type")
+        if kind == "text":
+            out.append(_sse({"type": "content_block_start", "index": i, "content_block": {"type": "text", "text": ""}}))
+            out.append(_sse({"type": "content_block_delta", "index": i,
+                             "delta": {"type": "text_delta", "text": b.get("text", "")}}))
+        elif kind in ("server_tool_use", "tool_use"):
+            out.append(_sse({"type": "content_block_start", "index": i,
+                             "content_block": {"type": kind, "id": b.get("id"), "name": b.get("name"), "input": {}}}))
+            out.append(_sse({"type": "content_block_delta", "index": i,
+                             "delta": {"type": "input_json_delta", "partial_json": json.dumps(b.get("input") or {})}}))
+        else:
+            out.append(_sse({"type": "content_block_start", "index": i, "content_block": b}))
+        out.append(_sse({"type": "content_block_stop", "index": i}))
+    out.append(_sse({"type": "message_delta",
+                     "delta": {"stop_reason": resp.get("stop_reason"), "stop_sequence": resp.get("stop_sequence")},
+                     "usage": usage}))
+    out.append(_sse({"type": "message_stop"}))
+    return out
+
+
+def wrap_short_circuit(orig, *, is_native, is_search, flag=EMIT_NATIVE_FLAG, stream_cls):
+    """Wrap LiteLLM's _try_websearch_short_circuit(model, messages, tools,
+    custom_llm_provider, stream, kwargs). When the client sent a native tool
+    (flag set) but the hook already swapped it, hand the native tool back so
+    LiteLLM emits server_tool_use + web_search_tool_result; then add the usage
+    count and build the stream ourselves (LiteLLM's drops the usage)."""
+
+    async def short_circuit(model, messages, tools, custom_llm_provider, stream, kwargs=None):
+        flagged = bool((kwargs or {}).get(flag))
+        if flagged and tools and not any(is_native(t) for t in tools):
+            restored, done = [], False
+            for t in tools:
+                if is_search(t):
+                    if not done:
+                        restored.append(dict(NATIVE_SEARCH_TOOL))
+                        done = True
+                else:
+                    restored.append(t)
+            tools = restored
+        resp = await orig(model=model, messages=messages, tools=tools, custom_llm_provider=custom_llm_provider,
+                          stream=False, kwargs=kwargs)
+        if resp is None:
+            return None
+        if flagged or any(isinstance(b, dict) and b.get("type") == "web_search_tool_result"
+                          for b in resp.get("content") or []):
+            resp = add_search_usage(_clean_server_tool_queries(resp))
+            _log(f"search answer: {resp['usage']['server_tool_use']['web_search_requests']} native result block(s)")
+        return stream_cls(resp) if stream else resp
+
+    short_circuit._ccl_native_blocks = True
+    return short_circuit
+
+
+def install_native_blocks(handler_mod, *, is_native, is_search, flag=EMIT_NATIVE_FLAG, stream_cls):
+    """Patch handler_mod._try_websearch_short_circuit once. Returns True if patched."""
+    orig = getattr(handler_mod, "_try_websearch_short_circuit", None)
+    if orig is None or getattr(orig, "_ccl_native_blocks", False):
+        return False
+    handler_mod._try_websearch_short_circuit = wrap_short_circuit(
+        orig, is_native=is_native, is_search=is_search, flag=flag, stream_cls=stream_cls)
+    return True
+
+
+def _install_litellm_native_blocks():
+    from litellm.integrations.websearch_interception import handler as wi_handler
+    from litellm.integrations.websearch_interception.tools import (
+        is_anthropic_native_web_search_tool,
+        is_web_search_tool,
+    )
+    from litellm.llms.anthropic.experimental_pass_through.messages import handler as msg_handler
+    from litellm.llms.anthropic.experimental_pass_through.messages.fake_stream_iterator import (
+        FakeAnthropicMessagesStreamIterator,
+    )
+
+    class _NativeSearchStream(FakeAnthropicMessagesStreamIterator):
+        def _create_streaming_chunks(self):
+            return sse_chunks(dict(self.response))
+
+    flag = getattr(wi_handler, "WEBSEARCH_EMIT_NATIVE_BLOCKS_KEY", EMIT_NATIVE_FLAG)
+    return install_native_blocks(msg_handler, is_native=is_anthropic_native_web_search_tool,
+                                 is_search=is_web_search_tool, flag=flag, stream_cls=_NativeSearchStream)
+
+
 def install():
     import ddgs  # noqa: F401  fail here, not mid-request, if it's missing
     import litellm
+
+    try:
+        if _install_litellm_native_blocks():
+            print("[sitecustomize] WebSearch answers carry native web_search_tool_result blocks", flush=True)
+    except Exception as e:  # a LiteLLM without these pieces: keep the text-only answer
+        print(f"[sitecustomize] native WebSearch blocks not installed: {type(e).__name__}: {e}", flush=True)
 
     orig = litellm.asearch
     if getattr(orig, "_ccl_ddgs", False):
