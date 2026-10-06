@@ -4,6 +4,7 @@ Cases: online, offline with a cache, offline with no cache, bad auth, plus the
 JSON contract the ladder picker (#5) relies on. No test opens a socket.
 """
 import csv
+import datetime as dt
 import io
 import json
 import subprocess
@@ -22,7 +23,9 @@ import ire_fetch as F  # noqa: E402
 FIX = Path(__file__).resolve().parent / "fixtures" / "ire"
 SHA = "0123456789abcdef0123456789abcdef01234567"
 TOKEN = "test-token-not-real"
-KEYS = {"source", "top20", "price_policy", "ladders", "retries", "cooldown_s", "frontier"}
+KEYS = {"source", "top20", "price_policy", "ladders", "retries", "cooldown_s", "frontier", "freshness"}
+ROW_KEYS = {"rank", "name", "vendor", "eligible", "gate_reasons", "cost_per_mtok",
+            "price_in", "price_out", "blend_per_mtok", "ids"}
 FRONTIER_ROW = {"rank", "name", "vendor", "route", "best_route", "eligible", "health", "cost_per_mtok",
                 "price_in", "price_out", "preferred_endpoint", "system_prompt_handling", "context_window"}
 
@@ -81,7 +84,7 @@ def check_contract(b):
     assert b["source"] in ("live", "cache", "defaults")
     assert isinstance(b["top20"], list) and b["top20"]
     for row in b["top20"]:
-        assert set(row) == {"rank", "name", "vendor", "eligible", "gate_reasons", "cost_per_mtok", "ids"}
+        assert set(row) == ROW_KEYS
     assert set(b["price_policy"]) == {"free_below_per_mtok", "unit", "source"}
     assert set(b["ladders"]) == {"main", "advisor"}
     assert all(isinstance(x, str) for chain in b["ladders"].values() for x in chain)
@@ -89,6 +92,7 @@ def check_contract(b):
     assert isinstance(b["frontier"], list)
     for row in b["frontier"]:
         assert set(row) == FRONTIER_ROW
+    assert set(b["freshness"]) == {"as_of", "age_days", "stale"}
     json.dumps(b)
 
 
@@ -344,7 +348,45 @@ def test_defaults_match_the_builtin_top20_table():
     check_contract(b)
     with open(REPO / "shared/litellm/config/top20-builtin.csv", encoding="utf-8") as fh:
         rows = list(csv.DictReader(fh))
-    assert [r["ids"][0] for r in b["top20"]] == [r["model_ids"].strip() for r in rows]
+    assert [r["ids"][0] for r in b["top20"]] == [r["model_ids"].split(";")[0].strip() for r in rows]
+    # The ask basis (IRE issue #94): the built-in table and defaults must agree.
+    assert [r["price_in"] for r in b["top20"]] == \
+        [float(r["best_route_min_ask_in_usdc_per_1m"]) for r in rows]
+    assert [r["price_out"] for r in b["top20"]] == \
+        [float(r["best_route_min_ask_out_usdc_per_1m"]) for r in rows]
+
+
+# ------------------------------------------------------------------ freshness
+
+
+def test_freshness_flags_a_list_older_than_a_week():
+    now = dt.datetime(2026, 10, 5, 12, tzinfo=dt.timezone.utc)
+    assert F.freshness("2026-10-05T23:47:02Z", now) == {
+        "as_of": "2026-10-05T23:47:02Z", "age_days": 0, "stale": False}
+    old = F.freshness("2026-09-20T00:00:00Z", now)
+    assert old["age_days"] == 15 and old["stale"] is True
+
+
+def test_freshness_never_raises_on_a_bad_timestamp():
+    for bad in (None, "", "not-a-date", 123, {"x": 1}):
+        assert F.freshness(bad) == {"as_of": None, "age_days": None, "stale": False}
+
+
+def test_stale_cache_warns_but_still_loads(env, capsys):
+    env.mkdir(parents=True)
+    F.write_cache(env, F.load_defaults(), SHA, "2000-01-01T00:00:00Z")
+    b = F.get_recommendations(offline=True, directory=env)
+    check_contract(b)
+    assert b["source"] == "cache" and b["freshness"]["stale"] is True
+    assert "days old" in capsys.readouterr().err
+
+
+def test_fresh_cache_does_not_warn(env, capsys):
+    env.mkdir(parents=True)
+    F.write_cache(env, F.load_defaults(), SHA, F.now_utc())
+    b = F.get_recommendations(offline=True, directory=env)
+    assert b["freshness"]["stale"] is False
+    assert "days old" not in capsys.readouterr().err
 
 
 def test_cache_dir_per_platform(monkeypatch, tmp_path):
@@ -415,9 +457,11 @@ def test_cli_writes_the_picker_table_and_top20_csv(env, tmp_path):
     assert r.returncode == 0, r.stderr
     assert r.stdout == ""
     lines = (out / "table.txt").read_text().splitlines()
-    assert len(lines) == 20 and lines[0] == "1|DeepSeek V4.1 Flash|cb/deepseek-v4.1-flash|true|0.022"
+    assert len(lines) == 20 and lines[0] == "1|DeepSeek V4.1 Flash|cb/deepseek-v4.1-flash|true|0.00015|0.0006"
     rows = list(csv.DictReader(io.StringIO((out / "top20.csv").read_text())))
-    assert rows[0]["model_ids"] == "cb/deepseek-v4.1-flash" and len(rows) == 20
+    assert rows[0]["model_ids"].split(";")[0] == "cb/deepseek-v4.1-flash" and len(rows) == 20
+    assert rows[0]["best_route_min_ask_in_usdc_per_1m"] == "0.00015"
+    assert rows[0]["best_route_min_ask_out_usdc_per_1m"] == "0.0006"
 
 
 def test_builtin_table_matches_the_mac_launcher_fallback():

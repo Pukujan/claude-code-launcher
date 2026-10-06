@@ -3,6 +3,7 @@ import io
 import json
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -23,8 +24,10 @@ class Defaults(unittest.TestCase):
         os.environ.pop("CCL_OPT_IN_MODELS", None)
 
     def test_stock_chains_when_nothing_blocks(self):
+        # cbcn/deepseek-v4-flash is gated in IRE now, so the default replaces that
+        # rung with the next eligible route in rank order (cbcn/minimax-m3).
         self.assertEqual(L.default_ladder(self.b, "main", "cb/deepseek-v4.1-flash"),
-                         ["ali/qwen3.8-flash", "cbcn/deepseek-v4-flash"])
+                         ["ali/qwen3.8-flash", "cbcn/minimax-m3"])
         self.assertEqual(L.default_ladder(self.b, "advisor", "cbcn/glm-5.3-flash"), ["cbcn/minimax-m3"])
 
     def test_fixed_chains_are_the_builtin_defaults(self):
@@ -56,12 +59,16 @@ class Defaults(unittest.TestCase):
     def test_real_ire_module_output_is_understood(self):
         sys.path.insert(0, str(ROOT / "shared" / "ire"))
         import ire_fetch
-        raw = ire_fetch.get_recommendations(offline=True)
+        # An empty cache dir keeps this off any machine-local cache: the module
+        # then falls through to its built-in defaults, so the result is the same
+        # on a dev box (which may hold a live list) and in CI.
+        with tempfile.TemporaryDirectory() as t:
+            raw = ire_fetch.get_recommendations(offline=True, directory=Path(t))
         b = I.normalize(raw)
         self.assertIsNotNone(b)
         self.assertEqual(b["ladders"]["main"]["primary"], "cb/deepseek-v4.1-flash")
         self.assertEqual(L.default_ladder(b, "main", "cb/deepseek-v4.1-flash"),
-                         ["ali/qwen3.8-flash", "cbcn/deepseek-v4-flash"])
+                         ["ali/qwen3.8-flash", "cbcn/minimax-m3"])
 
     def test_bad_ire_bundle_is_ignored(self):
         import tempfile
@@ -73,18 +80,18 @@ class Defaults(unittest.TestCase):
     def test_primary_removed_and_replaced_from_top20(self):
         lad = L.default_ladder(self.b, "main", "ali/qwen3.8-flash")
         self.assertNotIn("ali/qwen3.8-flash", lad)
-        self.assertEqual(lad, ["cbcn/deepseek-v4-flash", "cb/deepseek-v4.1-flash"])
+        self.assertEqual(lad, ["cb/deepseek-v4.1-flash", "cbcn/minimax-m3"])
 
     def test_blocked_vendor_dropped(self):
         self.assertEqual(L.default_ladder(self.b, "main", "cb/deepseek-v4.1-flash", ["cbcn"]),
-                         ["ali/qwen3.8-flash"])
+                         ["ali/qwen3.8-flash", "cx/gpt-5.6-luna"])
 
     def test_never_more_than_three_and_only_cheap_eligible(self):
         b = dict(self.b, ladders={"main": {"fallbacks": [
             "ali/glm-5.2", "ag/gemini-3.8-flash-high", "ali/qwen3.8-flash", "cbcn/minimax-m3",
             "cbcn/deepseek-v4-flash", "cbcn/glm-5.3-flash"]}})
         lad = L.default_ladder(b, "main", "cb/deepseek-v4.1-flash")
-        self.assertEqual(lad, ["ali/qwen3.8-flash", "cbcn/minimax-m3", "cbcn/deepseek-v4-flash"])
+        self.assertEqual(lad, ["ali/glm-5.2", "ali/qwen3.8-flash", "cbcn/minimax-m3"])
 
     def test_ire_marks_rung_ineligible(self):
         for m in self.b["top20"]:
@@ -95,6 +102,14 @@ class Defaults(unittest.TestCase):
     def test_prune(self):
         self.assertEqual(L.prune_for_other_seat(["ali/qwen3.8-flash", "cbcn/deepseek-v4-flash"], ["cbcn"]),
                          (["ali/qwen3.8-flash"], ["cbcn/deepseek-v4-flash"]))
+
+    def test_cap_price_uses_the_output_ask_then_falls_back(self):
+        # issue #94: judge the cap on the output ask. An older list with no ask
+        # columns leaves price_out None, so the input ask / blend is used instead.
+        self.assertEqual(L.cap_price({"price_out": 0.5, "cost_per_mtok": 0.1}), 0.5)
+        self.assertEqual(L.cap_price({"price_out": None, "cost_per_mtok": 0.02}), 0.02)
+        self.assertEqual(L.cap_price({"cost_per_mtok": 0.03}), 0.03)
+        self.assertIsNone(L.cap_price({}))
 
 
 class Picker(unittest.TestCase):
@@ -111,7 +126,7 @@ class Picker(unittest.TestCase):
         return [c["id"] for c in L.catalog(self.b) if c["id"] != "cb/deepseek-v4.1-flash"]
 
     def test_enter_accepts_default(self):
-        self.assertEqual(self.run_picker([""]), {"fallbacks": ["ali/qwen3.8-flash", "cbcn/deepseek-v4-flash"],
+        self.assertEqual(self.run_picker([""]), {"fallbacks": ["ali/qwen3.8-flash", "cbcn/minimax-m3"],
                                                  "source": "default"})
 
     def test_zero_means_none(self):
@@ -143,10 +158,16 @@ class Picker(unittest.TestCase):
         self.assertEqual(res["fallbacks"], ["ali/qwen3.8-flash"])
 
     def test_hand_picks_over_cap_or_gated_are_kept_with_a_warning(self):
-        ids = self.ids()
+        # Every Top 20 route's output ask is under the cap now, so lift one over it
+        # to exercise the over-cap warning (a hand pick is kept, only warned about).
+        b = dict(self.b, top20=[dict(m) for m in self.b["top20"]])
+        for m in b["top20"]:
+            if m["name"] == "GLM 5.2":
+                m["price_out"] = 0.5
+        ids = [c["id"] for c in L.catalog(b) if c["id"] != "cb/deepseek-v4.1-flash"]
         out = io.StringIO()
         it = iter([f"{ids.index('ali/glm-5.2') + 1} {ids.index('ag/gemini-3.8-flash-high') + 1}"])
-        res = L.prompt_ladder(self.b, "main", "cb/deepseek-v4.1-flash", (), inp=lambda _: next(it), out=out)
+        res = L.prompt_ladder(b, "main", "cb/deepseek-v4.1-flash", (), inp=lambda _: next(it), out=out)
         self.assertEqual(res, {"fallbacks": ["ali/glm-5.2", "ag/gemini-3.8-flash-high"], "source": "picked"})
         self.assertIn("warning: ali/glm-5.2 costs over $0.10 per 1M", out.getvalue())
         self.assertIn("warning: ag/gemini-3.8-flash-high is gated", out.getvalue())
@@ -189,9 +210,9 @@ class Picker(unittest.TestCase):
         it = iter(["1"])
         row = L.prompt_primary(b, "main", inp=lambda _: next(it), out=io.StringIO())
         self.assertEqual(row["id"], "cx/gpt-6.1-sol")
-        it = iter(["t", "7"])
+        it = iter(["t", "7"])   # 7th Top 20 row after the reorder
         row = L.prompt_primary(b, "main", inp=lambda _: next(it), out=io.StringIO())
-        self.assertEqual(row["id"], "ali/qwen3.8-flash")
+        self.assertEqual(row["id"], "cbcn/deepseek-v4-pro")
         it = iter(["o"])
         self.assertEqual(L.prompt_primary(b, "advisor", allow_off=True, inp=lambda _: next(it),
                                           out=io.StringIO())["id"], "")

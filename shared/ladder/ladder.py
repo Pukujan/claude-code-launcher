@@ -41,6 +41,15 @@ def is_cx(route_id: str) -> bool:
     return prefix(route_id) == "cx"
 
 
+def cap_price(m: dict):
+    """The price the $0.10 cap is judged on: the route's output ask when the list
+    carries one, else the input ask, else the supply-weighted blend (IRE issue #94).
+    Judging the output ask stops a cheap input price from hiding a costly output."""
+    if m.get("price_out") is not None:
+        return m.get("price_out")
+    return m.get("cost_per_mtok")
+
+
 def litellm_model(route_id: str) -> str:
     """LiteLLM model string for an InferHub route.
 
@@ -125,7 +134,8 @@ def catalog(bundle: dict, which: str = "top20") -> list:
             out.append({"id": rid, "name": m.get("name") or rid, "rank": m.get("rank"),
                         "eligible": bool(m.get("eligible")), "cost_per_mtok": cost,
                         "price_in": m.get("price_in"), "price_out": m.get("price_out"),
-                        "cheap": cost is not None and cost < cap, "placeholder": False,
+                        "cheap": cap_price(m) is not None and float(cap_price(m)) < cap,
+                        "placeholder": False,
                         "extra": False, "opt_in": False, "note": m.get("health") or "",
                         "list": "frontier"})
         return out
@@ -133,7 +143,8 @@ def catalog(bundle: dict, which: str = "top20") -> list:
         rid = m["ids"][0]
         cost = m.get("cost_per_mtok")
         out.append({"id": rid, "name": m["name"], "rank": m["rank"], "eligible": bool(m.get("eligible")),
-                    "cost_per_mtok": cost, "cheap": cost is not None and cost < cap,
+                    "cost_per_mtok": cost, "price_in": m.get("price_in"), "price_out": m.get("price_out"),
+                    "cheap": cap_price(m) is not None and float(cap_price(m)) < cap,
                     "placeholder": False, "extra": False, "opt_in": False, "note": "", "list": "top20"})
         seen.add(rid)
     for x in load_extra_models():
@@ -159,7 +170,9 @@ def _route_index(bundle: dict) -> dict:
     for m in bundle.get("frontier") or []:
         if m.get("route"):
             idx.setdefault(m["route"], {"eligible": bool(m.get("eligible")), "frontier": True,
-                                        "cost_per_mtok": m.get("cost_per_mtok"), "name": m.get("name")})
+                                        "cost_per_mtok": m.get("cost_per_mtok"),
+                                        "price_in": m.get("price_in"), "price_out": m.get("price_out"),
+                                        "name": m.get("name")})
     for x in load_extra_models():
         idx.setdefault(x["id"], {"eligible": extra_allowed(x)[0], "extra": True,
                                  "cost_per_mtok": x.get("cost_per_mtok"), "name": x.get("name")})
@@ -186,7 +199,7 @@ def rung_ok(bundle: dict, rid: str) -> bool:
         return False
     if m.get("extra"):
         return True  # opted in and inside its own price-cap hook
-    c = m.get("cost_per_mtok")
+    c = cap_price(m)
     return c is not None and float(c) < cap
 
 
@@ -268,7 +281,7 @@ def pick_warnings(bundle: dict, picks: list, blocked_prefixes=()) -> list:
     out = []
     for r in picks:
         m = idx.get(r) or {}
-        c = m.get("cost_per_mtok")
+        c = cap_price(m)
         if not m.get("extra"):
             if not m.get("eligible"):
                 out.append(f"{r} is gated in IRE (not recommendation-eligible)")
@@ -283,14 +296,15 @@ def pick_warnings(bundle: dict, picks: list, blocked_prefixes=()) -> list:
 
 
 def _fmt_cost(c):
-    return "   ?  " if c is None else f"{c:6.3f}"
+    return "   ?  " if c is None else f"{c:g}".rjust(6)
 
 
 def format_row(i: int, c: dict, cap: float, blocked=()) -> str:
     """One picker row: number, route, price per 1M, name, flags. Rows at or over
     the cap are marked 'OVER $0.10'."""
     flags = []
-    over = c.get("cost_per_mtok") is None or float(c["cost_per_mtok"]) >= cap
+    judge = cap_price(c)
+    over = judge is None or float(judge) >= cap
     if c.get("extra"):
         flags.append("opt-in extra, not from IRE" if c["eligible"] else f"not pickable: {c['note']}")
         if c.get("output_cost_per_mtok") is not None:
@@ -298,8 +312,8 @@ def format_row(i: int, c: dict, cap: float, blocked=()) -> str:
         over = False if c.get("cost_per_mtok") is not None and float(c["cost_per_mtok"]) < cap else over
     elif not c["eligible"]:
         flags.append("gated")
-    if c.get("list") == "frontier" and c.get("price_out") is not None:
-        flags.append(f"in/out {c.get('price_in')}/{c.get('price_out')}")
+    if c.get("price_in") is not None and c.get("price_out") is not None:
+        flags.append(f"in/out {c['price_in']:g}/{c['price_out']:g}")
     if prefix(c["id"]) in set(blocked):
         flags.append("other seat's vendor")
     if is_cx(c["id"]):

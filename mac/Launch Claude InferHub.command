@@ -76,30 +76,31 @@ OVR_FILE="$LITELLM_DIR/requirements-overrides.txt"
 REQUIREMENTS="$(cat "$REQ_FILE" 2>/dev/null)"
 OVERRIDES="$(cat "$OVR_FILE" 2>/dev/null)"
 
-# HOOK(ire-models): the built-in picker table, rank|name|id|eligible|cost.
+# HOOK(ire-models): the built-in picker table, rank|name|id|eligible|in|out.
 # load_ire_table replaces it with the live IRE Top 20 when shared/ire answers.
 # This copy is the last resort; it matches shared/litellm/config/top20-builtin.csv,
 # the Windows table and shared/ire/defaults.json (tests check all of them).
-MODELS='1|DeepSeek V4.1 Flash|cb/deepseek-v4.1-flash|true|0.022
-2|GLM 5.3 Flash|cbcn/glm-5.3-flash|true|0.033
-3|Gemini 3.8 Flash|ag/gemini-3.8-flash-high|false|0.066
-4|DeepSeek V4 Flash|cbcn/deepseek-v4-flash|true|0.047
-5|DeepSeek V4 Pro 0813|ali/deepseek-v4-pro-0813|false|0.083
-6|Qwen3.8 Max 0902|ali/qwen3.8-max-0902|false|0.078
-7|Qwen3.8 Flash|ali/qwen3.8-flash|true|0.008
-8|Muse Spark 1.3 Contributor|cmc/meta/muse-spark-1.3-contributor|false|0.040
-9|GPT 5.6 Luna|cx/gpt-5.6-luna|false|0.040
-10|MiniMax M3|cbcn/minimax-m3|true|0.052
-11|DeepSeek V4 Flash 0731|ali/deepseek-v4-flash-0731|false|0.091
-12|Gemini 3.7 Flash|ag/gemini-3.7-flash-high|false|0.077
-13|Gemini 3.6 Flash|ag/gemini-3.6-flash-high|false|0.081
-14|DeepSeek V4 Pro|cbcn/deepseek-v4-pro|true|0.138
-15|GLM 5.2|ali/glm-5.2|true|0.181
-16|Hy4 Preview|cb/hy4-preview|false|0.077
-17|Muse Spark 1.2 Contributor|cmc/meta/muse-spark-1.2-contributor|false|0.029
-18|Qwen 3.8 Max|ali/qwen3.8-max|true|0.170
-19|GLM 5.3|cbcn/glm-5.3|true|0.267
-20|Kimi K2.7 Code|ali/kimi-k2.7-code|true|0.156'
+# The two prices are the best route's cheapest listed asks per 1M tokens.
+MODELS='1|DeepSeek V4.1 Flash|cb/deepseek-v4.1-flash|true|0.00015|0.0006
+2|MiniMax M3|cbcn/minimax-m3|true|0.0003|0.0012
+3|GLM 5.3 Flash|cbcn/glm-5.3-flash|true|0.00015|0.0005
+4|DeepSeek V4 Flash|cbcn/deepseek-v4-flash|false|0.00308|0.00924
+5|GPT 5.6 Luna|cx/gpt-5.6-luna|true|0.0042|0.0252
+6|Qwen3.8 Flash|ali/qwen3.8-flash|true|0.00015|0.00047
+7|DeepSeek V4 Pro|cbcn/deepseek-v4-pro|false|0.00924|0.02772
+8|Kimi K2.7 Code|ali/kimi-k2.7-code|false|0.0133|0.056
+9|Qwen3.8 Max 0902|ali/qwen3.8-max-0902|false|0.01|0.03
+10|GLM 5.3|cbcn/glm-5.3|true|0.0014|0.0044
+11|Gemini 3.8 Flash|ag/gemini-3.8-flash-high|false|0.0015|0.0075
+12|Gemini 3.7 Flash|ag/gemini-3.7-flash-high|false|0.0015|0.0075
+13|MiniMax M2.7|mm/MiniMax-M2.7|false|0.0003|0.0012
+14|Gemini 3.6 Flash|ag/gemini-3.6-flash-high|false|0.0015|0.0075
+15|MiMo V2.5|ocg/mimo-v2.5|true|0.014|0.028
+16|GLM 5.2|ali/glm-5.2|true|0.0014|0.0044
+17|Kimi K2.6|cbcn/kimi-k2.6|false|0.0133|0.056
+18|GPT 6 Luna|cb/gpt-6-luna|false|0.0021|0.0105
+19|Qwen3.8 Omni Flash|alicn/qwen3.8-omni-flash|false|0.00015|0.00047
+20|Hy4 Preview|cb/hy4-preview|false|0.011676|0.035014'
 
 MODEL_COUNT="$(printf '%s\n' "$MODELS" | grep -c '|')"
 
@@ -389,7 +390,7 @@ load_ire_table() {
   table="$(cat "$IRE_TABLE")"
   n="$(printf '%s\n' "$table" | grep -c '|')"
   if [ "$n" -lt 1 ] || printf '%s\n' "$table" \
-      | grep -vqE '^[0-9]+\|[^|]+\|[a-z0-9]+(/[A-Za-z0-9._-]+)+\|(true|false)\|[0-9.]*$'; then
+      | grep -vqE '^[0-9]+\|[^|]+\|[a-z0-9]+(/[A-Za-z0-9._-]+)+\|(true|false)\|[0-9.]*\|[0-9.]*$'; then
     log "IRE: the fetched model table looks wrong; using the built-in one"
     return 0
   fi
@@ -419,8 +420,8 @@ ensure_top20() {
     mkdir -p "$STATE_DIR" || die "cannot create $STATE_DIR"
     csv="$STATE_DIR/top20-builtin.csv"
     {
-      printf 'recommendation_rank,model_family,recommendation_eligible,supply_weighted_median_cost_usdc_per_1m,model_ids\n'
-      printf '%s\n' "$MODELS" | awk -F'|' '{printf "%s,%s,%s,%s,%s\n", $1, $2, $4, $5, $3}'
+      printf 'recommendation_rank,model_family,recommendation_eligible,best_route_min_ask_in_usdc_per_1m,best_route_min_ask_out_usdc_per_1m,model_ids\n'
+      printf '%s\n' "$MODELS" | awk -F'|' '{printf "%s,%s,%s,%s,%s,%s\n", $1, $2, $4, $5, $6, $3}'
     } > "$csv"
   fi
   # Regenerate only when the source CSV or the API base changed.
@@ -495,21 +496,28 @@ ensure_proxy() {
 }
 
 # ---- pickers ----------------------------------------------------------------
-model_field() {  # model_field INDEX(1-based) FIELD(1-5)
+model_field() {  # model_field INDEX(1-based) FIELD(1-6)
   printf '%s\n' "$MODELS" | awk -F'|' -v i="$1" -v f="$2" 'NR == i {print $f}'
 }
 
 print_models() {  # print_models with_off
-  local rank name id elig cost tag star over
+  local rank name id elig cost cout judge tag star over
   if [ "$1" = "1" ]; then
     printf '   0  OFF  (disable advisor tool / seat aliases fall back to main)\n' >&2
   fi
-  while IFS='|' read -r rank name id elig cost; do
+  while IFS='|' read -r rank name id elig cost cout; do
     if [ "$elig" = "true" ]; then tag="eligible"; else tag="gated"; fi
     star=" "
     if [ "$1" != "1" ] && [ "$id" = "$DEFAULT_MODEL_ID" ]; then star="*"; fi
-    over=""; awk -v c="$cost" 'BEGIN { exit !(c + 0 >= 0.10) }' && over="OVER \$0.10"
-    printf '%s%3d  %-28s %-42s %-8s  ~%s/1M %s\n' "$star" "$rank" "$name" "$id" "$tag" "$cost" "$over" >&2
+    # The $0.10 cap is judged on the output ask when the table carries one.
+    judge="$cout"; [ -n "$judge" ] || judge="$cost"
+    over=""; awk -v c="$judge" 'BEGIN { exit !(c + 0 >= 0.10) }' && over="OVER \$0.10"
+    if [ -n "$cout" ]; then
+      printf '%s%3d  %-28s %-42s %-8s  ~%s in/%s out per 1M %s\n' \
+        "$star" "$rank" "$name" "$id" "$tag" "$cost" "$cout" "$over" >&2
+    else
+      printf '%s%3d  %-28s %-42s %-8s  ~%s/1M %s\n' "$star" "$rank" "$name" "$id" "$tag" "$cost" "$over" >&2
+    fi
   done <<EOF
 $MODELS
 EOF
