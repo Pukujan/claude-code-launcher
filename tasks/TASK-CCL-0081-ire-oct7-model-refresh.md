@@ -158,6 +158,29 @@ Blocked/uncertain:
 Next:
 - Open the linked pull request, verify required CI, and enable auto-merge only after the final push.
 
+### 2026-10-07 20:43:37 UTC — Codex
+
+<!-- continuity:checkpoint {"agent":"Codex","blocked":["Corrective CI on PR #108 is pending; task remains active until required checks pass and the PR merges."],"changed":["windows/launch-claude-inferhub.ps1; tests/test_ckff_off.py; tests/test_ladder.py; tests/test_ultracode_windows_wizard.py; tasks/TASK-CCL-0081-ire-oct7-model-refresh.md; checkpoints/CURRENT.md; .coord/boss_claim.json"],"completed":["A changed IRE provider left Windows picker defaults pointing outside the current list; defaults now follow the current listed route for the same model family."],"decisions":["Keep the shared fixed fallback configuration, seat/shim scripts, live proxy and saved non-CKFF custom routes unchanged; map only picker defaults and an emptied CKFF-only slot fallback to current IRE routes."],"evidence":["Issue #107 remains OPEN. The correction is recorded in issue comments 6045504469 and 6046443651. PR #108 head 6d7fb069 had required python-tests FAILURE; all other required checks and the supplemental Windows installer passed. No tests were run locally. Continuity validation is VALID, git diff --check is clean, and shared fixed fallback configuration plus seat/shim routing files are unchanged."],"next_action":"Verify required CI on PR #108's exact pushed head and enable auto-merge after this final push; then confirm merge, issue status, and accepted history.","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"CCL-0081","timestamp":"2026-10-07T20:43:37Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"2ef261f79e2b8d17017bf374d88b7be147ce1bbead2d3897983ed09dea60b828","request_id":"a204c068f12c442bbf0f350af7c2d062","schema":"project-continuity.checkpoint-operation.v1","task_id":"CCL-0081"} -->
+
+Completed:
+- A changed IRE provider left Windows picker defaults pointing outside the current list; defaults now follow the current listed route for the same model family.
+
+Evidence:
+- Issue #107 remains OPEN. The correction is recorded in issue comments 6045504469 and 6046443651. PR #108 head 6d7fb069 had required python-tests FAILURE; all other required checks and the supplemental Windows installer passed. No tests were run locally. Continuity validation is VALID, git diff --check is clean, and shared fixed fallback configuration plus seat/shim routing files are unchanged.
+
+Decisions:
+- Keep the shared fixed fallback configuration, seat/shim scripts, live proxy and saved non-CKFF custom routes unchanged; map only picker defaults and an emptied CKFF-only slot fallback to current IRE routes.
+
+Changed:
+- windows/launch-claude-inferhub.ps1; tests/test_ckff_off.py; tests/test_ladder.py; tests/test_ultracode_windows_wizard.py; tasks/TASK-CCL-0081-ire-oct7-model-refresh.md; checkpoints/CURRENT.md; .coord/boss_claim.json
+
+Blocked/uncertain:
+- Corrective CI on PR #108 is pending; task remains active until required checks pass and the PR merges.
+
+Next:
+- Verify required CI on PR #108's exact pushed head and enable auto-merge after this final push; then confirm merge, issue status, and accepted history.
+
 ## Handoff
 
 Read PROJECT → CURRENT → this task → minimum relevant spec. Checkpoint before stopping.
