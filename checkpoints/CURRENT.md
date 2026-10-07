@@ -6,7 +6,7 @@ This is an as-of projection; live GitHub issues own progression. Link the owning
 
 ## Program state
 
-Phase: the scheduled IRE refresh path is in place, and the October 7 source changes 9 of 20 Top 20 rows plus all 20 captured frontier rows; task CCL-0081 refreshes those snapshots. The launcher also has a first-class Linux entry point and installer on `main`.
+Phase: the scheduled IRE refresh path is in place. The October 7 snapshot has been regenerated on the CCL-0081 task branch; `main` remains on the earlier snapshot pending PR checks and merge. The launcher also has a first-class Linux entry point and installer on `main`.
 
 ## Completed
 
@@ -32,7 +32,7 @@ Phase: the scheduled IRE refresh path is in place, and the October 7 source chan
 
 ## Active
 
-- **CCL-0081**: the October 6 snapshot differs from IRE's October 7 source in 9 of 20 Top 20 rows and all 20 captured frontier rows; refresh the four built-in Top 20 tables and Windows offline frontier fallback from pinned IRE commit `c80166a2` ([issue #107](https://github.com/Pukujan/claude-code-launcher/issues/107), scope correction: [comment 6045326197](https://github.com/Pukujan/claude-code-launcher/issues/107#issuecomment-6045326197), parent: none, dependencies: none, branch `codex/ccl-0081-ire-oct7-model-refresh`).
+- **CCL-0081**: regenerated the four built-in Top 20 tables and Windows offline frontier fallback from pinned IRE commit `c80166a2`; the branch is pushed and awaits its review PR ([issue #107](https://github.com/Pukujan/claude-code-launcher/issues/107), scope correction: [comment 6045326197](https://github.com/Pukujan/claude-code-launcher/issues/107#issuecomment-6045326197), parent: none, dependencies: none, branch `codex/ccl-0081-ire-oct7-model-refresh`).
 
 ## Queued
 
@@ -44,4 +44,4 @@ Phase: the scheduled IRE refresh path is in place, and the October 7 source chan
 
 ## Next atomic action
 
-Generate the built-in Top 20 and Windows offline frontier tables from IRE commit `c80166a2`, update affected expectations, and open the linked review PR.
+Open the linked review PR, verify required checks, and enable auto-merge after the final push.
