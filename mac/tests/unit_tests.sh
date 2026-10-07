@@ -81,6 +81,42 @@ check "letter key" "$(printf 'S' | read_menu_key)" "s"
 check "clip_line short" "$(clip_line visible 40)" "visible"
 check "clip_line long" "$(clip_line abcdefghij 6)" "abc..."
 
+echo "== slot editor (issue #91) =="
+check "chain_at rung 1" "$(chain_at "a b c" 1)" "a"
+check "chain_at past the end" "$(chain_at "a b c" 4)" ""
+check "chain_set replaces a rung and keeps the tail" "$(chain_set "a b c" 1 "z")" "z b c"
+check "chain_set none truncates" "$(chain_set "a b c" 2 "")" "a"
+check "chain_set appends past the end" "$(chain_set "a b" 3 "c")" "a b c"
+check "chain_set de-duplicates" "$(chain_set "a b c" 1 "b")" "b c"
+check "chain_set caps at 3 rungs" "$(chain_set "a b c d" 4 "e")" "a b c"
+check "slot_num maps haiku to 3" "$(slot_num haiku)" "3"
+SLOT_CHAINS[0]="x/y z/w"
+check "slot_arg is the --slot form" "$(slot_arg sonnet)" "sonnet=x/y,z/w"
+check "slot_chain_text joins with dashes" "$(slot_chain_text sonnet)" "x/y-z/w"
+# The chains round-trip through last-picks.json. haiku_same makes haiku follow
+# sonnet without storing the chain twice.
+slots_file save 1 "s1 s2" "o1" "f1" "unused"
+check "saved sonnet" "$(slots_file load | awk -F'\t' '$1=="sonnet"{print $2}')" "s1 s2"
+check "haiku_same follows sonnet" "$(slots_file load | awk -F'\t' '$1=="haiku"{print $2}')" "s1 s2"
+slots_file save 0 "s1" "o1" "f1" "h1 h2"
+check "haiku independent without haiku_same" "$(slots_file load | awk -F'\t' '$1=="haiku"{print $2}')" "h1 h2"
+slots_file launch ultracode uc-orch uc-worker
+check "a launch save keeps the slots" "$(slots_file load | awk -F'\t' '$1=="sonnet"{print $2}')" "s1"
+check "a slots save keeps the launch target" "$(last_pick launch)" "ultracode"
+# The resolver fills all four chains (seat file first, then the built-in chains).
+slots_default_load
+for slot in sonnet opus fable haiku; do
+  if [ -n "$(slot_chain "$slot")" ]; then ok "resolver fills $slot"; else bad "resolver fills $slot"; fi
+done
+# With no terminal the editor must change nothing, so apply_seat keeps using
+# --main/--advisor and the dry run's piped answers still line up.
+SLOTS_PICKED=1
+pick_slots
+check "no terminal skips the editor" "$SLOTS_PICKED" ""
+CLAUDE_IH_SLOTS=off pick_slots
+check "CLAUDE_IH_SLOTS=off skips the editor" "$SLOTS_PICKED" ""
+unset CLAUDE_IH_SLOTS
+
 echo "== env scrubbing =="
 export ANTHROPIC_BASE_URL=http://elsewhere:1 ANTHROPIC_API_KEY=x ANTHROPIC_AUTH_TOKEN=x \
   CKFF_API_KEY=x ckff_api_url=x CLAUDE_CODE_OAUTH_TOKEN=x SHIM_KEEP_ME=keep

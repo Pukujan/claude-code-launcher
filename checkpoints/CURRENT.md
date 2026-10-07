@@ -1,6 +1,6 @@
 # Current Repository Checkpoint
 
-<!-- continuity:current {"active_task":null,"active_task_file":null,"protocol_version":"0.1.0-draft","schema":"project-continuity.current.v1"} -->
+<!-- continuity:current {"active_task":"CCL-0077","active_task_file":"tasks/TASK-CCL-0077-linux-slot-editor.md","protocol_version":"0.1.0-draft","schema":"project-continuity.current.v1"} -->
 
 This is an as-of projection; live GitHub issues own progression. Link the owning leaf, parent ancestry and dependencies for active work.
 
@@ -25,20 +25,26 @@ Phase: the launcher's built-in picker tables track IRE's current Top 20, and the
 - **CCL-0074**: the launcher's vendored `sync_inferhub_top20.py` prices each generated `ih/` deployment from its best route's ask, writes both the input and output cost, and names the basis, so rank 1 comes out at 1.5e-10 in and 6e-10 out ([issue #80](https://github.com/Pukujan/claude-code-launcher/issues/80), PR #81, merge `a534be9`).
 - **CCL-0075**: the four built-in picker tables are refreshed to IRE's current Top 20, so the offline fallback marks GPT 5.6 Luna not eligible, drops Gemini 3.8 Flash and Hy4 Preview, and adds the model 4.6 and Muse Spark 1.3 Contributor ([issue #84](https://github.com/Pukujan/claude-code-launcher/issues/84), PR #85, merge `288fa4e`).
 - **CCL-0076**: a first-class Linux entry point and installer in a new `linux/` folder, so a Linux user gets the same one-command start without Docker. `linux/launch-claude-inferhub.sh` and `linux/stop-litellm.sh` are thin entries over the Linux-proven shared launcher body, and `linux/setup.sh` is a distro-aware, shell-rc-aware installer with `--check`/`--uninstall` ([issue #88](https://github.com/Pukujan/claude-code-launcher/issues/88), PR #89, merge `a903844`).
+- `linux-dry-run` is a required status check on `main` (repository settings, 2026-10-07). The job already existed and passed; it is now enforced next to `gates`, `lint`, `mac-dry-run`, `python-tests` and `bash 3.2 compatibility`.
 
 ## Active
 
-- None.
+- **CCL-0077**: port the Windows launcher's model-slots step to the shared body, so the Mac and
+  Linux launcher can set all four [CC] slots (sonnet, opus, fable, haiku), each a first model and
+  up to two fallbacks, instead of only sonnet's and fable's first models. Leaf issue
+  [#91](https://github.com/Pukujan/claude-code-launcher/issues/91), parent
+  [#53](https://github.com/Pukujan/claude-code-launcher/issues/53); branch
+  `ccl-0077-linux-slot-editor`; PR pending.
 
 ## Queued
 
 - Re-sync `windows/launch-claude-inferhub.ps1` from the PC after the pending fixes there.
-- Add `linux-dry-run` to the required status checks on `main` (the job exists and passes; it is not yet enforced).
 
 ## Blockers
 
-- Adding `linux-dry-run` to the required checks needs branch-protection write, which the current `gh` OAuth App token cannot do (the API returns 404). Do it in the repository UI or with a classic PAT that has `repo` scope.
+- None.
 
 ## Next atomic action
 
-Add `linux-dry-run` to the required status checks on `main` from the repository settings UI, then re-sync `windows/launch-claude-inferhub.ps1` from the PC.
+Push `ccl-0077-linux-slot-editor`, open the #91 pull request with auto-merge, and verify the
+required checks.
