@@ -1327,14 +1327,45 @@ options = [
      "behavesAs": "claude-haiku-4-5-20251001"},
 ]
 for row in os.environ["MODELS_TABLE"].splitlines():
-    rank, name, mid, elig, _cost = row.split("|")
+    fields = row.split("|")
+    if len(fields) < 4:
+        continue
+    rank, name, mid, elig = fields[:4]
+    provider = mid.split("/", 1)[0]
     options.append({
         "model": "ih/" + mid,
-        "label": name + " (InferHub ih/)",
+        "label": f"{name} — {provider} (IRE Top 20 #{rank})",
         "description": "IRE Top 20 #" + rank + "; " + ("eligible" if elig == "true" else "gated")
                        + " - direct, no slot chain",
         "behavesAs": "claude-sonnet-5",
     })
+ire_path = os.environ.get("CCL_IRE_JSON")
+if ire_path and os.path.isfile(ire_path):
+    try:
+        with open(ire_path, encoding="utf-8") as f:
+            ire = json.load(f)
+        frontier = [r for r in ire.get("frontier", [])
+                    if isinstance(r, dict) and r.get("best_route")
+                    and str(r.get("rank", "")).isdigit() and int(r["rank"]) <= 20]
+        frontier.sort(key=lambda r: (int(r["rank"]), str(r.get("route", ""))))
+        for row in frontier:
+            mid = str(row.get("route") or "")
+            if "/" not in mid:
+                continue
+            rank = int(row["rank"])
+            name = str(row.get("name") or mid)
+            eligible = bool(row.get("eligible"))
+            provider = mid.split("/", 1)[0]
+            options.append({
+                "model": "ih/" + mid,
+                "label": f"{name} — {provider} (IRE Frontier #{rank})",
+                "description": f"IRE Frontier #{rank}; "
+                               + ("eligible" if eligible else "gated")
+                               + " - direct, no slot chain",
+                "behavesAs": "claude-sonnet-5",
+            })
+    except (OSError, ValueError, TypeError):
+        pass
 with open(path, encoding="utf-8") as f:
     data = json.load(f)
 data["modelPicker"] = {"options": options}

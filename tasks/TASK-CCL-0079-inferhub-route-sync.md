@@ -1,6 +1,6 @@
 # TASK CCL-0079: Keep launcher model families paired with IRE's current provider routes
 
-<!-- continuity:task {"acceptance":["All four built-in Top 20 artifacts use the current IRE family, rank, eligibility, prices, and selected provider route.","No built-in Top 20 row has a blank or malformed provider route; each ID matches the family in the pinned IRE source fixture.","The frontier importer preserves route, health, prices, and preferred endpoint; Windows offline frontier routes match current IRE recommendations.","A scheduled and manually dispatched workflow opens a review PR when generated fallback tables drift and never merges them automatically.","Tests cover all 20 Top 20 model/provider pairs and frontier routes.","No seat or shim routing changes, fallback chain changes, port 4000 activity, or secrets."],"depends_on":[],"goal":"Keep the launcher's free Top 20 and frontier pickers aligned to IRE's actual InferHub provider routes, including the offline fallback.","id":"CCL-0079","issue_url":"https://github.com/Pukujan/claude-code-launcher/issues/96","next_action":"Generate the built-in route tables from current IRE output, verify row-level mappings, then open a reviewed PR.","owner":"Alex; executor agent implements","priority":"P2","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"active","why":"The checked-in Top 20 fallback has stale or mismatched model/provider pairs, including an invalid ag/ route for Claude Sonnet 4.6. Mac can use live IRE data, but Windows and offline/cache paths can select a route left behind after rankings changed. A reviewed scheduled refresh prevents future silent drift."} -->
+<!-- continuity:task {"acceptance":["All four built-in Top 20 artifacts use the current IRE family, rank, eligibility, prices, and selected provider route.","No built-in Top 20 row has a blank or malformed provider route; each ID matches the family in the pinned IRE source fixture.","The frontier importer preserves route, health, prices, and preferred endpoint; Windows offline frontier routes match current IRE recommendations.","A scheduled and manually dispatched workflow opens a review PR when generated fallback tables drift and never merges them automatically.","Tests cover all 20 Top 20 model/provider pairs and frontier routes.","No seat or shim routing changes, fallback chain changes, port 4000 activity, or secrets.","The Linux/macOS Claude Code model picker accepts the six-field Top 20 table, displays provider IDs, and includes IRE's first 20 frontier best routes."],"depends_on":[],"goal":"Keep the launcher's free Top 20 and frontier pickers aligned to IRE's actual InferHub provider routes, including the offline fallback.","id":"CCL-0079","issue_url":"https://github.com/Pukujan/claude-code-launcher/issues/96","next_action":"Repair and merge the Linux/macOS model-picker sync so current Top 20 and frontier provider routes appear in Claude Code.","owner":"Alex; executor agent implements","priority":"P2","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"active","why":"The checked-in Top 20 fallback has stale or mismatched model/provider pairs, including an invalid ag/ route for Claude Sonnet 4.6. Mac can use live IRE data, but Windows and offline/cache paths can select a route left behind after rankings changed. A reviewed scheduled refresh prevents future silent drift."} -->
 
 - Status: active
 - Owner: Alex; executor agent implements
@@ -8,7 +8,7 @@
 - Depends on: none
 - Leaf issue: [#96](https://github.com/Pukujan/claude-code-launcher/issues/96); parent: none (refs Pukujan/inference-recommendation-engine#94, #97, #104)
 - Primary writer: Codex
-- Branch: `ccl-0079-inferhub-route-sync`
+- Branch (merged table refresh): `ccl-0079-inferhub-route-sync`; follow-up: `codex/ccl-0079-model-picker-sync`
 
 ## Owning issue
 
@@ -31,12 +31,20 @@ Seat assignment, shim routing, `shared/litellm/config/inferhub_fallbacks.yaml`, 
 - [x] A scheduled and manually dispatched workflow opens a PR when generated fallbacks drift and does not auto-merge provider changes.
 - [x] Tests cover all Top 20 model/provider pairs and frontier routes.
 - [x] No seat or shim routing changes, fallback chain changes, live port 4000 activity, or secrets.
+- [ ] Linux/macOS Claude Code model-picker sync accepts the six-field Top 20 table, displays provider IDs, and includes IRE's first 20 frontier best routes.
 
 ## Evidence and interpretation
 
 - Observed at launcher `main` revision `7417fa9`: its checked-in Top 20 tables are internally consistent but stale against IRE. Examples include rank 11 still being MiMo while current IRE rank 11 is Gemini 3.8 Flash, rank 19 using the invalid-looking `ag/` route, and rank 20 listing Muse Spark while current IRE rank 20 is Qwen3.8 Omni Flash.
 - Observed at IRE `main` revision `f463962`: current Top 20 JSON includes `best_route`, and the CSV's first `model_ids` entry matches it. Frontier JSON carries per-route health, listed prices, and endpoint metadata.
 - Inferred: independently maintained fallback files allowed IDs to stay attached to stale families after ranks and model families changed.
+
+## Linux model-picker follow-up
+
+- Observed: the installed Linux launcher fetched IRE `main` at `f4639620b9b8814181b25f4e66bb3ddbcfc8ec48` and had 20 Top 20 rows plus 20 selected frontier rows, but its settings sync raised `ValueError: too many values to unpack (expected 5)` because the refreshed table has six fields.
+- Inferred: Claude Code therefore kept no provider entries in its model picker even though the launcher's terminal menus had fresh IRE data.
+- The user directed this follow-up in issue [#96 comment 6034151538](https://github.com/Pukujan/claude-code-launcher/issues/96#issuecomment-6034151538).
+- The current Linux user's picker settings have been refreshed from the existing live IRE cache; it now contains 20 Top 20 and 20 frontier provider choices, with each provider shown in its label.
 
 ## Checkpoint log
 
@@ -231,3 +239,52 @@ Blocked/uncertain:
 
 Next:
 - Verify all required checks and auto-merge on PR #97 at the new pushed checkpoint SHA.
+
+### Linux model-picker follow-up — 2026-10-07
+
+Completed:
+- Fixed the shared Linux/macOS Claude Code model-picker sync to accept the current six-field IRE Top 20 rows and label each route with its provider.
+- Added the first 20 IRE frontier best routes to the Claude Code picker, preserving their provider route IDs and eligibility labels.
+- Refreshed this Linux user's picker settings from the already-current cached IRE bundle; it now has 20 Top 20 and 20 frontier routes.
+
+Evidence:
+- The launcher log showed live IRE source `f4639620b9b8814181b25f4e66bb3ddbcfc8ec48`, followed by `ValueError: too many values to unpack (expected 5)` during settings sync.
+- The cached IRE bundle as of `2026-10-07T08:30:11Z` has 20 Top 20 rows and 20 selected frontier best routes at ranks 1–20.
+- The Claude Code settings refresh reported 44 picker options: four slots, 20 Top 20 routes and 20 frontier routes.
+- Required CI is pending for this follow-up branch. No tests were run locally.
+
+Decisions:
+- Keep the issue open until this permanent code repair passes required CI and is merged.
+- Do not start, probe, reload or restart the live proxy as part of the settings repair.
+
+Changed:
+- `mac/Launch Claude InferHub.command`, this task record and `checkpoints/CURRENT.md`.
+
+Blocked/uncertain:
+- None.
+
+Next:
+- Commit the product and projection updates, checkpoint and push the follow-up branch, then open a linked review PR.
+
+### 2026-10-07 08:35:26 UTC — Codex
+
+<!-- continuity:checkpoint {"agent":"Codex","blocked":[],"changed":["none"],"completed":["Fixed Linux/macOS Claude Code model-picker sync for six-field Top 20 rows, added provider-labeled first-20 frontier routes, and refreshed the Linux user's picker from cached IRE data."],"decisions":["no new decisions"],"evidence":["IRE bundle at f4639620b9b8814181b25f4e66bb3ddbcfc8ec48 as of 2026-10-07T08:30:11Z; settings now contain 44 options (4 slots, 20 Top 20, 20 frontier); continuity validate VALID; diff check clean; no tests run locally."],"next_action":"Open a linked PR for the pushed branch, then verify required CI and auto-merge.","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"CCL-0079","timestamp":"2026-10-07T08:35:26Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"94c7551e5c46b3b618f8f9ee6fa43a8e348bd3c55921c6dcc32cff610b189ec5","request_id":"2e0aa962318e4d79baba4ab9ebb95be0","schema":"project-continuity.checkpoint-operation.v1","task_id":"CCL-0079"} -->
+
+Completed:
+- Fixed Linux/macOS Claude Code model-picker sync for six-field Top 20 rows, added provider-labeled first-20 frontier routes, and refreshed the Linux user's picker from cached IRE data.
+
+Evidence:
+- IRE bundle at f4639620b9b8814181b25f4e66bb3ddbcfc8ec48 as of 2026-10-07T08:30:11Z; settings now contain 44 options (4 slots, 20 Top 20, 20 frontier); continuity validate VALID; diff check clean; no tests run locally.
+
+Decisions:
+- no new decisions
+
+Changed:
+- none
+
+Blocked/uncertain:
+- none
+
+Next:
+- Open a linked PR for the pushed branch, then verify required CI and auto-merge.
