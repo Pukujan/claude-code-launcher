@@ -1,0 +1,68 @@
+name: refresh IRE model tables
+
+on:
+  schedule:
+    - cron: "20 21 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: refresh-ire-model-tables
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Pin the IRE source revision
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api repos/Pukujan/inference-recommendation-engine/commits/main \
+            --jq '"sha=\(.sha)\ndate=\(.commit.committer.date)"' >> "$GITHUB_OUTPUT"
+
+      - name: Fetch current IRE recommendations at the pinned revision
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IRE_SHA: ${{ steps.source.outputs.sha }}
+        run: python shared/ire/ire_fetch.py --ref "$IRE_SHA" --out "$RUNNER_TEMP/ire.json"
+
+      - name: Refresh built-in Top 20 and frontier fallbacks
+        run: >-
+          python shared/ire/sync_builtin_tables.py
+          --bundle "$RUNNER_TEMP/ire.json"
+          --source-sha "${{ steps.source.outputs.sha }}"
+          --source-date "${{ steps.source.outputs.date }}"
+          --require-live
+
+      - name: Open or update the review pull request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ github.token }}
+          branch: codex/ire-model-tables-refresh
+          delete-branch: false
+          add-paths: |
+            shared/litellm/config/top20-builtin.csv
+            shared/ire/defaults.json
+            shared/ire/sync_builtin_tables.py
+            windows/launch-claude-inferhub.ps1
+            mac/Launch Claude InferHub.command
+            tests/fixtures/ire/top20-frontier-route-map.json
+          commit-message: "Refresh built-in model routes from IRE (Refs #96)"
+          title: "Refresh built-in InferHub model routes from IRE"
+          body: |
+            The checked-in fallback tables can retain stale model/provider pairs after IRE changes its current Top 20 or frontier recommendations.
+
+            This PR refreshes the Windows and Mac fallback tables, shared defaults, and pinned route map from the current IRE output. Review the route changes and wait for the required checks before merging.
+
+            Refs #96

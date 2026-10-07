@@ -1,33 +1,401 @@
 {
-  "_note": "Built-in defaults, used only when GitHub is unreachable and there is no cache. Top 20 mirrors shared/litellm/config/top20-builtin.csv and the launchers' picker tables. The price shown is the best route's cheapest listed ask (IRE issue #94), with the supply-weighted blend kept beside it; ladders are the launcher's fixed chains. Each row's single id is the launcher's curated route for that family (the id the fixed chains name), not necessarily IRE's first listed id, so the built-in table stays compatible with the launcher's config.",
-  "_as_of": "2026-10-06T02:57:21Z",
+  "_note": "Built-in defaults used when GitHub is unavailable and no cache exists. Top 20 matches shared/litellm/config/top20-builtin.csv and both launchers. Each ids list is ordered with IRE's selected best provider route first. The shown price is that route's cheapest listed ask; fixed seat ladders remain unchanged.",
+  "_as_of": "2026-10-06T17:10:38Z",
   "source": "defaults",
   "top20": [
-    {"rank": 1, "name": "DeepSeek V4.1 Flash", "vendor": "DeepSeek", "eligible": true, "gate_reasons": [], "cost_per_mtok": 0.00015, "price_in": 0.00015, "price_out": 0.0006, "blend_per_mtok": 0.025396, "ids": ["cb/deepseek-v4.1-flash"]},
-    {"rank": 2, "name": "MiniMax M3", "vendor": "MiniMax", "eligible": true, "gate_reasons": [], "cost_per_mtok": 0.0003, "price_in": 0.0003, "price_out": 0.0012, "blend_per_mtok": 0.057632, "ids": ["cbcn/minimax-m3"]},
-    {"rank": 3, "name": "GLM 5.3 Flash", "vendor": "Z.ai", "eligible": true, "gate_reasons": [], "cost_per_mtok": 0.00015, "price_in": 0.00015, "price_out": 0.0005, "blend_per_mtok": 0.015061, "ids": ["cbcn/glm-5.3-flash"]},
-    {"rank": 4, "name": "DeepSeek V4 Flash", "vendor": "DeepSeek", "eligible": false, "gate_reasons": ["not_routing_eligible"], "cost_per_mtok": 0.0033, "price_in": 0.0033, "price_out": 0.0099, "blend_per_mtok": 0.020669, "ids": ["cbcn/deepseek-v4-flash"]},
-    {"rank": 5, "name": "GPT 5.6 Luna", "vendor": "OpenAI", "eligible": false, "gate_reasons": ["open_weight_unverified"], "cost_per_mtok": 0.0042, "price_in": 0.0042, "price_out": 0.0252, "blend_per_mtok": 0.048792, "ids": ["cx/gpt-5.6-luna"]},
-    {"rank": 6, "name": "Qwen3.8 Flash", "vendor": "Alibaba/Qwen", "eligible": true, "gate_reasons": [], "cost_per_mtok": 0.00015, "price_in": 0.00015, "price_out": 0.00047, "blend_per_mtok": 0.030293, "ids": ["ali/qwen3.8-flash"]},
-    {"rank": 7, "name": "DeepSeek V4 Pro", "vendor": "DeepSeek", "eligible": false, "gate_reasons": ["not_routing_eligible"], "cost_per_mtok": 0.0099, "price_in": 0.0099, "price_out": 0.0297, "blend_per_mtok": 0.038842, "ids": ["cbcn/deepseek-v4-pro"]},
-    {"rank": 8, "name": "Kimi K2.7 Code", "vendor": "Moonshot", "eligible": false, "gate_reasons": ["not_routing_eligible"], "cost_per_mtok": 0.01425, "price_in": 0.01425, "price_out": 0.06, "blend_per_mtok": 0.071696, "ids": ["ali/kimi-k2.7-code"]},
-    {"rank": 9, "name": "Qwen3.8 Max 0902", "vendor": "Alibaba/Qwen", "eligible": false, "gate_reasons": ["insufficient_provider_breadth", "catalog_availability_below_minimum", "open_weight_unverified"], "cost_per_mtok": 0.01, "price_in": 0.01, "price_out": 0.03, "blend_per_mtok": 0.080072, "ids": ["ali/qwen3.8-max-0902"]},
-    {"rank": 10, "name": "GLM 5.3", "vendor": "Z.ai", "eligible": true, "gate_reasons": [], "cost_per_mtok": 0.0014, "price_in": 0.0014, "price_out": 0.0044, "blend_per_mtok": 0.209871, "ids": ["cbcn/glm-5.3"]},
-    {"rank": 11, "name": "MiMo V2.5", "vendor": "Xiaomi", "eligible": true, "gate_reasons": [], "cost_per_mtok": 0.014, "price_in": 0.014, "price_out": 0.028, "blend_per_mtok": 0.065686, "ids": ["ocg/mimo-v2.5"]},
-    {"rank": 12, "name": "Gemini 3.7 Flash", "vendor": "Google", "eligible": false, "gate_reasons": ["insufficient_provider_breadth", "catalog_availability_below_minimum", "release_date_unknown", "open_weight_unverified"], "cost_per_mtok": 0.0015, "price_in": 0.0015, "price_out": 0.0075, "blend_per_mtok": 0.075028, "ids": ["ag/gemini-3.7-flash-high"]},
-    {"rank": 13, "name": "MiniMax M2.7", "vendor": "", "eligible": false, "gate_reasons": ["tier_below_minimum", "capability_below_minimum", "release_date_unknown"], "cost_per_mtok": 0.0003, "price_in": 0.0003, "price_out": 0.0012, "blend_per_mtok": 0.023007, "ids": ["mm/MiniMax-M2.7"]},
-    {"rank": 14, "name": "Gemini 3.6 Flash", "vendor": "Google", "eligible": false, "gate_reasons": ["insufficient_provider_breadth", "catalog_availability_below_minimum", "release_date_unknown", "open_weight_unverified"], "cost_per_mtok": 0.0015, "price_in": 0.0015, "price_out": 0.0075, "blend_per_mtok": 0.044259, "ids": ["ag/gemini-3.6-flash-high"]},
-    {"rank": 15, "name": "Kimi K2.6", "vendor": "Moonshot", "eligible": false, "gate_reasons": ["tier_below_minimum", "capability_below_minimum", "release_date_unknown", "not_routing_eligible"], "cost_per_mtok": 0.01425, "price_in": 0.01425, "price_out": 0.06, "blend_per_mtok": 0.071575, "ids": ["cbcn/kimi-k2.6"]},
-    {"rank": 16, "name": "GLM 5.2", "vendor": "Z.ai", "eligible": true, "gate_reasons": [], "cost_per_mtok": 0.0014, "price_in": 0.0014, "price_out": 0.0044, "blend_per_mtok": 0.230729, "ids": ["ali/glm-5.2"]},
-    {"rank": 17, "name": "GPT 6 Luna", "vendor": "OpenAI", "eligible": false, "gate_reasons": ["tier_below_minimum", "capability_below_minimum", "release_date_unknown", "open_weight_unverified"], "cost_per_mtok": 0.0021, "price_in": 0.0021, "price_out": 0.0105, "blend_per_mtok": 0.021868, "ids": ["cb/gpt-6-luna"]},
-    {"rank": 18, "name": "Qwen3.8 Omni Flash", "vendor": "", "eligible": false, "gate_reasons": ["tier_below_minimum", "capability_below_minimum", "release_date_unknown", "open_weight_unverified"], "cost_per_mtok": 0.00015, "price_in": 0.00015, "price_out": 0.00047, "blend_per_mtok": 0.01578, "ids": ["alicn/qwen3.8-omni-flash"]},
-    {"rank": 19, "name": "Claude Sonnet 4.6", "vendor": "Anthropic", "eligible": false, "gate_reasons": ["tier_below_minimum", "capability_below_minimum", "release_date_unknown", "open_weight_unverified"], "cost_per_mtok": 0.003, "price_in": 0.003, "price_out": 0.015, "blend_per_mtok": 0.068942, "ids": ["ag/"]},
-    {"rank": 20, "name": "Muse Spark 1.3 Contributor", "vendor": "Meta", "eligible": false, "gate_reasons": ["insufficient_provider_breadth", "catalog_availability_below_minimum", "not_routing_eligible", "open_weight_unverified"], "cost_per_mtok": 0.05, "price_in": 0.05, "price_out": 0.1, "blend_per_mtok": 0.075786, "ids": ["cmc/meta/muse-spark-1.3-contributor"]}
+    {
+      "rank": 1,
+      "name": "DeepSeek V4.1 Flash",
+      "vendor": "DeepSeek",
+      "eligible": true,
+      "gate_reasons": [],
+      "cost_per_mtok": 0.00015,
+      "price_in": 0.00015,
+      "price_out": 0.0006,
+      "blend_per_mtok": 0.023678,
+      "ids": [
+        "alicn/deepseek-v4.1-flash",
+        "cb/deepseek-v4.1-flash",
+        "cp/cline-pass/deepseek-v4.1-flash",
+        "ali/deepseek-v4.1-flash",
+        "cbcn/deepseek-v4.1-flash",
+        "cmc/deepseek/deepseek-v4.1-flash",
+        "ocg/deepseek-v4.1-flash"
+      ]
+    },
+    {
+      "rank": 2,
+      "name": "MiniMax M3",
+      "vendor": "MiniMax",
+      "eligible": true,
+      "gate_reasons": [],
+      "cost_per_mtok": 0.0003,
+      "price_in": 0.0003,
+      "price_out": 0.0012,
+      "blend_per_mtok": 0.059026,
+      "ids": [
+        "mm/MiniMax-M3",
+        "cb/minimax-m3",
+        "cbcn/minimax-m3",
+        "mmcn/MiniMax-M3",
+        "cp/cline-pass/minimax-m3",
+        "ocg/minimax-m3"
+      ]
+    },
+    {
+      "rank": 3,
+      "name": "GLM 5.3 Flash",
+      "vendor": "Z.ai",
+      "eligible": true,
+      "gate_reasons": [],
+      "cost_per_mtok": 0.00015,
+      "price_in": 0.00015,
+      "price_out": 0.0005,
+      "blend_per_mtok": 0.012175,
+      "ids": [
+        "zai/glm-5.3-flash",
+        "cp/zai/glm-5.3-flash",
+        "cbcn/glm-5.3-flash",
+        "ocg/glm-5.3-flash",
+        "cp/cline-pass/glm-5.3-flash"
+      ]
+    },
+    {
+      "rank": 4,
+      "name": "DeepSeek V4 Flash",
+      "vendor": "DeepSeek",
+      "eligible": true,
+      "gate_reasons": [],
+      "cost_per_mtok": 0.00352,
+      "price_in": 0.00352,
+      "price_out": 0.01056,
+      "blend_per_mtok": 0.016917,
+      "ids": [
+        "cbcn/deepseek-v4-flash",
+        "cmc/deepseek/deepseek-v4-flash",
+        "ocg/deepseek-v4-flash"
+      ]
+    },
+    {
+      "rank": 5,
+      "name": "GPT 5.6 Luna",
+      "vendor": "OpenAI",
+      "eligible": false,
+      "gate_reasons": [
+        "open_weight_unverified"
+      ],
+      "cost_per_mtok": 0.003,
+      "price_in": 0.003,
+      "price_out": 0.018,
+      "blend_per_mtok": 0.049382,
+      "ids": [
+        "cb/gpt-5.6-luna",
+        "cx/gpt-5.6-luna",
+        "ocg/gpt-5.6-luna"
+      ]
+    },
+    {
+      "rank": 6,
+      "name": "Qwen3.8 Flash",
+      "vendor": "Alibaba/Qwen",
+      "eligible": true,
+      "gate_reasons": [],
+      "cost_per_mtok": 0.00015,
+      "price_in": 0.00015,
+      "price_out": 0.00047,
+      "blend_per_mtok": 0.032197,
+      "ids": [
+        "alicn/qwen3.8-flash",
+        "ali/qwen3.8-flash",
+        "ocg/qwen3.8-flash"
+      ]
+    },
+    {
+      "rank": 7,
+      "name": "DeepSeek V4 Pro",
+      "vendor": "DeepSeek",
+      "eligible": false,
+      "gate_reasons": [
+        "not_routing_eligible"
+      ],
+      "cost_per_mtok": 0.01056,
+      "price_in": 0.01056,
+      "price_out": 0.03168,
+      "blend_per_mtok": 0.02774,
+      "ids": [
+        "cbcn/deepseek-v4-pro",
+        "cmc/deepseek/deepseek-v4-pro",
+        "cp/cline-pass/deepseek-v4-pro"
+      ]
+    },
+    {
+      "rank": 8,
+      "name": "Kimi K2.7 Code",
+      "vendor": "Moonshot",
+      "eligible": true,
+      "gate_reasons": [],
+      "cost_per_mtok": 0.0152,
+      "price_in": 0.0152,
+      "price_out": 0.064,
+      "blend_per_mtok": 0.047943,
+      "ids": [
+        "cbcn/kimi-k2.7",
+        "ali/kimi-k2.7-code",
+        "cmc/moonshotai/Kimi-K2.7-Code",
+        "ocg/kimi-k2.7-code"
+      ]
+    },
+    {
+      "rank": 9,
+      "name": "Qwen3.8 Max 0902",
+      "vendor": "Alibaba/Qwen",
+      "eligible": false,
+      "gate_reasons": [
+        "insufficient_provider_breadth",
+        "catalog_availability_below_minimum",
+        "open_weight_unverified"
+      ],
+      "cost_per_mtok": 0.01,
+      "price_in": 0.01,
+      "price_out": 0.03,
+      "blend_per_mtok": 0.087445,
+      "ids": [
+        "ali/qwen3.8-max-0902"
+      ]
+    },
+    {
+      "rank": 10,
+      "name": "GLM 5.3",
+      "vendor": "Z.ai",
+      "eligible": true,
+      "gate_reasons": [],
+      "cost_per_mtok": 0.0014,
+      "price_in": 0.0014,
+      "price_out": 0.0044,
+      "blend_per_mtok": 0.221285,
+      "ids": [
+        "alicn/glm-5.3",
+        "zai/glm-5.3",
+        "cbcn/glm-5.3",
+        "ali/glm-5.3",
+        "cb/glm-5.3",
+        "ocg/glm-5.3",
+        "cp/cline-pass/glm-5.3"
+      ]
+    },
+    {
+      "rank": 11,
+      "name": "Gemini 3.8 Flash",
+      "vendor": "Google",
+      "eligible": false,
+      "gate_reasons": [
+        "insufficient_provider_breadth",
+        "catalog_availability_below_minimum",
+        "open_weight_unverified"
+      ],
+      "cost_per_mtok": 0.00375,
+      "price_in": 0.00375,
+      "price_out": 0.01875,
+      "blend_per_mtok": 0.07445,
+      "ids": [
+        "ag/gemini-3.8-flash-high"
+      ]
+    },
+    {
+      "rank": 12,
+      "name": "Gemini 3.7 Flash",
+      "vendor": "Google",
+      "eligible": false,
+      "gate_reasons": [
+        "insufficient_provider_breadth",
+        "catalog_availability_below_minimum",
+        "release_date_unknown",
+        "open_weight_unverified"
+      ],
+      "cost_per_mtok": 0.00375,
+      "price_in": 0.00375,
+      "price_out": 0.01875,
+      "blend_per_mtok": 0.083338,
+      "ids": [
+        "ag/gemini-3.7-flash-high"
+      ]
+    },
+    {
+      "rank": 13,
+      "name": "MiniMax M2.7",
+      "vendor": "",
+      "eligible": false,
+      "gate_reasons": [
+        "tier_below_minimum",
+        "capability_below_minimum",
+        "release_date_unknown"
+      ],
+      "cost_per_mtok": 0.0003,
+      "price_in": 0.0003,
+      "price_out": 0.0012,
+      "blend_per_mtok": 0.014814,
+      "ids": [
+        "mm/MiniMax-M2.7",
+        "cbcn/minimax-m2.7",
+        "mmcn/MiniMax-M2.7",
+        "cmc/MiniMaxAI/MiniMax-M2.7",
+        "ocg/minimax-m2.7"
+      ]
+    },
+    {
+      "rank": 14,
+      "name": "Gemini 3.6 Flash",
+      "vendor": "Google",
+      "eligible": false,
+      "gate_reasons": [
+        "insufficient_provider_breadth",
+        "catalog_availability_below_minimum",
+        "release_date_unknown",
+        "not_routing_eligible",
+        "open_weight_unverified"
+      ],
+      "cost_per_mtok": 0.0015,
+      "price_in": 0.0015,
+      "price_out": 0.0075,
+      "blend_per_mtok": 0.043104,
+      "ids": [
+        "ag/gemini-3.6-flash-high"
+      ]
+    },
+    {
+      "rank": 15,
+      "name": "MiMo V2.5",
+      "vendor": "Xiaomi",
+      "eligible": false,
+      "gate_reasons": [
+        "not_routing_eligible"
+      ],
+      "cost_per_mtok": 0.02268,
+      "price_in": 0.02268,
+      "price_out": 0.04536,
+      "blend_per_mtok": 0.079935,
+      "ids": [
+        "cmc/xiaomi/mimo-v2.5",
+        "cp/cline-pass/mimo-v2.5",
+        "mimo/mimo-v2.5",
+        "ocg/mimo-v2.5"
+      ]
+    },
+    {
+      "rank": 16,
+      "name": "Kimi K2.6",
+      "vendor": "Moonshot",
+      "eligible": false,
+      "gate_reasons": [
+        "tier_below_minimum",
+        "capability_below_minimum",
+        "release_date_unknown"
+      ],
+      "cost_per_mtok": 0.0152,
+      "price_in": 0.0152,
+      "price_out": 0.064,
+      "blend_per_mtok": 0.047438,
+      "ids": [
+        "cbcn/kimi-k2.6",
+        "cmc/moonshotai/Kimi-K2.6",
+        "ocg/kimi-k2.6"
+      ]
+    },
+    {
+      "rank": 17,
+      "name": "GLM 5.2",
+      "vendor": "Z.ai",
+      "eligible": false,
+      "gate_reasons": [
+        "not_routing_eligible"
+      ],
+      "cost_per_mtok": 0.0014,
+      "price_in": 0.0014,
+      "price_out": 0.0044,
+      "blend_per_mtok": 0.23466,
+      "ids": [
+        "alicn/glm-5.2",
+        "cbcn/glm-5.2",
+        "cb/glm-5.2",
+        "ali/glm-5.2",
+        "cmc/zai-org/GLM-5.2"
+      ]
+    },
+    {
+      "rank": 18,
+      "name": "GPT 6 Luna",
+      "vendor": "OpenAI",
+      "eligible": false,
+      "gate_reasons": [
+        "tier_below_minimum",
+        "capability_below_minimum",
+        "release_date_unknown",
+        "open_weight_unverified"
+      ],
+      "cost_per_mtok": 0.0015,
+      "price_in": 0.0015,
+      "price_out": 0.0075,
+      "blend_per_mtok": 0.011264,
+      "ids": [
+        "cb/gpt-6-luna",
+        "cx/gpt-6-luna"
+      ]
+    },
+    {
+      "rank": 19,
+      "name": "Muse Spark 1.3 Contributor",
+      "vendor": "Meta",
+      "eligible": false,
+      "gate_reasons": [
+        "insufficient_provider_breadth",
+        "catalog_availability_below_minimum",
+        "not_routing_eligible",
+        "open_weight_unverified"
+      ],
+      "cost_per_mtok": 0.05,
+      "price_in": 0.05,
+      "price_out": 0.1,
+      "blend_per_mtok": 0.075786,
+      "ids": [
+        "cmc/meta/muse-spark-1.3-contributor"
+      ]
+    },
+    {
+      "rank": 20,
+      "name": "Qwen3.8 Omni Flash",
+      "vendor": "",
+      "eligible": false,
+      "gate_reasons": [
+        "tier_below_minimum",
+        "capability_below_minimum",
+        "release_date_unknown",
+        "open_weight_unverified"
+      ],
+      "cost_per_mtok": 0.00015,
+      "price_in": 0.00015,
+      "price_out": 0.00047,
+      "blend_per_mtok": 0.016483,
+      "ids": [
+        "alicn/qwen3.8-omni-flash",
+        "ali/qwen3.8-omni-flash"
+      ]
+    }
   ],
-  "price_policy": {"free_below_per_mtok": 0.1, "unit": "USDC per 1M tokens", "source": "built-in copy of docs/INFERHUB-API-SETUP.md"},
+  "price_policy": {
+    "free_below_per_mtok": 0.1,
+    "unit": "USDC per 1M tokens",
+    "source": "built-in copy of docs/INFERHUB-API-SETUP.md"
+  },
   "ladders": {
-    "main": ["cb/deepseek-v4.1-flash", "ali/qwen3.8-flash", "cbcn/deepseek-v4-flash"],
-    "advisor": ["cbcn/glm-5.3-flash", "cbcn/minimax-m3"]
+    "main": [
+      "cb/deepseek-v4.1-flash",
+      "ali/qwen3.8-flash",
+      "cbcn/deepseek-v4-flash"
+    ],
+    "advisor": [
+      "cbcn/glm-5.3-flash",
+      "cbcn/minimax-m3"
+    ]
   },
   "retries": 3,
   "cooldown_s": 180
