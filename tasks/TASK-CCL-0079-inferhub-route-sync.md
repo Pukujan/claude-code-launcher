@@ -48,6 +48,9 @@ Completed:
 - Compared the current launcher fallback to IRE Top 20 and frontier outputs.
 - Corrected the initial issue diagnosis: live Top 20 route ordering matches IRE; checked-in offline mappings are stale.
 
+Decisions:
+- Treat IRE's selected best route as the source of truth for each model-family row.
+
 Evidence:
 - IRE `main` `f4639620b9b8814181b25f4e66bb3ddbcfc8ec48` (daily refresh PR #104).
 - Launcher `main` `7417fa97f8647cee461e4277508fe2307b8363b9` has stale Top 20 family/provider rows; issue #96 comment 6033488169 records the correction.
@@ -68,6 +71,9 @@ Completed:
 - Added daily and manual GitHub Actions refresh that opens a review PR without merging it, pinned to one IRE commit SHA and date.
 - Updated offline provider routes to IRE `f4639620b9b8814181b25f4e66bb3ddbcfc8ec48`.
 - Added row-by-row Top 20/frontier regression checks and adjusted an integration assertion that assumed the old rank-one provider ID; fixed seat and fallback routing files remain unchanged.
+
+Decisions:
+- Keep seat assignment, shim routing, and fixed fallback chains unchanged; refresh only model-pick snapshots and make snapshot tests read the generated route data.
 
 Evidence:
 - Live bundle fetch at the pinned IRE revision succeeded; generator recorded source date `2026-10-06T17:10:38Z`.
@@ -107,3 +113,28 @@ Blocked/uncertain:
 
 Next:
 - Open the review PR for CCL-0079, wait for required checks and review, then enable auto-merge only after the final push.
+
+### CI correction — 2026-10-07
+
+Completed:
+- Added the `Decisions:` headings required by the pinned continuity validator to the earlier task checkpoint projections.
+- Changed Mac model-route and UltraCode picker test expectations to derive from the built-in snapshot, including the dry-run's selected seat routes.
+
+Decisions:
+- Keep the Mac test dry run aligned with the selected IRE routes while leaving seat/shim routing code unchanged.
+
+Evidence:
+- PR #97 armed squash auto-merge on checkpoint SHA `9fa6e87ba0778881bd748fe56ead28ed88eae970`.
+- The pinned PCM gate rejected two checkpoint projections because they lacked the required `Decisions:` section.
+- Mac unit tests pass locally (107 passed); Bash syntax checks and `git diff --check` pass.
+- The local dry run could not begin: its test copy tried to duplicate the existing ignored LiteLLM virtualenv into `/tmp` and hit the container disk quota. The partial task-created temp directory was removed; the user's local virtualenv and ignored Top 20 cache were preserved.
+- The continuity CLI is now installed from the pinned PCM source; `continuity issue verify` reports issue #96 OPEN, then exits with an error because this repository has no `.continuity/documents.json`.
+
+Changed:
+- `mac/tests/unit_tests.sh`, `mac/tests/dry_run.sh`, `tasks/TASK-CCL-0079-inferhub-route-sync.md`, and `checkpoints/CURRENT.md`.
+
+Blocked/uncertain:
+- Updated CI has not run yet; the previous PR check run still reports failures against the earlier pushed SHA.
+
+Next:
+- Commit and checkpoint this correction, push the updated branch, then confirm all required PR checks pass.

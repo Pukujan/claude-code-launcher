@@ -97,8 +97,14 @@ grep -q "weak_key_flag_leaked" "$T/claude-call.txt" && { echo "keyless flag reac
 grep -q "IRE: source=defaults" "$T/launcher-output.txt" || { echo "IRE status line missing"; fail=1; }
 n="$(grep -c -E '^(ANTHROPIC_|CLAUDE_CODE_|CKFF_|ckff_)' "$T/claude-call.txt")"
 [ "$n" = "10" ] || { echo "expected exactly 7 ANTHROPIC_* vars plus 3 CLAUDE_CODE_* vars and no CKFF vars, got $n"; fail=1; }
-grep -q '"main_inferhub_id": "cbcn/glm-5.3-flash"' "$LL/config/inferhub_seat.json" || { echo "seat main wrong"; fail=1; }
-grep -q '"advisor_inferhub_id": "cbcn/minimax-m3"' "$LL/config/inferhub_seat.json" || { echo "seat advisor wrong"; fail=1; }
+builtin_route() {
+  awk -F, -v wanted="$1" 'NR == wanted + 1 { split($7, routes, ";"); sub(/^[[:space:]]+/, "", routes[1]); print routes[1] }' \
+    "$LL/config/top20-builtin.csv"
+}
+main_route="$(builtin_route 3)"
+advisor_route="$(builtin_route 2)"
+grep -qF "\"main_inferhub_id\": \"$main_route\"" "$LL/config/inferhub_seat.json" || { echo "seat main wrong"; fail=1; }
+grep -qF "\"advisor_inferhub_id\": \"$advisor_route\"" "$LL/config/inferhub_seat.json" || { echo "seat advisor wrong"; fail=1; }
 grep -q "LITELLM_MASTER_KEY" "$T/home/.config/inferhub/.env" 2>/dev/null && { echo "launcher wrote a master key"; fail=1; }
 if [ -z "$(find "$T/home/.config/inferhub/.env" -perm 600 2>/dev/null)" ]; then
   echo "env file is not mode 600"; fail=1

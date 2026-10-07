@@ -30,7 +30,7 @@ Phase: the launcher's built-in picker tables track IRE's current Top 20, and the
 
 ## Active
 
-- **CCL-0079**: refresh the launcher’s built-in Top 20 and frontier provider routes from current IRE data and add a scheduled review PR ([issue #96](https://github.com/Pukujan/claude-code-launcher/issues/96), parent: none, dependencies: none, branch `ccl-0079-inferhub-route-sync`). Generated snapshots and tests are ready; the continuity CLI is unavailable, so the required checkpoint, push and PR remain pending.
+- **CCL-0079**: refresh the launcher’s built-in Top 20 and frontier provider routes from current IRE data and add a scheduled review PR ([issue #96](https://github.com/Pukujan/claude-code-launcher/issues/96), parent: none, dependencies: none, branch `ccl-0079-inferhub-route-sync`). PR #97 is open with auto-merge armed; initial CI found missing checkpoint metadata and stale provider assumptions in Mac tests, now corrected locally for a follow-up push.
 
 ## Queued
 
@@ -42,4 +42,4 @@ Phase: the launcher's built-in picker tables track IRE's current Top 20, and the
 
 ## Next atomic action
 
-Restore the pinned continuity CLI, checkpoint the verified change, push the branch, and open its review PR.
+Commit and checkpoint the CI fixes, push the branch, and verify the required PR checks.
