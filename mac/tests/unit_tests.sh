@@ -213,7 +213,7 @@ if command -v uv >/dev/null 2>&1; then
   check "last picks keep the orchestrator" "$(last_pick uc_orch)" "claude-ih-fast"
   check "first choice is the main seat" "$(head -1 "$UC_LIST" | cut -f1)" "claude-ih-main"
   check "no CKFF choice" "$(grep -ci ckff "$UC_LIST")" "0"
-  check "Top 20 listed" "$(grep -c "^$first_uc_id[[:space:]]" "$UC_LIST")" "1"
+  check "Top 20 listed" "$(grep -c "^${first_uc_id}[[:space:]]" "$UC_LIST")" "1"
   check "shim port" "$(grep -c "\"listen_port\": $UC_PORT" "$UC_DIR/config.json")" "1"
   unset UC_ORCH UC_WORKER
   next_after_fast="$(awk -F'\t' '$1=="claude-ih-fast" { found=1; next } found { print $1; exit }' "$UC_LIST")"

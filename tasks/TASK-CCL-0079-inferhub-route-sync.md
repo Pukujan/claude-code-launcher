@@ -127,17 +127,20 @@ Evidence:
 - PR #97 armed squash auto-merge on checkpoint SHA `9fa6e87ba0778881bd748fe56ead28ed88eae970`.
 - The pinned PCM gate rejected two checkpoint projections because they lacked the required `Decisions:` section.
 - Mac unit tests pass locally (107 passed); Bash syntax checks and `git diff --check` pass.
+- ShellCheck 0.9.0 then flagged an unbraced variable before a bracket expression in the new UltraCode assertion; that quoting issue is corrected locally.
+- Python CI found two remaining hard-coded rank-one route values in `tests/test_ultracode_windows_wizard.py`; the test now reads the current route from the built-in CSV.
 - The local dry run could not begin: its test copy tried to duplicate the existing ignored LiteLLM virtualenv into `/tmp` and hit the container disk quota. The partial task-created temp directory was removed; the user's local virtualenv and ignored Top 20 cache were preserved.
 - The continuity CLI is now installed from the pinned PCM source; `continuity issue verify` reports issue #96 OPEN, then exits with an error because this repository has no `.continuity/documents.json`.
 
 Changed:
-- `mac/tests/unit_tests.sh`, `mac/tests/dry_run.sh`, `tasks/TASK-CCL-0079-inferhub-route-sync.md`, and `checkpoints/CURRENT.md`.
+- `mac/tests/unit_tests.sh`, `mac/tests/dry_run.sh`, `tests/test_ultracode_windows_wizard.py`, `tasks/TASK-CCL-0079-inferhub-route-sync.md`, and `checkpoints/CURRENT.md`.
 
 Blocked/uncertain:
-- Updated CI has not run yet; the previous PR check run still reports failures against the earlier pushed SHA.
+- On PR head `910757b3a141825d38f2a7277f6aa231a2168d91`, the second CI run passed the continuity gate, Mac dry run, Bash 3.2, and Linux dry run. Lint failed on the corrected ShellCheck quoting issue; Python tests failed on the corrected route expectations; the Windows installer was still running at inspection.
+- Focused route/wizard tests now pass locally (40 passed, 4 skipped); Mac unit tests pass (107 passed); `continuity validate`, Ruff, Bash syntax and diff checks pass.
 
 Next:
-- Commit and checkpoint this correction, push the updated branch, then confirm all required PR checks pass.
+- Commit and checkpoint the ShellCheck and Windows wizard test corrections, push the updated branch, then confirm all required PR checks pass.
 
 ### 2026-10-07 08:14:03 UTC — Codex
 
