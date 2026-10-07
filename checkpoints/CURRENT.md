@@ -30,7 +30,7 @@ Phase: the launcher's built-in picker tables track IRE's current Top 20, and the
 
 ## Active
 
-- **CCL-0079**: refresh the launcher’s built-in Top 20 and frontier provider routes from current IRE data and add a scheduled review PR ([issue #96](https://github.com/Pukujan/claude-code-launcher/issues/96), parent: none, dependencies: none, branch `ccl-0079-inferhub-route-sync`). PR #97 is open with auto-merge armed; on head `07c55c55`, continuity, lint, Mac dry run, Bash 3.2 and Linux dry run passed. Python found one old rank-two fallback assumption, corrected locally; Windows installer was pending.
+- **CCL-0079**: the Top 20/frontier route-table refresh merged in PR #97 at `7891c113ce7fb4e4cb72d48521f96c6600156b6e`; issue #96 remains open for the Linux/macOS picker-sync follow-up ([issue #96](https://github.com/Pukujan/claude-code-launcher/issues/96), parent: none, dependencies: none, follow-up branch `codex/ccl-0079-model-picker-sync`). The launcher log showed that Claude Code settings sync rejected the six-field model rows and skipped provider options. The user-local picker now has 20 Top 20 and 20 frontier routes from IRE; CI and PR for the permanent repair are pending.
 
 ## Queued
 
@@ -42,4 +42,4 @@ Phase: the launcher's built-in picker tables track IRE's current Top 20, and the
 
 ## Next atomic action
 
-Commit and checkpoint the final Windows route expectation update, push the branch, and verify the required PR checks.
+Commit and checkpoint the Linux/macOS model-picker sync repair, push the follow-up branch, and verify the required PR checks.
