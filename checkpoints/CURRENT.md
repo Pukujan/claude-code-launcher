@@ -30,7 +30,7 @@ Phase: the launcher's built-in picker tables track IRE's current Top 20, and the
 
 ## Active
 
-- **CCL-0079**: refresh the launcher’s built-in Top 20 and frontier provider routes from current IRE data and add a scheduled review PR ([issue #96](https://github.com/Pukujan/claude-code-launcher/issues/96), parent: none, dependencies: none, branch `ccl-0079-inferhub-route-sync`). PR #97 is open with auto-merge armed; on head `910757b3`, the continuity gate, Mac dry run, Bash 3.2 and Linux dry run passed. ShellCheck and two Python route assertions failed and are corrected locally for the next push; Windows installer was pending.
+- **CCL-0079**: refresh the launcher’s built-in Top 20 and frontier provider routes from current IRE data and add a scheduled review PR ([issue #96](https://github.com/Pukujan/claude-code-launcher/issues/96), parent: none, dependencies: none, branch `ccl-0079-inferhub-route-sync`). PR #97 is open with auto-merge armed; on head `07c55c55`, continuity, lint, Mac dry run, Bash 3.2 and Linux dry run passed. Python found one old rank-two fallback assumption, corrected locally; Windows installer was pending.
 
 ## Queued
 
@@ -42,4 +42,4 @@ Phase: the launcher's built-in picker tables track IRE's current Top 20, and the
 
 ## Next atomic action
 
-Commit and checkpoint the ShellCheck and Windows wizard test corrections, push the branch, and verify the required PR checks.
+Commit and checkpoint the final Windows route expectation update, push the branch, and verify the required PR checks.

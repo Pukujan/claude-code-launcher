@@ -187,3 +187,24 @@ Blocked/uncertain:
 
 Next:
 - Verify all required CI checks and auto-merge on PR #97 at the pushed checkpoint SHA.
+
+### CI correction follow-up — 2026-10-07
+
+Completed:
+- Changed the Windows wizard test to assert that fallback selections come from current Top 20 routes or the configured ladder, while still checking the selected primary exactly.
+
+Decisions:
+- Keep the wizard test focused on route provenance and primary selection; current eligibility may legitimately change which configured fallback is chosen.
+
+Evidence:
+- On PR head `07c55c558b3791605d86725bcfb50bf421c41de3`, continuity, lint, Mac dry run, Bash 3.2 and Linux dry run passed; Python tests failed on the old rank-two fallback expectation. The Windows installer was still running at inspection.
+- Focused tests now pass locally (40 passed, 4 skipped); continuity validation and Ruff pass. Four skips include Windows wizard execution because PowerShell is unavailable locally.
+
+Changed:
+- `tests/test_ultracode_windows_wizard.py`, `tasks/TASK-CCL-0079-inferhub-route-sync.md`, and `checkpoints/CURRENT.md`.
+
+Blocked/uncertain:
+- Updated CI for this correction has not run. The prior Windows installer check remained in progress at last inspection.
+
+Next:
+- Commit and checkpoint this final route expectation update, push it, and verify all PR checks.

@@ -53,6 +53,11 @@ def top20_routes():
         return [row["model_ids"].split(";")[0].strip() for row in csv.DictReader(handle)]
 
 
+def configured_main_routes():
+    defaults = json.loads((REPO / "shared/ire/defaults.json").read_text(encoding="utf-8"))
+    return set(top20_routes()) | set(defaults["ladders"]["main"])
+
+
 # First run (no saved slots): sonnet, opus, fable 3 Enters each (default chains), haiku
 # Enter ("same chain as sonnet"), folder Enter, launch Down+Enter (UltraCode).
 SLOTS_DEFAULT = ",".join(["Enter"] * 10)
@@ -70,7 +75,9 @@ def test_ultracode_picks_orchestrator_and_worker(tmp_path):
     assert cfg["proxy"]["listen_port"] == 4241 + 4017
     assert cfg["proxy"]["anthropic_upstream"] == "http://127.0.0.1:4017"
     assert not [m for m in cfg["models"] if "ckff" in m["id"]]
-    assert result["sonnet"] == [top20_routes()[0], "ali/qwen3.8-flash", "cbcn/glm-5.3-flash"]
+    assert result["sonnet"][0] == top20_routes()[0]
+    assert len(result["sonnet"]) <= 3
+    assert set(result["sonnet"][1:]) <= configured_main_routes()
     assert result["haiku_same"] is True and picks["version"] == 2 and picks["slots"]["opus"][0] == "cb/gpt-6-astra"
     # Next run: Step 1 Enter keeps the saved slots, then folder, launch, orch, worker Enter.
     result2, _, _ = run(tmp_path, "Enter,Enter,Enter,Enter,Enter")
