@@ -164,3 +164,26 @@ Blocked/uncertain:
 
 Next:
 - Verify required checks on PR #97 at the new pushed checkpoint SHA and confirm auto-merge.
+
+### 2026-10-07 08:19:59 UTC — Codex
+
+<!-- continuity:checkpoint {"agent":"Codex","blocked":["The latest CI for these fixes has not run yet; local full Mac dry run could not duplicate the ignored LiteLLM virtualenv within the container disk quota."],"changed":["mac/tests/unit_tests.sh, tests/test_ultracode_windows_wizard.py, task and current checkpoint projections"],"completed":["Corrected the remaining ShellCheck quoting warning and Windows wizard assertions that hard-coded IRE rank-one provider IDs."],"decisions":["Have Mac and Windows picker tests read the selected route from the generated recommendation table so scheduled updates do not require hard-coded provider edits."],"evidence":["Focused route/wizard tests 40 passed, 4 skipped; Mac unit suite 107 passed; continuity validate VALID; Ruff, bash -n and git diff --check passed. CI on previous head passed gates, Mac dry run, Bash 3.2, Linux dry run; ShellCheck and two Python assertions were fixed."],"next_action":"Verify all required CI checks and auto-merge on PR #97 at the pushed checkpoint SHA.","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"CCL-0079","timestamp":"2026-10-07T08:19:59Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"1c6ef6e02f7f9b9aab5c54fb653f2193a2c0104bf880a9f06ae81c4d66efab6e","request_id":"97fd5b1a73d44ad0a16979a991ddc747","schema":"project-continuity.checkpoint-operation.v1","task_id":"CCL-0079"} -->
+
+Completed:
+- Corrected the remaining ShellCheck quoting warning and Windows wizard assertions that hard-coded IRE rank-one provider IDs.
+
+Evidence:
+- Focused route/wizard tests 40 passed, 4 skipped; Mac unit suite 107 passed; continuity validate VALID; Ruff, bash -n and git diff --check passed. CI on previous head passed gates, Mac dry run, Bash 3.2, Linux dry run; ShellCheck and two Python assertions were fixed.
+
+Decisions:
+- Have Mac and Windows picker tests read the selected route from the generated recommendation table so scheduled updates do not require hard-coded provider edits.
+
+Changed:
+- mac/tests/unit_tests.sh, tests/test_ultracode_windows_wizard.py, task and current checkpoint projections
+
+Blocked/uncertain:
+- The latest CI for these fixes has not run yet; local full Mac dry run could not duplicate the ignored LiteLLM virtualenv within the container disk quota.
+
+Next:
+- Verify all required CI checks and auto-merge on PR #97 at the pushed checkpoint SHA.
