@@ -1,12 +1,12 @@
 # Current Repository Checkpoint
 
-<!-- continuity:current {"active_task":"CCL-0079","active_task_file":"tasks/TASK-CCL-0079-inferhub-route-sync.md","protocol_version":"0.1.0-draft","schema":"project-continuity.current.v1"} -->
+<!-- continuity:current {"active_task":"CCL-0081","active_task_file":"tasks/TASK-CCL-0081-ire-oct7-model-refresh.md","protocol_version":"0.1.0-draft","schema":"project-continuity.current.v1"} -->
 
 This is an as-of projection; live GitHub issues own progression. Link the owning leaf, parent ancestry and dependencies for active work.
 
 ## Program state
 
-Phase: the launcher's built-in picker tables track IRE's current Top 20, and the launcher has a first-class Linux entry point and installer on `main`.
+Phase: the scheduled IRE refresh path is in place, and the October 7 source changes 9 of 20 Top 20 rows plus all 20 captured frontier rows; task CCL-0081 refreshes those snapshots. The launcher also has a first-class Linux entry point and installer on `main`.
 
 ## Completed
 
@@ -27,11 +27,12 @@ Phase: the launcher's built-in picker tables track IRE's current Top 20, and the
 - **CCL-0076**: a first-class Linux entry point and installer in a new `linux/` folder, so a Linux user gets the same one-command start without Docker. `linux/launch-claude-inferhub.sh` and `linux/stop-litellm.sh` are thin entries over the Linux-proven shared launcher body, and `linux/setup.sh` is a distro-aware, shell-rc-aware installer with `--check`/`--uninstall` ([issue #88](https://github.com/Pukujan/claude-code-launcher/issues/88), PR #89, merge `a903844`).
 - `linux-dry-run` is a required status check on `main` (repository settings, 2026-10-07). The job already existed and passed; it is now enforced next to `gates`, `lint`, `mac-dry-run`, `python-tests` and `bash 3.2 compatibility`.
 - **CCL-0077**: the shared launcher body gets the Windows launcher's model-slots step, so Mac and Linux can set all four [CC] slots (sonnet, opus, fable, haiku), each a first model and up to two fallbacks, instead of only sonnet's and fable's first models. Merged with `lint`, `gates`, `mac-dry-run`, `linux-dry-run`, `python-tests` and `bash 3.2 compatibility` all passing ([issue #91](https://github.com/Pukujan/claude-code-launcher/issues/91), PR #92, merge `82169e1`).
+- **CCL-0079**: built-in model routes now match IRE's pinned data, Linux/macOS model pickers show 20 Top 20 and 20 frontier routes, and the Linux picker preserves the user's CB DeepSeek choice ([issue #96](https://github.com/Pukujan/claude-code-launcher/issues/96), PRs #97/#98/#99, merges `7891c11`/`d67e0c9`/`5070ced`; all six required checks passed on PR #99). Issue #96 is CLOSED. A later source refresh is tracked separately under #107.
 - **CCL-0080**: the port 4000 house rule read "Never connect to, restart, stop or bind `127.0.0.1:4000`", which an agent followed literally and so refused to probe the live proxy, reporting routing as unproven. The rule now forbids changing 4000, keeps read-only probing allowed, and names the copy-proxy-then-merge path, in `AGENTS.md`, `PROJECT.md` and `README.md`. Merged with all six required checks passing ([issue #102](https://github.com/Pukujan/claude-code-launcher/issues/102), PR #105, merge `081970f`).
 
 ## Active
 
-- **CCL-0079**: the table refresh and Linux/macOS model-picker fix merged in PRs #97 and #98, but issue #96 was reopened after the user found a provider mismatch ([issue #96](https://github.com/Pukujan/claude-code-launcher/issues/96), parent: none, dependencies: none, active branch `codex/ccl-0079-ire-provider-roster`). The full local picker now has 20 Top 20 and 20 frontier choices; a user-local CB preference selects `cb/deepseek-v4.1-flash`. Latest IRE main still selects `alicn` for that family, conflicting with IRE issue #94 closure evidence. The preference persistence is under CI review; after merge, file the requested IRE issue log.
+- **CCL-0081**: the October 6 snapshot differs from IRE's October 7 source in 9 of 20 Top 20 rows and all 20 captured frontier rows; refresh the four built-in Top 20 tables and Windows offline frontier fallback from pinned IRE commit `c80166a2` ([issue #107](https://github.com/Pukujan/claude-code-launcher/issues/107), scope correction: [comment 6045326197](https://github.com/Pukujan/claude-code-launcher/issues/107#issuecomment-6045326197), parent: none, dependencies: none, branch `codex/ccl-0081-ire-oct7-model-refresh`).
 
 ## Queued
 
@@ -43,4 +44,4 @@ Phase: the launcher's built-in picker tables track IRE's current Top 20, and the
 
 ## Next atomic action
 
-Commit and checkpoint local provider-preference persistence, verify and merge its required checks, then file the user-requested IRE issue log.
+Generate the built-in Top 20 and Windows offline frontier tables from IRE commit `c80166a2`, update affected expectations, and open the linked review PR.

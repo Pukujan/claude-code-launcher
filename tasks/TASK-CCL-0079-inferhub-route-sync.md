@@ -1,8 +1,8 @@
 # TASK CCL-0079: Keep launcher model families paired with IRE's current provider routes
 
-<!-- continuity:task {"acceptance":["All four built-in Top 20 artifacts use the current IRE family, rank, eligibility, prices, and selected provider route.","No built-in Top 20 row has a blank or malformed provider route; each ID matches the family in the pinned IRE source fixture.","The frontier importer preserves route, health, prices, and preferred endpoint; Windows offline frontier routes match current IRE recommendations.","A scheduled and manually dispatched workflow opens a review PR when generated fallback tables drift and never merges them automatically.","Tests cover all 20 Top 20 model/provider pairs and frontier routes.","No seat or shim routing changes, fallback chain changes, port 4000 activity, or secrets.","The Linux/macOS Claude Code model picker accepts the six-field Top 20 table, displays provider IDs, and includes IRE's first 20 frontier best routes.","Local provider preferences are re-applied after each IRE fetch to the derived Top 20 bundle, picker table and CSV, and must select a route currently present for that family."],"depends_on":[],"goal":"Keep the launcher's free Top 20 and frontier pickers aligned to IRE's actual InferHub provider routes, including the offline fallback.","id":"CCL-0079","issue_url":"https://github.com/Pukujan/claude-code-launcher/issues/96","next_action":"Merge the local full-roster refresh and provider-preference persistence, then file the user-requested IRE observational issue log.","owner":"Alex; executor agent implements","priority":"P2","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"active","why":"The checked-in Top 20 fallback has stale or mismatched model/provider pairs, including an invalid ag/ route for Claude Sonnet 4.6. Mac can use live IRE data, but Windows and offline/cache paths can select a route left behind after rankings changed. A reviewed scheduled refresh prevents future silent drift."} -->
+<!-- continuity:task {"acceptance":["All four built-in Top 20 artifacts use the current IRE family, rank, eligibility, prices, and selected provider route.","No built-in Top 20 row has a blank or malformed provider route; each ID matches the family in the pinned IRE source fixture.","The frontier importer preserves route, health, prices, and preferred endpoint; Windows offline frontier routes match current IRE recommendations.","A scheduled and manually dispatched workflow opens a review PR when generated fallback tables drift and never merges them automatically.","Tests cover all 20 Top 20 model/provider pairs and frontier routes.","No seat or shim routing changes, fallback chain changes, port 4000 activity, or secrets.","The Linux/macOS Claude Code model picker accepts the six-field Top 20 table, displays provider IDs, and includes IRE's first 20 frontier best routes.","Local provider preferences are re-applied after each IRE fetch to the derived Top 20 bundle, picker table and CSV, and must select a route currently present for that family."],"depends_on":[],"goal":"Keep the launcher's free Top 20 and frontier pickers aligned to IRE's actual InferHub provider routes, including the offline fallback.","id":"CCL-0079","issue_url":"https://github.com/Pukujan/claude-code-launcher/issues/96","next_action":"none; issue #96 closed after PRs #97, #98, and #99 merged.","owner":"Alex; executor agent implements","priority":"P2","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"completed","why":"The checked-in Top 20 fallback has stale or mismatched model/provider pairs, including an invalid ag/ route for Claude Sonnet 4.6. Mac can use live IRE data, but Windows and offline/cache paths can select a route left behind after rankings changed. A reviewed scheduled refresh prevents future silent drift."} -->
 
-- Status: active
+- Status: completed
 - Owner: Alex; executor agent implements
 - Priority: P2
 - Depends on: none
@@ -32,7 +32,7 @@ Seat assignment, shim routing, `shared/litellm/config/inferhub_fallbacks.yaml`, 
 - [x] Tests cover all Top 20 model/provider pairs and frontier routes.
 - [x] No seat or shim routing changes, fallback chain changes, live port 4000 activity, or secrets.
 - [x] Linux/macOS Claude Code model-picker sync accepts the six-field Top 20 table, displays provider IDs, and includes IRE's first 20 frontier best routes.
-- [ ] Local provider preferences are re-applied after each IRE fetch to the derived Top 20 bundle, picker table and CSV, and must select a route currently present for that family.
+- [x] Local provider preferences are re-applied after each IRE fetch to the derived Top 20 bundle, picker table and CSV, and must select a route currently present for that family.
 
 ## Evidence and interpretation
 
@@ -338,3 +338,25 @@ Blocked/uncertain:
 
 Next:
 - Open a linked PR, verify required CI and merge, then file the user-requested IRE issue log.
+
+### Final delivery projection — 2026-10-07
+
+Completed:
+- The provider snapshot refresh, Linux/macOS picker repair, and local provider-preference persistence are merged in PRs #97, #98, and #99. The user's CB DeepSeek preference survives later IRE fetches.
+
+Decisions:
+- Treat the three merged PRs as completion of CCL-0079; preserve all earlier checkpoint history.
+
+Evidence:
+- PR #97 merged as `7891c113ce7fb4e4cb72d48521f96c6600156b6e`; PR #98 as `d67e0c9c66e1e5484984b40f71aa759ba98df02a`; PR #99 as `5070ced42ace2ce899942ab316c3e66fb2885fca`.
+- PR #99's required checks all passed: `gates`, `lint`, `mac-dry-run`, `linux-dry-run`, `python-tests`, and `bash 3.2 compatibility`. The supplemental Windows installer check also passed.
+- GitHub issue #96 is CLOSED. Its completion receipt is recorded in the October 7 comment.
+
+Changed:
+- `shared/ire/`, `shared/litellm/config/top20-builtin.csv`, Windows and Mac launcher tables, the scheduled refresh workflow, tests, and local provider-preference support.
+
+Blocked/uncertain:
+- None for this task. A later IRE data refresh is tracked separately by issue #107.
+
+Next:
+- None. Preserve this completed record; follow current IRE list changes under the new owning issue.

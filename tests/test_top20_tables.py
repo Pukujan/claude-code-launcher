@@ -53,9 +53,9 @@ def test_builtin_csv_matches_windows():
 def test_default_model_is_rank_one_everywhere():
     win = (REPO / "windows" / "launch-claude-inferhub.ps1").read_text(encoding="utf-8-sig")
     mac = (REPO / "mac" / "Launch Claude InferHub.command").read_text(encoding="utf-8")
-    assert '$DefaultModelId = "alicn/deepseek-v4.1-flash"' in win
-    assert 'DEFAULT_MODEL_ID="alicn/deepseek-v4.1-flash"' in mac
-    assert windows_rows()[0][2] == "alicn/deepseek-v4.1-flash"
+    assert '$DefaultModelId = "cb/deepseek-v4.1-flash"' in win
+    assert 'DEFAULT_MODEL_ID="cb/deepseek-v4.1-flash"' in mac
+    assert windows_rows()[0][2] == "cb/deepseek-v4.1-flash"
 
 
 def test_top20_routes_match_the_pinned_ire_family_map():
