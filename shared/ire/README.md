@@ -97,6 +97,25 @@ helper fails. The Mac picker uses the fetched Top 20; Windows' live picker still
 its built-in table, now refreshed through the reviewed scheduled workflow. The ladder
 picker (issue #5) is the part that reads `CCL_IRE_JSON`.
 
+### Local provider preferences (Linux/macOS)
+
+When a preferred provider should be used instead of IRE's current first route, create
+`~/.config/inferhub/model-provider-preferences.json` as a JSON object keyed by the exact
+IRE model-family name. For example:
+
+```json
+{
+  "DeepSeek V4.1 Flash": "cb/deepseek-v4.1-flash"
+}
+```
+
+The launcher checks that each preferred route is still present in IRE's current route
+list for that family. Valid preferences are applied to the local IRE bundle, picker
+table and Top 20 CSV after every fetch, so the full Top 20 and frontier rosters stay
+current while the chosen provider remains selected. Invalid or stale preferences are
+ignored and logged; they never prevent launch. This file is local user configuration
+and must not be committed or include credentials.
+
 ## Output schema
 
 These six top-level keys, plus the optional `frontier` key described below. The ladder
