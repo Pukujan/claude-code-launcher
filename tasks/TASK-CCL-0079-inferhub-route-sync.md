@@ -315,3 +315,26 @@ Blocked/uncertain:
 
 Next:
 - Commit and checkpoint the preference persistence, verify required CI, merge the follow-up, then file the IRE issue log.
+
+### 2026-10-07 08:52:19 UTC — Codex
+
+<!-- continuity:checkpoint {"agent":"Codex","blocked":[],"changed":["none"],"completed":["Added a Linux/macOS provider-preference hook that preserves the user's CB DeepSeek choice while refreshing the complete Top 20 and frontier lists from IRE; refreshed the local 20 plus 20 picker."],"decisions":["no new decisions"],"evidence":["Live IRE main f4639620b9; local derived IRE bundle has 20 Top 20 families and 93 frontier routes, with 20 first-20 best routes; Claude Code settings have 20 Top 20 and 20 frontier entries and rank 1 ih/cb/deepseek-v4.1-flash; continuity validate VALID; no local tests run."],"next_action":"Open a linked PR, verify required CI and merge, then file the user-requested IRE issue log.","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"CCL-0079","timestamp":"2026-10-07T08:52:19Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"cd48ec8a9cf5622940d835fe99e9baa0e13d29fe489e9d5590e617878b81b85c","request_id":"eb74dc1a81064f52a6b57b2ff5754754","schema":"project-continuity.checkpoint-operation.v1","task_id":"CCL-0079"} -->
+
+Completed:
+- Added a Linux/macOS provider-preference hook that preserves the user's CB DeepSeek choice while refreshing the complete Top 20 and frontier lists from IRE; refreshed the local 20 plus 20 picker.
+
+Evidence:
+- Live IRE main f4639620b9; local derived IRE bundle has 20 Top 20 families and 93 frontier routes, with 20 first-20 best routes; Claude Code settings have 20 Top 20 and 20 frontier entries and rank 1 ih/cb/deepseek-v4.1-flash; continuity validate VALID; no local tests run.
+
+Decisions:
+- no new decisions
+
+Changed:
+- none
+
+Blocked/uncertain:
+- none
+
+Next:
+- Open a linked PR, verify required CI and merge, then file the user-requested IRE issue log.
