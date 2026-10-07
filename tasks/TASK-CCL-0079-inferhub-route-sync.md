@@ -208,3 +208,26 @@ Blocked/uncertain:
 
 Next:
 - Commit and checkpoint this final route expectation update, push it, and verify all PR checks.
+
+### 2026-10-07 08:23:19 UTC — Codex
+
+<!-- continuity:checkpoint {"agent":"Codex","blocked":["CI for the new head has not run; the Windows installer check on the previous head remained in progress."],"changed":["tests/test_ultracode_windows_wizard.py, task and current checkpoint projections"],"completed":["Updated the Windows wizard test to validate the selected primary and accept configured, currently eligible fallback routes."],"decisions":["Test provider route provenance and primary choice without freezing mutable IRE eligibility outcomes."],"evidence":["Focused tests 40 passed, 4 skipped; continuity validate VALID; Ruff and diff checks passed. PR head 07c55c55 had continuity, lint, Mac, Bash 3.2 and Linux checks pass; Python failed on the corrected rank-two fallback expectation."],"next_action":"Verify all required checks and auto-merge on PR #97 at the new pushed checkpoint SHA.","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"CCL-0079","timestamp":"2026-10-07T08:23:19Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"2b196f0dc41844089a7b8c6fdcf65a26664c1eb36824d2ec40b43e91c3e4e54e","request_id":"c21cf3dbb37f4abc8064c51eb058dce7","schema":"project-continuity.checkpoint-operation.v1","task_id":"CCL-0079"} -->
+
+Completed:
+- Updated the Windows wizard test to validate the selected primary and accept configured, currently eligible fallback routes.
+
+Evidence:
+- Focused tests 40 passed, 4 skipped; continuity validate VALID; Ruff and diff checks passed. PR head 07c55c55 had continuity, lint, Mac, Bash 3.2 and Linux checks pass; Python failed on the corrected rank-two fallback expectation.
+
+Decisions:
+- Test provider route provenance and primary choice without freezing mutable IRE eligibility outcomes.
+
+Changed:
+- tests/test_ultracode_windows_wizard.py, task and current checkpoint projections
+
+Blocked/uncertain:
+- CI for the new head has not run; the Windows installer check on the previous head remained in progress.
+
+Next:
+- Verify all required checks and auto-merge on PR #97 at the new pushed checkpoint SHA.
