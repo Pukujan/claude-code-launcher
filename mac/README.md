@@ -74,11 +74,23 @@ running, the script skips straight to the questions:
    - `x` to quit
 
    Then press Return to confirm.
-2. **Main model**: the IRE Top 20. Press Return for the default, DeepSeek V4.1
-   Flash.
-3. **Advisor model**: press Return for OFF (the default), or type a number.
+2. **Launch with**: `[CC]`, or UltraCode (arrow keys, Return picks).
+3. **Model slots**: the four [CC] slots — `sonnet` (the main conversation),
+   `opus` (planning), `fable` (the advisor) and `haiku` (background calls).
+   Up/Down move, Return picks, Left goes back a step, and `t` / `f` switch
+   between the IRE Top 20 and the frontier list. Each slot takes a first model
+   and up to two fallbacks; `haiku` can be set to the same chain as `sonnet`
+   with one pick. When slots were saved before, the step opens on "Use the
+   saved slots" with the four chains listed and "Change the slots" underneath.
+   The saved chains are used by every launch, Paseo included, and they are
+   applied through `apply_inferhub_seat.py --slot`, so all four chains reach the
+   running proxy.
+4. **Main and advisor**: skipped when the slots step ran, because it already set
+   `sonnet`'s and `fable`'s first models. Without a terminal, with
+   `CLAUDE_IH_MAIN` set, or with `CLAUDE_IH_SLOTS=off`, the slots step is skipped
+   and these two prompts work exactly as before.
 
-Claude Code then opens in that folder. To update the launcher, `git pull`.
+[CC] then opens in that folder. To update the launcher, `git pull`.
 
 ### Where the model list comes from
 
@@ -114,6 +126,7 @@ from it instead of the Top 20.
 | `LITELLM_HEALTH_TIMEOUT` | `300` | Seconds to wait for the proxy |
 | `INFERHUB_TOP20_CSV` | `shared/litellm/config/top20-builtin.csv` | A real IRE Top 20 CSV, if you have one |
 | `CLAUDE_IH_PROJECT`, `CLAUDE_IH_MAIN`, `CLAUDE_IH_ADVISOR` | (ask) | Skip a picker. The old names `ACS_FOLDER`, `ACS_MAIN_ID`, `ACS_ADVISOR_ID` still work. |
+| `CLAUDE_IH_SLOTS` | (ask; `off` skips) | `off` skips the model-slots step, so the saved or default chains are used and the main/advisor prompts come back. Setting `CLAUDE_IH_MAIN` skips it too. |
 | `CCL_IRE_OFFLINE` | unset | `1` skips GitHub and uses the cached or built-in list |
 | `CLAUDE_IH_LAUNCH` | (ask; `claude` with no terminal) | `claude` or `ultracode` skips the "launch with" picker. UltraCode runs [UltraCode-Shim](https://github.com/OnlyTerp/UltraCode-Shim) (pinned commit, cached in `~/.cache/claude-code-launcher/ultracode-shim`, never installed globally) on port proxy port + 4241, with the InferHub seats, the Top 20 and the shim's own usable routes (CKFF routes excluded) as options. You pick an orchestrator and a worker next; the launcher preselects them in the shim. |
 | `CLAUDE_IH_UC_ORCH` | (ask; last pick, else `claude-ih-main`) | UltraCode orchestrator model id (handles planning and questions). |
@@ -128,8 +141,9 @@ checkout's LiteLLM first, and never stops anything by port.
 ## Tests
 
 - `mac/tests/unit_tests.sh [bash]` runs offline checks on the model table, the
-  key reading, the folder navigation, the folder picker with piped answers, the
-  environment clearing and the stop script.
+  key reading, the model-slots helpers (chain editing, the saved chains in
+  `last-picks.json`, the no-terminal skip), the folder navigation, the folder
+  picker with piped answers, the environment clearing and the stop script.
 - `mac/tests/dry_run.sh [port] [bash]` copies `mac/` and `shared/` into a temp
   folder with a throwaway home, runs `setup.sh`, then `claude-acs` with a fake
   `claude` and a real LiteLLM on a test port (4100 by default; it refuses 4000).

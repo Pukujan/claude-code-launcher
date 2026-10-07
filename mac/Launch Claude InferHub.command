@@ -66,6 +66,13 @@ fi
 LOG_FILE="$LOG_DIR/launcher.log"
 VENV="$LITELLM_DIR/.litellm-venv"
 VENV_PY="$VENV/bin/python"
+# The slot helpers (issue #91) only need the standard library, plus PyYAML for
+# the fallback chains (slots.py falls back to its built-in chains without it).
+# The launcher's venv is built before the pickers run, but the helpers also work
+# when the launcher is sourced on its own (the unit tests), so fall back to a
+# system python3 when the venv is not there yet.
+SLOTS_PY="$VENV_PY"
+[ -x "$SLOTS_PY" ] || SLOTS_PY="$(command -v python3 2>/dev/null || printf 'python3')"
 
 # Pinned in shared/litellm/requirements.txt and requirements-overrides.txt,
 # the same files Windows installs from. The overrides pin fastapi/starlette/
@@ -773,8 +780,10 @@ last_pick() {
 # last time when this run didn't make them).
 save_last_picks() {
   local orch="${UC_ORCH-$(last_pick uc_orch)}" worker="${UC_WORKER-$(last_pick uc_worker)}"
-  mkdir -p "$STATE_DIR" && printf '{\n  "launch": "%s",\n  "uc_orch": "%s",\n  "uc_worker": "%s"\n}\n' \
-    "$LAUNCH" "$orch" "$worker" > "$LAST_PICKS"
+  mkdir -p "$STATE_DIR" || return 1
+  # The whole document is rewritten, so the slot chains pick_slots saved survive
+  # a launch-target change (issue #91).
+  slots_file launch "$LAUNCH" "$orch" "$worker" || return 1
 }
 
 # Writes the cache's config.json and the choices (id<TAB>label) to UC_LIST.
@@ -873,6 +882,365 @@ run_ultracode() {
   exec "$UC_DIR/bin/ultracode" --model "$UC_ORCH" --permission-mode bypassPermissions
 }
 
+# ---- per-slot model picks (issue #91) ----------------------------------------
+# Windows opens with a "model slots" step (windows/launch-claude-inferhub.ps1).
+# The shared body never had one, so on Mac and Linux the opus (planning) and
+# haiku (background) chains, and every slot's fallbacks, could not be set at all:
+# apply_seat() only ever passed --main and --advisor, which are the FIRST model of
+# sonnet and fable. This is the same step for both platforms: pick each of the
+# four [CC] slots' first model and up to two fallbacks with the arrow keys, save
+# the chains in last-picks.json under "slots" (the shape Windows writes), and
+# hand all four to apply_inferhub_seat.py --slot.
+SLOTS_ORDER="sonnet opus fable haiku"
+SLOT_CHAINS=()
+SLOTS_PICKED=""
+SLOT_CATALOG=""
+SLOT_LIST="top20"
+
+slot_num() {
+  case "$1" in
+    sonnet) printf '0' ;;
+    opus)   printf '1' ;;
+    fable)  printf '2' ;;
+    haiku)  printf '3' ;;
+  esac
+}
+
+slot_chain() { printf '%s' "${SLOT_CHAINS[$(slot_num "$1")]:-}"; }
+
+slot_chain_text() {
+  local c
+  c="$(slot_chain "$1")"
+  if [ -n "$c" ]; then printf '%s' "$(printf '%s' "$c" | tr ' ' '-')"; else printf '(none)'; fi
+}
+
+slot_title() {
+  case "$1" in
+    sonnet) printf 'sonnet (main conversation)' ;;
+    opus)   printf 'opus (planning)' ;;
+    fable)  printf 'fable (advisor)' ;;
+    haiku)  printf 'haiku (background)' ;;
+  esac
+}
+
+# slot_arg SLOT -> "name=id1,id2,id3" for apply_inferhub_seat.py --slot.
+slot_arg() { printf '%s=%s' "$1" "$(slot_chain "$1" | tr ' ' ',')"; }
+
+# slot_name_of ID -> the catalog's display name, else the id itself.
+slot_name_of() {
+  local id="$1" tab x name rest
+  tab="$(printf '\t')"
+  while IFS="$tab" read -r x name rest; do
+    [ "$x" = "$id" ] && { printf '%s' "$name"; return 0; }
+  done <<EOF
+$SLOT_CATALOG
+EOF
+  printf '%s' "$id"
+}
+
+# chain_at CHAIN RUNG -> the RUNG-th id (1-based), empty when the chain is shorter.
+chain_at() {
+  local c="$1" r="$2" i=1 x
+  for x in $c; do
+    [ "$i" = "$r" ] && { printf '%s' "$x"; return 0; }
+    i=$((i + 1))
+  done
+  printf ''
+}
+
+# chain_set CHAIN RUNG ID -> the new chain. An empty ID drops that rung and
+# everything after it, which is the "none (no further fallback)" choice. A real
+# pick keeps the rungs below it (deduped, at most 3), the same as the Windows
+# step, so changing the first model does not silently discard the fallbacks.
+chain_set() {
+  local c="$1" r="$2" id="$3" i=1 out="" x
+  for x in $c; do
+    if [ "$i" -lt "$r" ]; then
+      out="$out $x"
+    elif [ "$i" = "$r" ]; then
+      [ -n "$id" ] && out="$out $id"
+    elif [ -n "$id" ]; then
+      out="$out $x"
+    fi
+    i=$((i + 1))
+  done
+  if [ "$r" -ge "$i" ] && [ -n "$id" ]; then out="$out $id"; fi
+  printf '%s' "$(printf '%s' "$out" | tr ' ' '\n' | awk 'NF && !seen[$0]++' \
+    | head -3 | tr '\n' ' ' | sed 's/^ *//; s/ *$//')"
+}
+
+# The pickable routes as TSV, read once per launch: id, name, rank, eligible,
+# price_in, price_out, list. ladder_cli.py catalog is the shared source (Top 20
+# plus opted-in extras), so the editor and the ladder picker cannot drift.
+slot_catalog_load() {
+  SLOT_CATALOG="$("$SLOTS_PY" "$LADDER_CLI" catalog 2>/dev/null | "$SLOTS_PY" -c '
+import json, sys
+try:
+    rows = json.load(sys.stdin)
+except Exception:
+    rows = []
+for r in rows:
+    print("\t".join([
+        str(r.get("id", "")), str(r.get("name", "")), str(r.get("rank", "")),
+        "1" if r.get("eligible") else "0",
+        str(r.get("price_in", "")), str(r.get("price_out", "")),
+        str(r.get("list", "")),
+    ]))
+' 2>/dev/null)"
+}
+
+# One rung of one slot: an arrow-key list. Sets SLOT_CHOICE to the chosen id
+# ("" = none, "@sonnet" = haiku follows sonnet). Returns 1 when Left is pressed,
+# so the caller can step back.
+slot_rung_pick() {
+  # slot_rung_pick <slot> <rung> <want> <taken> <allow_same>
+  local slot="$1" rung="$2" want="$3" taken="$4" allow_same="$5"
+  local idx=0 key i n tab id name rank elig pin pout list tag star line
+  tab="$(printf '\t')"
+  SLOT_IDS=(); PICKER_LINES=()
+  if [ "$allow_same" = "1" ]; then
+    SLOT_IDS[0]="@sonnet"
+    PICKER_LINES[0]="   same chain as sonnet: $(slot_chain_text sonnet)"
+  fi
+  while IFS="$tab" read -r id name rank elig pin pout list; do
+    [ -n "$id" ] || continue
+    [ "$list" = "$SLOT_LIST" ] || continue
+    case " $taken " in *" $id "*) continue ;; esac
+    if [ "$elig" = "1" ]; then tag="eligible"; else tag="gated"; fi
+    star=" "
+    [ "$id" = "$want" ] && star="*"
+    n=${#SLOT_IDS[@]}
+    SLOT_IDS[n]="$id"
+    PICKER_LINES[n]="$(printf '%s%3s  %-28s %-42s %-8s  ~%s in/%s out per 1M' \
+      "$star" "$rank" "$name" "$id" "$tag" "$pin" "$pout")"
+  done <<EOF
+$SLOT_CATALOG
+EOF
+  if [ "$rung" -gt 1 ]; then
+    n=${#SLOT_IDS[@]}
+    SLOT_IDS[n]=""; PICKER_LINES[n]="   none (no further fallback)"
+  fi
+  i=0
+  while [ "$i" -lt "${#SLOT_IDS[@]}" ]; do
+    [ "${SLOT_IDS[$i]}" = "$want" ] && { idx=$i; break; }
+    i=$((i + 1))
+  done
+  while :; do
+    case "$rung" in
+      1) line="first model" ;;
+      2) line="2nd model (fallback 1) after $(chain_at "$(slot_chain "$slot")" 1)" ;;
+      *) line="3rd model (fallback 2) after $(chain_at "$(slot_chain "$slot")" 2)" ;;
+    esac
+    show_picker "${#SLOT_IDS[@]}" "$idx" "Slot $(slot_title "$slot"): $line   now: $(slot_chain_text "$slot")" \
+      "Up/Down move. Enter picks. Left = back a step. t = Top 20, f = frontier. Esc quits." \
+      "Prices are per 1M tokens. gated = ranked but not currently recommendation-eligible. list: $SLOT_LIST"
+    key="$(read_menu_key)"
+    case "$key" in
+      UP|DOWN|PGUP|PGDN|HOME|END) idx="$(move_index "$idx" "${#SLOT_IDS[@]}" "$key" 10)" ;;
+      ENTER|RIGHT) break ;;
+      LEFT) return 1 ;;
+      t) SLOT_LIST="top20"; return 2 ;;
+      f) SLOT_LIST="frontier"; return 2 ;;
+      ESC) die "Cancelled." ;;
+    esac
+  done
+  SLOT_CHOICE="${SLOT_IDS[$idx]}"
+}
+
+# The four chains, saved. last-picks.json also holds launch and the UltraCode
+# picks, so read/modify/write the whole document instead of replacing it.
+slots_file() {  # slots_file load | save <haiku_same> <sonnet> <opus> <fable> <haiku>
+  "$SLOTS_PY" - "$LAST_PICKS" "$@" <<'PY'
+import json, os, sys
+
+path, mode = sys.argv[1], sys.argv[2]
+
+
+def load():
+    try:
+        with open(path, encoding="utf-8") as fh:
+            doc = json.load(fh)
+        return doc if isinstance(doc, dict) else {}
+    except Exception:
+        return {}
+
+
+doc = load()
+
+if mode == "load":
+    slots = doc.get("slots") or {}
+    if not slots:
+        raise SystemExit(1)
+    same = bool(slots.get("haiku_same"))
+    for name in ("sonnet", "opus", "fable", "haiku"):
+        chain = [str(x) for x in (slots.get(name) or []) if x]
+        if name == "haiku" and same:
+            chain = [str(x) for x in (slots.get("sonnet") or []) if x]
+        print(name + "\t" + " ".join(chain))
+elif mode == "save":
+    doc.setdefault("version", 2)
+    slots = {}
+    for i, name in enumerate(("sonnet", "opus", "fable", "haiku")):
+        slots[name] = [x for x in sys.argv[4 + i].split() if x]
+    slots["haiku_same"] = sys.argv[3] == "1"
+    doc["slots"] = slots
+elif mode == "launch":
+    doc.setdefault("version", 2)
+    doc["launch"] = sys.argv[3]
+    doc["uc_orch"] = sys.argv[4]
+    doc["uc_worker"] = sys.argv[5]
+
+os.makedirs(os.path.dirname(path), exist_ok=True)
+tmp = path + ".tmp"
+with open(tmp, "w", encoding="utf-8") as fh:
+    fh.write(json.dumps(doc, indent=2) + "\n")
+os.replace(tmp, path)
+PY
+}
+
+# Fill SLOT_CHAINS from last-picks.json. Returns 1 when nothing is saved yet.
+slots_saved_load() {
+  local out slot chain
+  out="$(slots_file load 2>/dev/null)" || return 1
+  [ -n "$out" ] || return 1
+  while IFS="$(printf '\t')" read -r slot chain; do
+    [ -n "$slot" ] && SLOT_CHAINS[$(slot_num "$slot")]="$chain"
+  done <<EOF
+$out
+EOF
+  return 0
+}
+
+# Fill SLOT_CHAINS from the resolver (seat file first, then the yaml defaults),
+# so the editor opens on what the proxy is actually using.
+slots_default_load() {
+  local out slot chain
+  out="$("$SLOTS_PY" - "$LITELLM_DIR/scripts" "$LITELLM_DIR/config/inferhub_seat.json" \
+    "$LITELLM_DIR/config/inferhub_fallbacks.yaml" <<'PY' 2>/dev/null
+import json, sys
+from pathlib import Path
+
+sys.path.insert(0, sys.argv[1])
+import slots
+
+seat = {}
+try:
+    with open(sys.argv[2], encoding="utf-8-sig") as fh:
+        seat = json.load(fh)
+except Exception:
+    seat = {}
+chains = slots.resolve_slots(seat, None, Path(sys.argv[3]))
+for name in slots.SLOTS:
+    print(name + "\t" + " ".join(chains[name]))
+PY
+)" || return 1
+  [ -n "$out" ] || return 1
+  while IFS="$(printf '\t')" read -r slot chain; do
+    [ -n "$slot" ] && SLOT_CHAINS[$(slot_num "$slot")]="$chain"
+  done <<EOF
+$out
+EOF
+  return 0
+}
+
+slot_summary_lines() {
+  local slot
+  for slot in $SLOTS_ORDER; do
+    printf '      %-7s %s\n' "$slot" "$(slot_chain_text "$slot")"
+  done
+}
+
+# The slots step. Interactive only: with no terminal, CLAUDE_IH_SLOTS=off, or
+# CLAUDE_IH_MAIN set (scripts, the dry run), it changes nothing and apply_seat
+# keeps its --main/--advisor behaviour.
+pick_slots() {
+  local slot idx=0 key i step total saved=0 haiku_same=0 want taken entry rung allow rc line STEPS
+  SLOTS_PICKED=""
+  if slots_saved_load; then
+    saved=1
+  else
+    slots_default_load
+  fi
+  # haiku follows sonnet only when the chains actually match and are non-empty.
+  haiku_same=0
+  if [ -n "$(slot_chain haiku)" ] && [ "$(slot_chain haiku)" = "$(slot_chain sonnet)" ]; then
+    haiku_same=1
+  fi
+  if [ "${CLAUDE_IH_SLOTS:-}" = "off" ] || [ -n "${CLAUDE_IH_MAIN:-}" ] \
+     || [ ! -t 0 ] || ! _have_tty; then
+    return 0
+  fi
+  slot_catalog_load
+  # Step 1: keep the saved chains or change them.
+  if [ "$saved" = "1" ]; then
+    PICKER_LINES=("Use the saved slots")
+    while IFS= read -r line; do PICKER_LINES[${#PICKER_LINES[@]}]="$line"; done <<EOF
+$(slot_summary_lines)
+EOF
+    PICKER_LINES[${#PICKER_LINES[@]}]="Change the slots"
+    while :; do
+      show_picker "${#PICKER_LINES[@]}" "$idx" \
+        "Step 1: model slots (sonnet = main, opus = planning, fable = advisor, haiku = background)" \
+        "Up/Down move. Enter picks. Esc quits." \
+        "The saved slots are used by every launch, Paseo included. Change them here any time."
+      key="$(read_menu_key)"
+      case "$key" in
+        UP|DOWN|PGUP|PGDN|HOME|END) idx="$(move_index "$idx" "${#PICKER_LINES[@]}" "$key" 10)" ;;
+        ENTER|RIGHT) break ;;
+        ESC) die "Cancelled." ;;
+      esac
+    done
+    if [ "$idx" -eq 0 ]; then
+      SLOTS_PICKED=1
+      log "Slots (saved): $(slot_chain_text sonnet) | $(slot_chain_text opus) | $(slot_chain_text fable) | $(slot_chain_text haiku)"
+      return 0
+    fi
+  fi
+  # Walk the twelve rungs: four slots, each a first model and two fallbacks.
+  STEPS=()
+  for slot in $SLOTS_ORDER; do
+    for i in 1 2 3; do STEPS[${#STEPS[@]}]="$slot:$i"; done
+  done
+  total=${#STEPS[@]}
+  step=0
+  while [ "$step" -lt "$total" ]; do
+    entry="${STEPS[$step]}"
+    slot="${entry%%:*}"
+    rung="${entry##*:}"
+    want="$(chain_at "$(slot_chain "$slot")" "$rung")"
+    taken=""
+    i=1
+    while [ "$i" -lt "$rung" ]; do
+      taken="$taken $(chain_at "$(slot_chain "$slot")" "$i")"
+      i=$((i + 1))
+    done
+    allow=0
+    [ "$slot" = "haiku" ] && [ "$rung" = "1" ] && allow=1
+    rc=0
+    slot_rung_pick "$slot" "$rung" "$want" "$taken" "$allow" || rc=$?
+    if [ "$rc" = "1" ]; then
+      # Left: back a rung, or stay on the first one.
+      [ "$step" -gt 0 ] && step=$((step - 1))
+      continue
+    fi
+    # rc 2 is a list toggle (t / f): redraw this rung.
+    [ "$rc" = "2" ] && continue
+    if [ "$SLOT_CHOICE" = "@sonnet" ]; then
+      haiku_same=1
+      SLOT_CHAINS[$(slot_num haiku)]="$(slot_chain sonnet)"
+      step=$total
+      continue
+    fi
+    [ "$slot" = "haiku" ] && [ "$rung" = "1" ] && haiku_same=0
+    SLOT_CHAINS[$(slot_num "$slot")]="$(chain_set "$(slot_chain "$slot")" "$rung" "$SLOT_CHOICE")"
+    step=$((step + 1))
+  done
+  slots_file save "$haiku_same" "$(slot_chain sonnet)" "$(slot_chain opus)" \
+    "$(slot_chain fable)" "$(slot_chain haiku)" || log "warning: could not save the slots"
+  SLOTS_PICKED=1
+  log "Slots: sonnet=$(slot_chain_text sonnet) opus=$(slot_chain_text opus) fable=$(slot_chain_text fable) haiku=$(slot_chain_text haiku)"
+}
+
 # ---- fallback ladders (issue #5) ----------------------------------------------
 # After each seat is picked, show its default fallback ladder and let Alex
 # accept it (Enter) or pick up to 3 rungs. Applied to the running proxy after
@@ -918,14 +1286,24 @@ apply_ladder() {
 
 # ---- seat + Claude settings ---------------------------------------------------
 apply_seat() {
-  # --main / --advisor set the first model of the sonnet and fable slots; the rest of
-  # each chain, and the opus and haiku slots, come from the saved or default chains.
-  log "Slots: sonnet first=$MAIN_ID fable first=${ADVISOR_ID:-default} through LiteLLM ..."
+  local args
+  if [ "$SLOTS_PICKED" = "1" ]; then
+    # The slots step (issue #91) set all four chains, so hand them over whole.
+    # --slot replaces --main/--advisor, which can only reach a slot's first model.
+    log "Slots: sonnet=$(slot_chain_text sonnet) opus=$(slot_chain_text opus) fable=$(slot_chain_text fable) haiku=$(slot_chain_text haiku)"
+    args=(--slot "$(slot_arg sonnet)" --slot "$(slot_arg opus)" \
+          --slot "$(slot_arg fable)" --slot "$(slot_arg haiku)")
+  else
+    # --main / --advisor set the first model of the sonnet and fable slots; the rest of
+    # each chain, and the opus and haiku slots, come from the saved or default chains.
+    log "Slots: sonnet first=$MAIN_ID fable first=${ADVISOR_ID:-default} through LiteLLM ..."
+    args=(--main "$MAIN_ID" --advisor "$ADVISOR_ID")
+  fi
   (
     export_proxy_env
     export LITELLM_BASE_URL="$PROXY_BASE"
     "$VENV_PY" "$LITELLM_DIR/scripts/apply_inferhub_seat.py" --api-base "$IH_URL" \
-      --main "$MAIN_ID" --advisor "$ADVISOR_ID" --base-url "$PROXY_BASE"
+      "${args[@]}" --base-url "$PROXY_BASE"
   ) >> "$LOG_FILE" 2>&1 || die "apply_inferhub_seat.py failed (see log)"
 }
 
@@ -1193,10 +1571,22 @@ main() {
 
   until pick_folder && pick_launch; do :; done
   rm -f "$LADDER_STATE"
-  pick_main
-  pick_ladder main "$MAIN_ID"
-  pick_advisor
-  pick_ladder advisor "$ADVISOR_ID"
+  pick_slots
+  if [ "$SLOTS_PICKED" = "1" ]; then
+    # The slots step set every chain, sonnet's and fable's first models included,
+    # so the per-seat prompts would only re-ask for what was just chosen.
+    MAIN_ID="$(chain_at "$(slot_chain sonnet)" 1)"
+    MAIN_NAME="$(slot_name_of "$MAIN_ID")"
+    ADVISOR_ID="$(chain_at "$(slot_chain fable)" 1)"
+    ADVISOR_NAME="$(slot_name_of "$ADVISOR_ID")"
+    pick_ladder main "$MAIN_ID"
+    pick_ladder advisor "$ADVISOR_ID"
+  else
+    pick_main
+    pick_ladder main "$MAIN_ID"
+    pick_advisor
+    pick_ladder advisor "$ADVISOR_ID"
+  fi
   if [ "$LAUNCH" = "ultracode" ]; then
     pick_ultracode
   fi
