@@ -106,6 +106,29 @@ Blocked/uncertain:
 Next:
 - Generate and reconcile the complete pinned Top 20 and frontier snapshot.
 
+### 2026-10-07 19:34:23 UTC — Codex
+
+<!-- continuity:checkpoint {"agent":"Codex","blocked":["none"],"changed":["shared/ire/defaults.json; shared/litellm/config/top20-builtin.csv; Windows and Mac launcher tables; Windows frontier fallback; route-map fixture; table expectation tests; task and current projections; boss claim."],"completed":["Regenerated the shared CSV/defaults, Windows and Mac Top 20 tables, Windows offline first-20 frontier fallback, and pinned route-map fixture from IRE commit c80166a2; updated the two affected model-picker expectations; reconciled CCL-0079 completion projections."],"decisions":["Keep the pinned IRE source; no seat/shim routing, fixed fallback chain, live proxy, or user-local settings changes."],"evidence":["Pinned live IRE fetch succeeded at c80166a2e827c3e0ed1f311735d9596c2ef5ddbc dated 2026-10-07T17:48:43Z; 9 of 20 Top 20 rows changed eligibility or first route and all 20 captured frontier rows changed; continuity validate VALID; git diff --check clean; no tests run locally; latest origin/main remained 27f951e and IRE main remained c80166a2 before push."],"next_action":"Open the linked pull request, verify required CI, and enable auto-merge only after the final push.","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"CCL-0081","timestamp":"2026-10-07T19:34:23Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"a6b73a5a976ec7926d269c09a111710c3bf52342a5f1b5fca04c81bde4c4c1be","request_id":"40f6fd4aafee4b12ba141fe1187cb749","schema":"project-continuity.checkpoint-operation.v1","task_id":"CCL-0081"} -->
+
+Completed:
+- Regenerated the shared CSV/defaults, Windows and Mac Top 20 tables, Windows offline first-20 frontier fallback, and pinned route-map fixture from IRE commit c80166a2; updated the two affected model-picker expectations; reconciled CCL-0079 completion projections.
+
+Evidence:
+- Pinned live IRE fetch succeeded at c80166a2e827c3e0ed1f311735d9596c2ef5ddbc dated 2026-10-07T17:48:43Z; 9 of 20 Top 20 rows changed eligibility or first route and all 20 captured frontier rows changed; continuity validate VALID; git diff --check clean; no tests run locally; latest origin/main remained 27f951e and IRE main remained c80166a2 before push.
+
+Decisions:
+- Keep the pinned IRE source; no seat/shim routing, fixed fallback chain, live proxy, or user-local settings changes.
+
+Changed:
+- shared/ire/defaults.json; shared/litellm/config/top20-builtin.csv; Windows and Mac launcher tables; Windows frontier fallback; route-map fixture; table expectation tests; task and current projections; boss claim.
+
+Blocked/uncertain:
+- none
+
+Next:
+- Open the linked pull request, verify required CI, and enable auto-merge only after the final push.
+
 ## Handoff
 
 Read PROJECT → CURRENT → this task → minimum relevant spec. Checkpoint before stopping.
