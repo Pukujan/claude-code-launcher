@@ -115,7 +115,7 @@ $last = Read-LastPicks
 $slots = Read-SlotPicks
 $choices = @(Get-SlotChoices | ForEach-Object { $_.Id })
 @{ keys = @($last.Keys | Sort-Object); opus = @($slots.opus); sonnet = @($slots.sonnet);
-   astra_offered = ($choices -contains "cb/gpt-6-astra"); ckff_offered = @($choices | Where-Object { $_ -match "ckff" }).Count } | ConvertTo-Json -Compress
+   astra_offered = ($choices -contains "cx/gpt-6-astra"); ckff_offered = @($choices | Where-Object { $_ -match "ckff" }).Count } | ConvertTo-Json -Compress
 """
 
 
@@ -133,7 +133,9 @@ def test_windows_saved_ckff_pick_falls_back_to_default(tmp_path):
     assert r.returncode == 0, r.stderr + r.stdout
     out = json.loads(r.stdout.strip().splitlines()[-1])
     assert "uc_orch" not in out["keys"] and "launch" in out["keys"]
-    assert out["sonnet"] == ["cb/deepseek-v4.1-flash", "ali/qwen3.8-flash", "cbcn/glm-5.3-flash"]  # CKFF pick -> default
+    assert out["sonnet"] == [
+        "cb/deepseek-v4.1-flash", "alicn/qwen3.8-flash", "zai/glm-5.3-flash"
+    ]  # Disabled CKFF pick falls back to current IRE defaults.
     assert out["opus"] == ["cb/gpt-6-astra"]                  # InferHub Astra kept, CKFF Astra dropped
     assert out["astra_offered"] is True and out["ckff_offered"] == 0
 

@@ -46,7 +46,7 @@ NODE_MAJOR="${CLAUDE_IH_NODE_MAJOR:-24}"
 UV_INSTALLER_URL="${UV_INSTALLER_URL:-https://astral.sh/uv/install.sh}"
 CLAUDE_INSTALLER_URL="${CLAUDE_INSTALLER_URL:-https://claude.ai/install.sh}"
 
-DEFAULT_MODEL_ID="alicn/deepseek-v4.1-flash"
+DEFAULT_MODEL_ID="cb/deepseek-v4.1-flash"
 SEAT_ALIAS="sonnet"
 # Claude Code's auto-compact window: GPT 6 Astra (the opus slot's first model) has 272K.
 AUTO_COMPACT_WINDOW="272000"
@@ -88,26 +88,26 @@ OVERRIDES="$(cat "$OVR_FILE" 2>/dev/null)"
 # This copy is the last resort; it matches shared/litellm/config/top20-builtin.csv,
 # the Windows table and shared/ire/defaults.json (tests check all of them).
 # The two prices are the best route's cheapest listed asks per 1M tokens.
-MODELS='1|DeepSeek V4.1 Flash|alicn/deepseek-v4.1-flash|true|0.00015|0.0006
+MODELS='1|DeepSeek V4.1 Flash|cb/deepseek-v4.1-flash|false|0.00015|0.0006
 2|MiniMax M3|mm/MiniMax-M3|true|0.0003|0.0012
 3|GLM 5.3 Flash|zai/glm-5.3-flash|true|0.00015|0.0005
-4|DeepSeek V4 Flash|cbcn/deepseek-v4-flash|true|0.00352|0.01056
-5|GPT 5.6 Luna|cb/gpt-5.6-luna|false|0.003|0.018
-6|Qwen3.8 Flash|alicn/qwen3.8-flash|true|0.00015|0.00047
-7|DeepSeek V4 Pro|cbcn/deepseek-v4-pro|false|0.01056|0.03168
-8|Kimi K2.7 Code|cbcn/kimi-k2.7|true|0.0152|0.064
+4|DeepSeek V4 Flash|cbcn/deepseek-v4-flash|false|0.00352|0.01056
+5|Qwen3.8 Flash|alicn/qwen3.8-flash|true|0.00015|0.00047
+6|GPT 5.6 Luna|cx/gpt-5.6-luna|false|0.0032|0.0192
+7|Kimi K2.7 Code|cbcn/kimi-k2.7|true|0.0152|0.064
+8|DeepSeek V4 Pro|cbcn/deepseek-v4-pro|false|0.01056|0.03168
 9|Qwen3.8 Max 0902|ali/qwen3.8-max-0902|false|0.01|0.03
 10|GLM 5.3|alicn/glm-5.3|true|0.0014|0.0044
-11|Gemini 3.8 Flash|ag/gemini-3.8-flash-high|false|0.00375|0.01875
-12|Gemini 3.7 Flash|ag/gemini-3.7-flash-high|false|0.00375|0.01875
+11|Gemini 3.8 Flash|ag/gemini-3.8-flash-high|false|0.00075|0.00375
+12|Gemini 3.7 Flash|ag/gemini-3.7-flash-high|false|0.00075|0.00375
 13|MiniMax M2.7|mm/MiniMax-M2.7|false|0.0003|0.0012
-14|Gemini 3.6 Flash|ag/gemini-3.6-flash-high|false|0.0015|0.0075
-15|MiMo V2.5|cmc/xiaomi/mimo-v2.5|false|0.02268|0.04536
+14|Gemini 3.6 Flash|ag/gemini-3.6-flash-high|false|0.00075|0.00375
+15|MiMo V2.5|cmc/xiaomi/mimo-v2.5|false|0.02086|0.04172
 16|Kimi K2.6|cbcn/kimi-k2.6|false|0.0152|0.064
 17|GLM 5.2|alicn/glm-5.2|false|0.0014|0.0044
-18|GPT 6 Luna|cb/gpt-6-luna|false|0.0015|0.0075
-19|Muse Spark 1.3 Contributor|cmc/meta/muse-spark-1.3-contributor|false|0.05|0.1
-20|Qwen3.8 Omni Flash|alicn/qwen3.8-omni-flash|false|0.00015|0.00047'
+18|GPT 6 Luna|cx/gpt-6-luna|false|0.0016|0.008
+19|Qwen3.8 Omni Flash|alicn/qwen3.8-omni-flash|false|0.00015|0.00047
+20|MiniMax M2.5|mm/MiniMax-M2.5|false|0.0003|0.0012'
 
 MODEL_COUNT="$(printf '%s\n' "$MODELS" | grep -c '|')"
 

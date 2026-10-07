@@ -19,7 +19,7 @@ GLOB = "CLAUDE_CODE_GLOB_TIMEOUT_SECONDS"
 OPTIONS = [
     {"model": "sonnet", "label": "Sonnet slot (main)", "description": "Main chat chain via local LiteLLM", "behavesAs": "claude-sonnet-5"},
     {"model": "fable", "label": "Fable slot (advisor)", "description": "Advisor chain via local LiteLLM", "behavesAs": "claude-fable-5"},
-    {"model": "ih/cb/deepseek-v4.1-flash", "label": "DeepSeek V4.1 Flash (InferHub ih/)", "description": "IRE Top 20 #1; eligible - direct, no slot chain", "behavesAs": "claude-sonnet-5"},
+    {"model": "ih/cb/deepseek-v4.1-flash", "label": "DeepSeek V4.1 Flash (InferHub ih/)", "description": "IRE Top 20 #1; gated - direct, no slot chain", "behavesAs": "claude-sonnet-5"},
 ]
 
 json_scalar = st.none() | st.booleans() | st.integers(-10**6, 10**6) | st.text(max_size=12)
