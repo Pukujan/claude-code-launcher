@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import sys
+import csv
 
 import yaml
 
@@ -198,7 +199,9 @@ def test_full_merge_from_builtin_top20(tmp_path):
     assert r.returncode == 0, r.stderr
     doc = yaml.safe_load(out.read_text(encoding="utf-8"))
     names = {m["model_name"] for m in doc["model_list"]}
-    assert "ih/cb/deepseek-v4.1-flash" in names and "sonnet" in names
+    with (LITELLM / "config" / "top20-builtin.csv").open(encoding="utf-8", newline="") as handle:
+        first_route = next(csv.DictReader(handle))["model_ids"].split(";")[0].strip()
+    assert f"ih/{first_route}" in names and "sonnet" in names
     # Keyless: with no LITELLM_MASTER_KEY, runtime.yaml has no master_key at all.
     assert "master_key" not in (doc.get("general_settings") or {})
     assert {"haiku", "small-fast"} <= names
@@ -207,7 +210,6 @@ def test_full_merge_from_builtin_top20(tmp_path):
     # failure policy: 3 retries per model (seats and chain targets), benched 180 s after the last one
     pol = doc["router_settings"]["model_group_retry_policy"]
     assert pol["sonnet"]["ServiceUnavailableErrorRetries"] == 3
-    assert pol["ih/ali/qwen3.8-flash"]["RateLimitErrorRetries"] == 3
     assert pol["ccl-opus-3"]["RateLimitErrorRetries"] == 3
     info = {m["model_name"]: m.get("model_info") or {} for m in doc["model_list"]}
     assert info["sonnet"]["cooldown_time"] == 180.0

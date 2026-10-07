@@ -1,6 +1,6 @@
 # Current Repository Checkpoint
 
-<!-- continuity:current {"active_task":null,"active_task_file":null,"protocol_version":"0.1.0-draft","schema":"project-continuity.current.v1"} -->
+<!-- continuity:current {"active_task":"CCL-0079","active_task_file":"tasks/TASK-CCL-0079-inferhub-route-sync.md","protocol_version":"0.1.0-draft","schema":"project-continuity.current.v1"} -->
 
 This is an as-of projection; live GitHub issues own progression. Link the owning leaf, parent ancestry and dependencies for active work.
 
@@ -30,7 +30,7 @@ Phase: the launcher's built-in picker tables track IRE's current Top 20, and the
 
 ## Active
 
-- None.
+- **CCL-0079**: refresh the launcher’s built-in Top 20 and frontier provider routes from current IRE data and add a scheduled review PR ([issue #96](https://github.com/Pukujan/claude-code-launcher/issues/96), parent: none, dependencies: none, branch `ccl-0079-inferhub-route-sync`). PR #97 is open with auto-merge armed; on head `07c55c55`, continuity, lint, Mac dry run, Bash 3.2 and Linux dry run passed. Python found one old rank-two fallback assumption, corrected locally; Windows installer was pending.
 
 ## Queued
 
@@ -42,4 +42,4 @@ Phase: the launcher's built-in picker tables track IRE's current Top 20, and the
 
 ## Next atomic action
 
-Re-sync `windows/launch-claude-inferhub.ps1` from the PC after the pending fixes there.
+Commit and checkpoint the final Windows route expectation update, push the branch, and verify the required PR checks.

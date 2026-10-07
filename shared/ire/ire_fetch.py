@@ -505,9 +505,9 @@ def fetch_frontier(gh: GitHub, repo: str, sha: str) -> list:
     return []
 
 
-def write_cache(directory: Path, bundle: dict, sha: str, fetched_at: str) -> None:
+def write_cache(directory: Path, bundle: dict, sha: str, fetched_at: str, ref: str = IRE_REF) -> None:
     directory.mkdir(parents=True, exist_ok=True)
-    record = {"fetched_at": fetched_at, "source_sha": sha, "repo": IRE_REPO, "ref": IRE_REF,
+    record = {"fetched_at": fetched_at, "source_sha": sha, "repo": IRE_REPO, "ref": ref,
               "bundle": bundle}
     fd, tmp = tempfile.mkstemp(dir=str(directory), prefix=".ire-", suffix=".tmp")
     try:
@@ -537,7 +537,7 @@ def now_utc() -> str:
 
 
 def get_recommendations(offline: bool = False, timeout: float = DEFAULT_TIMEOUT,
-                        directory: Path | None = None) -> dict:
+                        directory: Path | None = None, ref: str | None = None) -> dict:
     """The one entry point. Always returns a valid bundle; never raises for network trouble."""
     directory = directory or cache_dir()
     if offline or os.environ.get("CCL_IRE_OFFLINE") == "1":
@@ -548,10 +548,11 @@ def get_recommendations(offline: bool = False, timeout: float = DEFAULT_TIMEOUT,
             # No token (issue #61): the IRE repo is public, so read it anonymously.
             where = f"no token, anonymous ({where})"
         try:
-            bundle, sha = fetch_live(GitHub(token, timeout))
+            source_ref = ref or IRE_REF
+            bundle, sha = fetch_live(GitHub(token, timeout), ref=source_ref)
             log(f"source=live  IRE {IRE_REPO}@{sha[:10]} via {where}")
             try:
-                write_cache(directory, bundle, sha, now_utc())
+                write_cache(directory, bundle, sha, now_utc(), source_ref)
             except OSError as e:
                 log(f"could not write the cache ({type(e).__name__}); continuing")
             return bundle
@@ -615,8 +616,10 @@ def main(argv=None) -> int:
                     help="also write rank|name|id|eligible|in|out lines (the Mac picker table)")
     ap.add_argument("--top20-csv", type=Path, default=None,
                     help="also write the Top 20 as a CSV for sync_inferhub_top20.py")
+    ap.add_argument("--ref", default=None,
+                    help="read IRE files at this branch, tag, or commit instead of resolving main")
     a = ap.parse_args(argv)
-    bundle = get_recommendations(offline=a.offline, timeout=a.timeout, directory=a.cache_dir)
+    bundle = get_recommendations(offline=a.offline, timeout=a.timeout, directory=a.cache_dir, ref=a.ref)
     text = json.dumps(bundle, indent=2) + "\n"
     if a.out:
         a.out.parent.mkdir(parents=True, exist_ok=True)

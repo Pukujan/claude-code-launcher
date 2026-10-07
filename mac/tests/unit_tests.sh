@@ -22,6 +22,12 @@ pass=0; fail=0
 ok()  { pass=$((pass + 1)); printf '  ok   %s\n' "$1"; }
 bad() { fail=$((fail + 1)); printf '  FAIL %s\n' "$1"; }
 check() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 (expected [$3] got [$2])"; fi; }
+builtin_route() {
+  awk -F, -v wanted="$1" 'NR == wanted + 1 { split($7, routes, ";"); sub(/^[[:space:]]+/, "", routes[1]); print routes[1] }' \
+    "$REPO/shared/litellm/config/top20-builtin.csv"
+}
+first_route="$(builtin_route 1)"
+first_uc_id="claude-ih-$(printf '%s' "$first_route" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9][^a-z0-9]*/-/g; s/^-//; s/-$//')"
 
 echo "bash $BASH_VERSION"
 
@@ -36,10 +42,10 @@ done
 
 echo "== model table =="
 check "20 built-in models" "$MODEL_COUNT" "20"
-check "rank 1 id" "$(model_field 1 3)" "cb/deepseek-v4.1-flash"
-check "rank 20 id" "$(model_field 20 3)" "cmc/meta/muse-spark-1.3-contributor"
+check "rank 1 id" "$(model_field 1 3)" "$(builtin_route 1)"
+check "rank 20 id" "$(model_field 20 3)" "$(builtin_route 20)"
 check "resolve by number" "$(resolve_model 10)" "10"
-check "resolve by id" "$(resolve_model cbcn/minimax-m3)" "2"
+check "resolve by id" "$(resolve_model "$(model_field 2 3)")" "2"
 if resolve_model 21 >/dev/null; then bad "rejects 21"; else ok "rejects 21"; fi
 check "auto-compact window" "$AUTO_COMPACT_WINDOW" "272000"
 
@@ -207,11 +213,12 @@ if command -v uv >/dev/null 2>&1; then
   check "last picks keep the orchestrator" "$(last_pick uc_orch)" "claude-ih-fast"
   check "first choice is the main seat" "$(head -1 "$UC_LIST" | cut -f1)" "claude-ih-main"
   check "no CKFF choice" "$(grep -ci ckff "$UC_LIST")" "0"
-  check "Top 20 listed" "$(grep -c '^claude-ih-cb-deepseek-v4-1-flash	' "$UC_LIST")" "1"
+  check "Top 20 listed" "$(grep -c "^${first_uc_id}[[:space:]]" "$UC_LIST")" "1"
   check "shim port" "$(grep -c "\"listen_port\": $UC_PORT" "$UC_DIR/config.json")" "1"
   unset UC_ORCH UC_WORKER
+  next_after_fast="$(awk -F'\t' '$1=="claude-ih-fast" { found=1; next } found { print $1; exit }' "$UC_LIST")"
   uc_pick orch < <(printf '\033[B\n') >/dev/null 2>&1
-  check "arrow pick: Down from last time's orchestrator" "$UC_PICK" "claude-ih-cb-deepseek-v4-1-flash"
+  check "arrow pick: Down from last time's orchestrator" "$UC_PICK" "$next_after_fast"
   uc_pick worker < <(printf '\n') >/dev/null 2>&1
   check "worker highlights last time's pick (same)" "$UC_PICK" ""
   if uc_pick worker < <(printf '\033[D') >/dev/null 2>&1; then bad "Left goes back"; else ok "Left goes back"; fi
