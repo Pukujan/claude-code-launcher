@@ -84,3 +84,26 @@ Blocked/uncertain:
 
 Next:
 - Restore the pinned continuity CLI, write the synchronized checkpoint, push this branch, and open a review PR linked to issue #96.
+
+### 2026-10-07 08:09:31 UTC — Codex
+
+<!-- continuity:checkpoint {"agent":"Codex","blocked":["continuity issue verify reports issue #96 OPEN but exits with missing .continuity/documents.json; live issue was checked directly with gh."],"changed":["shared/ire/, shared/litellm/config/top20-builtin.csv, Windows and Mac launcher snapshots, .github/workflows/sync-ire-model-tables.yml, tests, task and current checkpoint projections"],"completed":["Regenerated the offline Top 20 and frontier provider snapshots from pinned IRE output; added daily and manual reviewed refresh PR workflow and row-level route checks."],"decisions":["no new decisions"],"evidence":["Live IRE fetch at f4639620b9b8814181b25f4e66bb3ddbcfc8ec48; focused tests 80 passed; full suite 375 passed, 49 skipped; Ruff passed; workflow YAML parsed; issue #96 is OPEN."],"next_action":"Open the review PR for CCL-0079, wait for required checks and review, then enable auto-merge only after the final push.","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"CCL-0079","timestamp":"2026-10-07T08:09:31Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"9e911516af8116d32f55430e3c07d974d28f80e4c79a5a17419a6cdf4c080da2","request_id":"487ae81fbce944c98a704548356502f8","schema":"project-continuity.checkpoint-operation.v1","task_id":"CCL-0079"} -->
+
+Completed:
+- Regenerated the offline Top 20 and frontier provider snapshots from pinned IRE output; added daily and manual reviewed refresh PR workflow and row-level route checks.
+
+Evidence:
+- Live IRE fetch at f4639620b9b8814181b25f4e66bb3ddbcfc8ec48; focused tests 80 passed; full suite 375 passed, 49 skipped; Ruff passed; workflow YAML parsed; issue #96 is OPEN.
+
+Decisions:
+- no new decisions
+
+Changed:
+- shared/ire/, shared/litellm/config/top20-builtin.csv, Windows and Mac launcher snapshots, .github/workflows/sync-ire-model-tables.yml, tests, task and current checkpoint projections
+
+Blocked/uncertain:
+- continuity issue verify reports issue #96 OPEN but exits with missing .continuity/documents.json; live issue was checked directly with gh.
+
+Next:
+- Open the review PR for CCL-0079, wait for required checks and review, then enable auto-merge only after the final push.
