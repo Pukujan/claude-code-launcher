@@ -1,6 +1,6 @@
 # TASK CCL-0079: Keep launcher model families paired with IRE's current provider routes
 
-<!-- continuity:task {"acceptance":["All four built-in Top 20 artifacts use the current IRE family, rank, eligibility, prices, and selected provider route.","No built-in Top 20 row has a blank or malformed provider route; each ID matches the family in the pinned IRE source fixture.","The frontier importer preserves route, health, prices, and preferred endpoint; Windows offline frontier routes match current IRE recommendations.","A scheduled and manually dispatched workflow opens a review PR when generated fallback tables drift and never merges them automatically.","Tests cover all 20 Top 20 model/provider pairs and frontier routes.","No seat or shim routing changes, fallback chain changes, port 4000 activity, or secrets.","The Linux/macOS Claude Code model picker accepts the six-field Top 20 table, displays provider IDs, and includes IRE's first 20 frontier best routes."],"depends_on":[],"goal":"Keep the launcher's free Top 20 and frontier pickers aligned to IRE's actual InferHub provider routes, including the offline fallback.","id":"CCL-0079","issue_url":"https://github.com/Pukujan/claude-code-launcher/issues/96","next_action":"Repair and merge the Linux/macOS model-picker sync so current Top 20 and frontier provider routes appear in Claude Code.","owner":"Alex; executor agent implements","priority":"P2","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"active","why":"The checked-in Top 20 fallback has stale or mismatched model/provider pairs, including an invalid ag/ route for Claude Sonnet 4.6. Mac can use live IRE data, but Windows and offline/cache paths can select a route left behind after rankings changed. A reviewed scheduled refresh prevents future silent drift."} -->
+<!-- continuity:task {"acceptance":["All four built-in Top 20 artifacts use the current IRE family, rank, eligibility, prices, and selected provider route.","No built-in Top 20 row has a blank or malformed provider route; each ID matches the family in the pinned IRE source fixture.","The frontier importer preserves route, health, prices, and preferred endpoint; Windows offline frontier routes match current IRE recommendations.","A scheduled and manually dispatched workflow opens a review PR when generated fallback tables drift and never merges them automatically.","Tests cover all 20 Top 20 model/provider pairs and frontier routes.","No seat or shim routing changes, fallback chain changes, port 4000 activity, or secrets.","The Linux/macOS Claude Code model picker accepts the six-field Top 20 table, displays provider IDs, and includes IRE's first 20 frontier best routes.","Local provider preferences are re-applied after each IRE fetch to the derived Top 20 bundle, picker table and CSV, and must select a route currently present for that family."],"depends_on":[],"goal":"Keep the launcher's free Top 20 and frontier pickers aligned to IRE's actual InferHub provider routes, including the offline fallback.","id":"CCL-0079","issue_url":"https://github.com/Pukujan/claude-code-launcher/issues/96","next_action":"Merge the local full-roster refresh and provider-preference persistence, then file the user-requested IRE observational issue log.","owner":"Alex; executor agent implements","priority":"P2","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"active","why":"The checked-in Top 20 fallback has stale or mismatched model/provider pairs, including an invalid ag/ route for Claude Sonnet 4.6. Mac can use live IRE data, but Windows and offline/cache paths can select a route left behind after rankings changed. A reviewed scheduled refresh prevents future silent drift."} -->
 
 - Status: active
 - Owner: Alex; executor agent implements
@@ -8,7 +8,7 @@
 - Depends on: none
 - Leaf issue: [#96](https://github.com/Pukujan/claude-code-launcher/issues/96); parent: none (refs Pukujan/inference-recommendation-engine#94, #97, #104)
 - Primary writer: Codex
-- Branch (merged table refresh): `ccl-0079-inferhub-route-sync`; follow-up: `codex/ccl-0079-model-picker-sync`
+- Branch (merged refresh): `ccl-0079-inferhub-route-sync`; model-picker repair: `codex/ccl-0079-model-picker-sync`; roster correction: `codex/ccl-0079-ire-provider-roster`
 
 ## Owning issue
 
@@ -31,7 +31,8 @@ Seat assignment, shim routing, `shared/litellm/config/inferhub_fallbacks.yaml`, 
 - [x] A scheduled and manually dispatched workflow opens a PR when generated fallbacks drift and does not auto-merge provider changes.
 - [x] Tests cover all Top 20 model/provider pairs and frontier routes.
 - [x] No seat or shim routing changes, fallback chain changes, live port 4000 activity, or secrets.
-- [ ] Linux/macOS Claude Code model-picker sync accepts the six-field Top 20 table, displays provider IDs, and includes IRE's first 20 frontier best routes.
+- [x] Linux/macOS Claude Code model-picker sync accepts the six-field Top 20 table, displays provider IDs, and includes IRE's first 20 frontier best routes.
+- [ ] Local provider preferences are re-applied after each IRE fetch to the derived Top 20 bundle, picker table and CSV, and must select a route currently present for that family.
 
 ## Evidence and interpretation
 
@@ -288,3 +289,29 @@ Blocked/uncertain:
 
 Next:
 - Open a linked PR for the pushed branch, then verify required CI and auto-merge.
+
+### Local full-roster correction — 2026-10-07
+
+Completed:
+- Re-fetched the full current IRE bundle for the Linux launcher, retaining 20 Top 20 model families and the complete frontier route data (93 rows; 20 first-20 best routes).
+- Applied the operator's `cb/deepseek-v4.1-flash` preference to the local derived bundle, picker table, ignored Top 20 CSV and Claude Code settings.
+- Added a launcher hook that reapplies valid local provider preferences after each future IRE fetch.
+
+Evidence:
+- Live IRE `main` at `f4639620b9b8814181b25f4e66bb3ddbcfc8ec48` still puts `alicn/deepseek-v4.1-flash` first; the same row lists `cb/deepseek-v4.1-flash` as an alternative.
+- IRE issue #94's owner closure comment `6010083959` records the healthy DeepSeek route as `cb/deepseek-v4.1-flash`. The two source records disagree; the local CB choice follows the operator's direction pending IRE review.
+- The refreshed Claude Code picker contains 20 Top 20 and 20 frontier entries; rank 1 is `ih/cb/deepseek-v4.1-flash`.
+- The user requested an IRE issue log after the local repair. IRE's OIO ontology and agent guide have been read; its issue will be filed after this local correction is merged.
+
+Decisions:
+- Use a local, validated family-to-route preference to keep the user's selected provider while continuing to refresh all model families and frontier routes from IRE.
+- Preserve the discrepancy between IRE's current generated list and its earlier accepted evidence; do not describe the custom CB preference as the current IRE best route.
+
+Changed:
+- `shared/ire/apply_provider_preferences.py`, `shared/ire/README.md`, `mac/Launch Claude InferHub.command`, this task record and `checkpoints/CURRENT.md`.
+
+Blocked/uncertain:
+- IRE's latest generated roster and its earlier accepted feed evidence disagree on the DeepSeek route. The user-directed CB preference is applied locally; the upstream issue log will ask IRE to reconcile the full route roster.
+
+Next:
+- Commit and checkpoint the preference persistence, verify required CI, merge the follow-up, then file the IRE issue log.

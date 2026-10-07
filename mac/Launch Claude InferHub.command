@@ -384,6 +384,15 @@ fetch_ire() {
   done < <("$py" "$REPO_ROOT/shared/ire/ire_fetch.py" --out "$IRE_JSON" \
              --table-out "$IRE_TABLE" \
              --top20-csv "$LITELLM_DIR/config/top20.csv" 2>&1 >/dev/null)
+  if [ -f "$HOME/.config/inferhub/model-provider-preferences.json" ]; then
+    if ! "$py" "$REPO_ROOT/shared/ire/apply_provider_preferences.py" \
+        --bundle "$IRE_JSON" --table "$IRE_TABLE" \
+        --top20-csv "$LITELLM_DIR/config/top20.csv" \
+        --preferences "$HOME/.config/inferhub/model-provider-preferences.json" \
+        >> "$LOG_FILE" 2>&1; then
+      log "IRE: local provider preferences could not be applied; using IRE's current routes"
+    fi
+  fi
   [ -f "$IRE_JSON" ] && export CCL_IRE_JSON="$IRE_JSON"
   load_ire_table
   return 0
