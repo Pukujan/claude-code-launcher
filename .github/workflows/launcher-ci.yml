@@ -1,10 +1,11 @@
 name: launcher-ci
 
-# Lint, the Mac launcher dry run (on Linux), the Mac launcher under the bash
-# 3.2 that macOS ships, and the Python unit tests. Those four job names are
-# required checks on main, next to `gates`. No path filters, so every PR
-# reports all of them. windows-installer (issue #61) runs the installer's
-# Pester tests on a Windows runner, does one real sandboxed install and
+# Lint, the Mac launcher dry run (on Linux), the Linux installer tests, the Mac
+# launcher under the bash 3.2 that macOS ships, and the Python unit tests. The
+# Mac four (lint, mac-dry-run, bash32, python-tests) are required checks on main,
+# next to `gates`; linux-dry-run (issue #88) should be added to that list. No path
+# filters, so every PR reports all of them. windows-installer (issue #61) runs the
+# installer's Pester tests on a Windows runner, does one real sandboxed install and
 # uninstall, and uploads windows/install.ps1 as the build artifact.
 # Nothing here touches port 4000: the dry runs use 4100/4101 and refuse 4000.
 
@@ -25,13 +26,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: shellcheck the Mac scripts
+      - name: shellcheck the Mac and Linux scripts
         shell: bash
         run: |
           set -euo pipefail
           shellcheck --version | head -2
           shellcheck -s bash -x "mac/Launch Claude InferHub.command" mac/setup.sh \
             mac/stop-litellm.sh mac/lib/nav.sh mac/tests/*.sh
+          shellcheck -s bash -x linux/*.sh linux/tests/*.sh
 
       - name: Parse and PSScriptAnalyzer the Windows scripts
         shell: pwsh
@@ -73,6 +75,24 @@ jobs:
           bash -n "mac/Launch Claude InferHub.command"
           bash mac/tests/unit_tests.sh
           bash mac/tests/dry_run.sh 4100
+
+  linux-dry-run:
+    # Issue #88: the Linux installer. Uses a throwaway HOME and a stub launcher,
+    # so it never touches a real profile, the InferHub key, or port 4000.
+    name: linux-dry-run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse every Linux script
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in linux/*.sh linux/tests/*.sh; do bash -n "$f"; echo "parses: $f"; done
+
+      - name: Installer tests (throwaway HOME, stub launcher)
+        shell: bash
+        run: bash linux/tests/setup_tests.sh
 
   bash32:
     # macOS ships bash 3.2 and the Mac launcher must run on it. Ubuntu has
