@@ -129,6 +129,29 @@ Blocked/uncertain:
 Next:
 - Open the linked pull request, verify required CI, and enable auto-merge only after the final push.
 
+### 2026-10-07 19:35:18 UTC — Codex
+
+<!-- continuity:checkpoint {"agent":"Codex","blocked":["none"],"changed":["tasks/TASK-CCL-0081-ire-oct7-model-refresh.md; checkpoints/CURRENT.md"],"completed":["Updated the task and repository current projections to record that the pinned snapshot is generated and pushed; the next action is opening and reviewing the linked PR."],"decisions":["This is the final planned branch push before creating the pull request and letting the required checks start."],"evidence":["Continuity validation is VALID; issue #107 remains OPEN; latest origin/main remains 27f951e and IRE main remains c80166a2e827c3e0ed1f311735d9596c2ef5ddbc before this push."],"next_action":"Open the linked pull request, verify required CI, and enable auto-merge only after the final push.","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"CCL-0081","timestamp":"2026-10-07T19:35:18Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"87eb759f70daeee4302eb5f1fae51091d81eb733dfc68cbed8e258e45d65515d","request_id":"9c3f3d78cc8845679debf15e28a935d2","schema":"project-continuity.checkpoint-operation.v1","task_id":"CCL-0081"} -->
+
+Completed:
+- Updated the task and repository current projections to record that the pinned snapshot is generated and pushed; the next action is opening and reviewing the linked PR.
+
+Evidence:
+- Continuity validation is VALID; issue #107 remains OPEN; latest origin/main remains 27f951e and IRE main remains c80166a2e827c3e0ed1f311735d9596c2ef5ddbc before this push.
+
+Decisions:
+- This is the final planned branch push before creating the pull request and letting the required checks start.
+
+Changed:
+- tasks/TASK-CCL-0081-ire-oct7-model-refresh.md; checkpoints/CURRENT.md
+
+Blocked/uncertain:
+- none
+
+Next:
+- Open the linked pull request, verify required CI, and enable auto-merge only after the final push.
+
 ## Handoff
 
 Read PROJECT → CURRENT → this task → minimum relevant spec. Checkpoint before stopping.
