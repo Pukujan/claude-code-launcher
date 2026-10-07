@@ -6,7 +6,7 @@ This repository holds the Claude Code launcher for Windows and Mac and the share
 
 - Every task gets a GitHub issue first, and every change lands through a pull request that links it. Never commit to `main`.
 - Never print or commit secrets. Only `.env.example` is tracked.
-- Never connect to, restart, stop or bind `127.0.0.1:4000`. It is the live proxy. Tests use other ports.
+- Never change `127.0.0.1:4000` — no restart, stop, bind, reload or config write. It is the live proxy, serving people. Probing it read-only is fine and expected. Make any change, test or fix on a copy proxy on another port, and merge to 4000 only once it is verified there.
 - Do not change the seat or shim routing (`shared/litellm/scripts/apply_inferhub_seat.py`, `merge_litellm_config.py`, `config/inferhub_fallbacks.yaml`) without an issue that says so.
 
 ## Pinned stack (release train 2026-10-01)

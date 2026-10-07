@@ -37,7 +37,7 @@ The launcher used to live in three places at once: a Desktop copy on the PC, a m
 ## Non-goals
 
 - Changing how model names are routed to InferHub seats. The routing scripts are copied, not rewritten.
-- Running, restarting or stopping anything on port 4000 from CI or from agents. That is the live proxy.
+- Changing port 4000 from CI or from agents: no restart, stop, bind, reload or config write. That is the live proxy. Read-only probing is fine; a change is tested on a copy proxy on another port and merged to 4000 only once verified.
 - Hosting the proxy anywhere other than the local machine.
 - Storing secrets. Only `.env.example` is tracked.
 

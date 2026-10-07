@@ -31,6 +31,7 @@ Phase: the launcher's built-in picker tables track IRE's current Top 20, and the
 ## Active
 
 - **CCL-0079**: the table refresh and Linux/macOS model-picker fix merged in PRs #97 and #98, but issue #96 was reopened after the user found a provider mismatch ([issue #96](https://github.com/Pukujan/claude-code-launcher/issues/96), parent: none, dependencies: none, active branch `codex/ccl-0079-ire-provider-roster`). The full local picker now has 20 Top 20 and 20 frontier choices; a user-local CB preference selects `cb/deepseek-v4.1-flash`. Latest IRE main still selects `alicn` for that family, conflicting with IRE issue #94 closure evidence. The preference persistence is under CI review; after merge, file the requested IRE issue log.
+- **CCL-0080**: the port 4000 house rule read "Never connect to, restart, stop or bind `127.0.0.1:4000`", which an agent followed literally and so refused to probe the live proxy, reporting routing as unproven. The rule now forbids changing 4000, keeps read-only probing allowed, and names the copy-proxy-then-merge path, in `AGENTS.md`, `PROJECT.md` and `README.md` ([issue #102](https://github.com/Pukujan/claude-code-launcher/issues/102), parent: none, dependencies: none, active branch `ccl-0080-port-4000-wording`). Next: merge once the required checks pass.
 
 ## Queued
 
