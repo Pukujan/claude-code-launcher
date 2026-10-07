@@ -265,3 +265,26 @@ Blocked/uncertain:
 
 Next:
 - Commit the product and projection updates, checkpoint and push the follow-up branch, then open a linked review PR.
+
+### 2026-10-07 08:35:26 UTC — Codex
+
+<!-- continuity:checkpoint {"agent":"Codex","blocked":[],"changed":["none"],"completed":["Fixed Linux/macOS Claude Code model-picker sync for six-field Top 20 rows, added provider-labeled first-20 frontier routes, and refreshed the Linux user's picker from cached IRE data."],"decisions":["no new decisions"],"evidence":["IRE bundle at f4639620b9b8814181b25f4e66bb3ddbcfc8ec48 as of 2026-10-07T08:30:11Z; settings now contain 44 options (4 slots, 20 Top 20, 20 frontier); continuity validate VALID; diff check clean; no tests run locally."],"next_action":"Open a linked PR for the pushed branch, then verify required CI and auto-merge.","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"CCL-0079","timestamp":"2026-10-07T08:35:26Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"94c7551e5c46b3b618f8f9ee6fa43a8e348bd3c55921c6dcc32cff610b189ec5","request_id":"2e0aa962318e4d79baba4ab9ebb95be0","schema":"project-continuity.checkpoint-operation.v1","task_id":"CCL-0079"} -->
+
+Completed:
+- Fixed Linux/macOS Claude Code model-picker sync for six-field Top 20 rows, added provider-labeled first-20 frontier routes, and refreshed the Linux user's picker from cached IRE data.
+
+Evidence:
+- IRE bundle at f4639620b9b8814181b25f4e66bb3ddbcfc8ec48 as of 2026-10-07T08:30:11Z; settings now contain 44 options (4 slots, 20 Top 20, 20 frontier); continuity validate VALID; diff check clean; no tests run locally.
+
+Decisions:
+- no new decisions
+
+Changed:
+- none
+
+Blocked/uncertain:
+- none
+
+Next:
+- Open a linked PR for the pushed branch, then verify required CI and auto-merge.
