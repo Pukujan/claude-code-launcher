@@ -228,6 +228,21 @@ def _fmt_price(v) -> str:
     return "" if v is None else f"{float(v):g}"
 
 
+def _fmt_tps(v) -> str:
+    """Tokens per second for the picker table. Empty when the row has no speed.
+
+    One decimal, with a trailing .0 dropped, and never scientific notation, so
+    the launcher's table check can keep treating the field as a plain number.
+    """
+    if v is None or v == "":
+        return ""
+    try:
+        n = float(v)
+    except (TypeError, ValueError):
+        return ""
+    return f"{n:.1f}".rstrip("0").rstrip(".")
+
+
 def _parse_utc(text) -> dt.datetime | None:
     """A UTC datetime from an IRE timestamp ("...Z" or a bare date), or None."""
     if not isinstance(text, str) or not text.strip():
@@ -592,8 +607,9 @@ def top20_csv(bundle: dict) -> str:
 
 def shell_table(bundle: dict) -> str:
     """rank|name|id|eligible|in|out lines for the Mac picker (first InferHub id per
-    row). The two prices are the best route's cheapest listed asks per 1M tokens;
-    a list with no ask columns leaves them empty so a reader falls back to the blend."""
+    row), plus |tps when the row has a tokens-per-second figure. The two prices
+    are the best route's cheapest listed asks per 1M tokens; a list with no ask
+    columns leaves them empty so a reader falls back to the blend."""
     lines = []
     for r in bundle["top20"]:
         name = r["name"].replace("|", "/").replace("\n", " ") or r["ids"][0]
@@ -601,8 +617,12 @@ def shell_table(bundle: dict) -> str:
         in_p = r.get("price_in")
         if in_p is None:
             in_p = r.get("cost_per_mtok")
-        lines.append(f"{r['rank']}|{name}|{r['ids'][0]}|{'true' if r['eligible'] else 'false'}|"
-                     f"{_fmt_price(in_p)}|{_fmt_price(r.get('price_out'))}")
+        line = (f"{r['rank']}|{name}|{r['ids'][0]}|{'true' if r['eligible'] else 'false'}|"
+                f"{_fmt_price(in_p)}|{_fmt_price(r.get('price_out'))}")
+        tps = _fmt_tps(r.get("tps"))
+        if tps:
+            line += f"|{tps}"
+        lines.append(line)
     return "\n".join(lines) + "\n"
 
 

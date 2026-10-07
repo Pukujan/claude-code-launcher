@@ -70,6 +70,24 @@ if [ -n "$py" ]; then
 fi
 MODELS="$saved"; MODEL_COUNT=20
 
+echo "== tok/s on the picker =="
+printf '1|Model A|cb/model-a|true|0.010|0.030|114.8\n' > "$IRE_TABLE"
+load_ire_table
+check "table with tok/s loads" "$MODEL_COUNT" "1"
+check "tok/s field" "$(model_field 1 7)" "114.8"
+shown="$(print_models 0 2>&1)"
+case "$shown" in
+  *"114.8 tok/s"*) ok "picker line shows tok/s" ;;
+  *) bad "picker line shows tok/s: $shown" ;;
+esac
+printf '1|Model A|cb/model-a|true|0.010|0.030\n' > "$IRE_TABLE"
+load_ire_table
+check "table without tok/s still loads" "$MODEL_COUNT" "1"
+printf '1|Model A|cb/model-a|true|0.010|0.030|fast\n' > "$IRE_TABLE"
+load_ire_table 2>/dev/null
+check "non-numeric tok/s is rejected" "$(model_field 1 7)" ""
+MODELS="$saved"; MODEL_COUNT=20
+
 echo "== menu keys =="
 check "up"         "$(move_index 5 20 UP 10)" "4"
 check "down"       "$(move_index 5 20 DOWN 10)" "6"

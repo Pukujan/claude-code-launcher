@@ -213,6 +213,20 @@ class Picker(unittest.TestCase):
         self.assertNotIn("OVER", sol)
         self.assertIn(" 0.016/1M", sol)
 
+    def test_format_row_shows_tokens_per_second(self):
+        row = {"id": "cb/deepseek-v4.1-flash", "name": "DeepSeek V4.1 Flash", "eligible": True,
+               "cost_per_mtok": 0.0003, "price_in": 0.0003, "price_out": 0.0012, "tps": 114.8}
+        line = L.format_row(1, row, 0.10)
+        self.assertIn("114.8 tok/s", line)
+        self.assertIn("0.0003/1M", line)
+        self.assertNotIn("tok/s", L.format_row(1, dict(row, tps=None), 0.10))
+
+    def test_catalog_keeps_tokens_per_second(self):
+        top = dict(self.b["top20"][0])
+        top["tps"] = 114.8
+        b = dict(self.b, top20=[top] + self.b["top20"][1:])
+        self.assertEqual(L.catalog(b, "top20")[0]["tps"], 114.8)
+
     def test_frontier_empty_says_so(self):
         out = io.StringIO()
         it = iter(["f", ""])
