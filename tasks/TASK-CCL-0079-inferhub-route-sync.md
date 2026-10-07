@@ -138,3 +138,26 @@ Blocked/uncertain:
 
 Next:
 - Commit and checkpoint this correction, push the updated branch, then confirm all required PR checks pass.
+
+### 2026-10-07 08:14:03 UTC — Codex
+
+<!-- continuity:checkpoint {"agent":"Codex","blocked":["Updated remote CI has not run; local Mac dry run could not copy the existing ignored LiteLLM virtualenv within the container disk quota."],"changed":["mac/tests/unit_tests.sh, mac/tests/dry_run.sh, tasks/TASK-CCL-0079-inferhub-route-sync.md, checkpoints/CURRENT.md"],"completed":["Corrected task projections for pinned PCM gates and made Mac picker tests derive selected provider routes from the generated IRE Top 20."],"decisions":["Keep live CI checks as the verification source for the Mac dry run; no seat/shim routing code changed."],"evidence":["continuity validate VALID; Mac unit tests 107 passed; bash -n and git diff --check passed; local dry run could not start because copying ignored LiteLLM virtualenv exceeded /tmp quota, partial task temp copy removed."],"next_action":"Verify required checks on PR #97 at the new pushed checkpoint SHA and confirm auto-merge.","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"CCL-0079","timestamp":"2026-10-07T08:14:03Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"71d992a08316b0dbb69a31f903554dd9d4270d9384cb47c2e58166fa9273464c","request_id":"09134d4cea214fd084fe2a9b51389070","schema":"project-continuity.checkpoint-operation.v1","task_id":"CCL-0079"} -->
+
+Completed:
+- Corrected task projections for pinned PCM gates and made Mac picker tests derive selected provider routes from the generated IRE Top 20.
+
+Evidence:
+- continuity validate VALID; Mac unit tests 107 passed; bash -n and git diff --check passed; local dry run could not start because copying ignored LiteLLM virtualenv exceeded /tmp quota, partial task temp copy removed.
+
+Decisions:
+- Keep live CI checks as the verification source for the Mac dry run; no seat/shim routing code changed.
+
+Changed:
+- mac/tests/unit_tests.sh, mac/tests/dry_run.sh, tasks/TASK-CCL-0079-inferhub-route-sync.md, checkpoints/CURRENT.md
+
+Blocked/uncertain:
+- Updated remote CI has not run; local Mac dry run could not copy the existing ignored LiteLLM virtualenv within the container disk quota.
+
+Next:
+- Verify required checks on PR #97 at the new pushed checkpoint SHA and confirm auto-merge.
