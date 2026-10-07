@@ -34,6 +34,27 @@ done
 # shellcheck source=/dev/null
 . "$MAC/Launch Claude InferHub.command"
 
+echo "== platform label (issue #94) =="
+# The body serves mac/ and linux/, so the banner must name the platform it is
+# actually running on. OS_NAME is uname -s; OS_LABEL is what we show the user.
+BODY="$MAC/Launch Claude InferHub.command"
+check "OS_NAME is set" "$([ -n "$OS_NAME" ] && echo yes || echo no)" "yes"
+check "OS_LABEL is set" "$([ -n "$OS_LABEL" ] && echo yes || echo no)" "yes"
+if [ "$OS_NAME" = "Darwin" ]; then
+  check "OS_LABEL is macOS on Darwin" "$OS_LABEL" "macOS"
+else
+  check "OS_LABEL names the real platform off Darwin" "$OS_LABEL" "$OS_NAME"
+fi
+check "the banner interpolates OS_LABEL" \
+  "$(grep -c "Launch Claude InferHub (\$OS_LABEL)" "$BODY")" "1"
+check "no banner line hardcodes macOS" \
+  "$(grep -c 'Launch Claude InferHub (macOS)' "$BODY")" "0"
+check "need_curl interpolates OS_LABEL" \
+  "$(grep -c "it ships with \$OS_LABEL" "$BODY")" "1"
+# A hardcoded "this Mac" must not survive anywhere the user can see it.
+check "no user-facing 'this Mac' left" \
+  "$(grep -c 'this Mac looks unusual' "$BODY")" "0"
+
 echo "== model table =="
 check "20 built-in models" "$MODEL_COUNT" "20"
 check "rank 1 id" "$(model_field 1 3)" "cb/deepseek-v4.1-flash"

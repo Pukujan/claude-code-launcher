@@ -1,6 +1,6 @@
 # Current Repository Checkpoint
 
-<!-- continuity:current {"active_task":null,"active_task_file":null,"protocol_version":"0.1.0-draft","schema":"project-continuity.current.v1"} -->
+<!-- continuity:current {"active_task":"CCL-0078","active_task_file":"tasks/TASK-CCL-0078-platform-label.md","protocol_version":"0.1.0-draft","schema":"project-continuity.current.v1"} -->
 
 This is an as-of projection; live GitHub issues own progression. Link the owning leaf, parent ancestry and dependencies for active work.
 
@@ -30,7 +30,11 @@ Phase: the launcher's built-in picker tables track IRE's current Top 20, and the
 
 ## Active
 
-- None.
+- **CCL-0078**: the shared launcher body names the platform it is actually running on. The
+  startup banner and the `need_curl()` failure message hardcoded "macOS", a leftover from when
+  the body was the macOS-only launcher, so `claude-acs` on Linux printed
+  `=== Launch Claude InferHub (macOS) ... ===` and wrote the same line to the launcher log.
+  `OS_LABEL` (Darwin -> `macOS`, else `uname -s`) now feeds both ([issue #94](https://github.com/Pukujan/claude-code-launcher/issues/94), branch `ccl-0094-platform-label`).
 
 ## Queued
 

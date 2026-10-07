@@ -1,11 +1,15 @@
 #!/bin/bash
 # =============================================================================
-# Launch Claude InferHub (macOS)
+# Launch Claude InferHub (macOS and Linux)
 # Source of truth: Pukujan/claude-code-launcher mac/ (see SOURCES.md).
 # Ported from ACS inferhub-litellm-macos v0.1.0 (agent-custom-setup PR #65).
 # Mac counterpart of windows/launch-claude-inferhub.ps1.
 #
-# This is the one Mac launcher. It also has the parts of the old macos/ shim
+# This is the one bash launcher. linux/launch-claude-inferhub.sh reuses this
+# file verbatim, so it branches on `uname -s` for the log/state directories and
+# labels the platform it is actually running on (issue #94).
+#
+# It also has the parts of the old macos/ shim
 # (PR #7): mac/setup.sh installs everything plus a `claude-acs` command, the
 # folder picker has terminal navigation (mac/lib/nav.sh), and the model table
 # comes live from IRE through shared/ire/ire_fetch.py.
@@ -56,6 +60,12 @@ AUTO_COMPACT_WINDOW="272000"
 GLOB_TIMEOUT_DEFAULT="120"
 
 OS_NAME="$(uname -s)"
+# What to call this platform on screen. The body serves both mac/ and linux/,
+# so the banner must not claim macOS while running on Linux (issue #94).
+case "$OS_NAME" in
+  Darwin) OS_LABEL="macOS" ;;
+  *) OS_LABEL="$OS_NAME" ;;
+esac
 if [ "$OS_NAME" = "Darwin" ]; then
   LOG_DIR="${CLAUDE_IH_LOG_DIR:-$HOME/Library/Logs/claude-inferhub}"
   STATE_DIR="${CLAUDE_IH_STATE_DIR:-$HOME/Library/Application Support/claude-inferhub}"
@@ -234,7 +244,7 @@ port_in_use() {
 
 # ---- bootstrap steps --------------------------------------------------------
 need_curl() {
-  command -v curl >/dev/null 2>&1 || die "curl is missing; it ships with macOS, so this Mac looks unusual. Install curl and try again."
+  command -v curl >/dev/null 2>&1 || die "curl is missing; it ships with $OS_LABEL, so this system looks unusual. Install curl and try again."
 }
 
 ensure_workbench() {
@@ -1553,7 +1563,7 @@ main() {
     run_noninteractive
     exit $?
   fi
-  log "=== Launch Claude InferHub (macOS) $(date '+%Y-%m-%d %H:%M:%S %Z') (bash $BASH_VERSION) ==="
+  log "=== Launch Claude InferHub ($OS_LABEL) $(date '+%Y-%m-%d %H:%M:%S %Z') (bash $BASH_VERSION) ==="
   need_curl
   ensure_workbench
   ensure_uv
