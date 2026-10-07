@@ -6,7 +6,7 @@ This is an as-of projection; live GitHub issues own progression. Link the owning
 
 ## Program state
 
-Phase: the scheduled IRE refresh path is in place. The October 7 snapshot has been regenerated on the CCL-0081 task branch; `main` remains on the earlier snapshot pending PR checks and merge. The launcher also has a first-class Linux entry point and installer on `main`.
+Phase: the scheduled IRE refresh path is in place. The October 7 snapshot is in PR #108; its first required Python CI run failed on stale route expectations and an unavailable picker default. The scoped correction is ready locally on the CCL-0081 branch; `main` remains on the earlier snapshot pending a corrective push, passing PR checks and merge. The launcher also has a first-class Linux entry point and installer on `main`.
 
 ## Completed
 
@@ -32,7 +32,7 @@ Phase: the scheduled IRE refresh path is in place. The October 7 snapshot has be
 
 ## Active
 
-- **CCL-0081**: regenerated the four built-in Top 20 tables and Windows offline frontier fallback from pinned IRE commit `c80166a2`; the branch is pushed and awaits its review PR ([issue #107](https://github.com/Pukujan/claude-code-launcher/issues/107), scope correction: [comment 6045326197](https://github.com/Pukujan/claude-code-launcher/issues/107#issuecomment-6045326197), parent: none, dependencies: none, branch `codex/ccl-0081-ire-oct7-model-refresh`).
+- **CCL-0081**: regenerated the four built-in Top 20 tables and Windows offline frontier fallback from pinned IRE commit `c80166a2`. PR #108 is open; required Python CI failed at its first head, while the other required checks and Windows installer check passed. The issue also covers routing Windows picker defaults, including CKFF-only saved slots, to IRE's current route for the same model family when provider prefixes change ([issue #107](https://github.com/Pukujan/claude-code-launcher/issues/107), scope corrections: [comment 6045326197](https://github.com/Pukujan/claude-code-launcher/issues/107#issuecomment-6045326197), [comment 6045504469](https://github.com/Pukujan/claude-code-launcher/issues/107#issuecomment-6045504469), and [comment 6046443651](https://github.com/Pukujan/claude-code-launcher/issues/107#issuecomment-6046443651), parent: none, dependencies: none, branch `codex/ccl-0081-ire-oct7-model-refresh`).
 
 ## Queued
 
@@ -40,8 +40,8 @@ Phase: the scheduled IRE refresh path is in place. The October 7 snapshot has be
 
 ## Blockers
 
-- None.
+- PR #108's first required Python CI run failed; the picker and stale expectations are corrected locally and await a checkpoint push and new CI run.
 
 ## Next atomic action
 
-Open the linked review PR, verify required checks, and enable auto-merge after the final push.
+Push the picker correction and synchronized checkpoint, then verify required CI on PR #108 before enabling auto-merge.

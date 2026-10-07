@@ -167,6 +167,8 @@ $FrontierModels = @(
 # ---- Claude Code slots (issue #53) ----
 # Same defaults as `slots:` in shared\litellm\config\inferhub_fallbacks.yaml
 # (tests\test_slots.py checks that). Each chain is first model, then fallbacks.
+# If IRE changes a model family’s selected provider, the first-run picker maps
+# that old default route to the current listed route without changing the shared chain.
 $SlotOrder = @("sonnet", "opus", "fable", "haiku")
 $SlotDefaults = [ordered]@{
   sonnet = @("cb/deepseek-v4.1-flash", "ali/qwen3.8-flash", "cbcn/glm-5.3-flash")
@@ -417,9 +419,13 @@ function Read-SlotPicks {
   try { $j = Get-Content -LiteralPath $p -Raw -Encoding UTF8 | ConvertFrom-Json } catch { return $null }
   if (-not $j -or -not $j.slots) { return $null }
   $out = @{ haiku_same = ($j.slots.haiku_same -eq $true) }
+  $defaults = $null
   foreach ($slot in $SlotOrder) {
     $chain = @($j.slots.$slot | Where-Object { $_ -and -not (Test-CkffModel ([string]$_)) } | ForEach-Object { [string]$_ })
-    if ($chain.Count -eq 0) { $chain = @($SlotDefaults[$slot]) }
+    if ($chain.Count -eq 0) {
+      if ($null -eq $defaults) { $defaults = Get-DefaultSlots }
+      $chain = @($defaults[$slot])
+    }
     $out[$slot] = $chain
   }
   if ($out.haiku_same) { $out.haiku = @($out.sonnet) }
@@ -446,7 +452,12 @@ function Write-LastPicks {
 
 function Get-DefaultSlots {
   $out = @{ haiku_same = $true }
-  foreach ($slot in $SlotOrder) { $out[$slot] = @($SlotDefaults[$slot]) }
+  $choices = @(Get-SlotChoices)
+  foreach ($slot in $SlotOrder) {
+    $out[$slot] = @($SlotDefaults[$slot] | ForEach-Object {
+      Resolve-IreListedRoute -Id ([string]$_) -Choices $choices
+    })
+  }
   if (-not @($out.sonnet)[0]) { $out.sonnet = @($DefaultModelId) }   # rank 1 if the table is ever emptied
   return $out
 }
@@ -475,6 +486,25 @@ function Get-StartPick {
 
 function Get-SlotChoices {
   return @(@($Models) + @($FrontierModels) | Where-Object { -not (Test-CkffModel $_.Id) })
+}
+
+function Resolve-IreListedRoute {
+  # Keep a picker default on the same model family when IRE changes its
+  # preferred provider. Leave unrelated or absent families alone.
+  param([string]$Id, $Choices)
+  if (-not $Id) { return $Id }
+  $exact = @($Choices | Where-Object { [string]$_.Id -ieq $Id } | Select-Object -First 1)
+  if ($exact.Count -gt 0) { return [string]$exact[0].Id }
+  $slash = $Id.IndexOf("/")
+  if ($slash -lt 0) { return $Id }
+  $family = $Id.Substring($slash + 1)
+  $familyRoutes = @($Choices | Where-Object {
+    $candidate = [string]$_.Id
+    $candidateSlash = $candidate.IndexOf("/")
+    $candidateSlash -ge 0 -and $candidate.Substring($candidateSlash + 1) -ieq $family
+  } | Select-Object -ExpandProperty Id -Unique)
+  if ($familyRoutes.Count -eq 1) { return [string]$familyRoutes[0] }
+  return $Id
 }
 
 function Invoke-SlotsChoiceStep {
@@ -507,14 +537,14 @@ function Invoke-SlotStep {
   } else {
     $taken = @($chain[0..($Rung - 1)])
     $choices = @($all | Where-Object { $taken -notcontains $_.Id }) + @(@{ Rank = 0; Name = "none"; Id = ""; Eligible = $true; Cost = "-" })
-    $want = $dflt
+    $want = Resolve-IreListedRoute -Id $dflt -Choices $choices
     $n = $(if ($Rung -eq 1) { "2nd" } else { "3rd" })
-    $title = "Slot " + $SlotInfo[$Slot] + ": " + $n + " model (fallback " + $Rung + ") after " + $chain[$Rung - 1] + "   default: " + $(if ($dflt) { $dflt } else { "none" })
+    $title = "Slot " + $SlotInfo[$Slot] + ": " + $n + " model (fallback " + $Rung + ") after " + $chain[$Rung - 1] + "   default: " + $(if ($want) { $want } else { "none" })
   }
   $lines = @(foreach ($m in $choices) {
     if ($m.Id -eq "@sonnet") { "   same chain as sonnet: " + (Format-SlotChain $S.slots.sonnet) }
     elseif ($m.Id -eq "") { "   none (no further fallback)" }
-    else { Format-OldModelLine $m $(if ($m.Id -eq $dflt) { "*" } else { " " }) }
+    else { Format-OldModelLine $m $(if ($m.Id -eq $want) { "*" } else { " " }) }
   })
   $index = 0
   for ($i = 0; $i -lt $choices.Count; $i++) { if ($choices[$i].Id -eq $want) { $index = $i; break } }
@@ -650,7 +680,7 @@ function Invoke-LaunchStep {
 function Invoke-LaunchWizard {
   # Returns @{ Slots; Folder; Launch; UcOrch; UcWorker }. With saved slots, Step 1
   # offers them (Enter keeps them); otherwise the slot steps run with the defaults
-  # highlighted, so Enter all the way through takes Alex's default chains.
+  # highlighted on current IRE routes when their provider changed.
   $saved = Read-SlotPicks
   $S = @{ slots = $(if ($saved) { $saved } else { Get-DefaultSlots }); uc_orch = $null; uc_worker = $null; change = ($null -eq $saved) }
   $last = Read-LastPicks

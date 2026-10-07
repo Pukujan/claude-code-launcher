@@ -1,6 +1,6 @@
 # TASK CCL-0081: Refresh the built-in model picker from IRE's October 7 list
 
-<!-- continuity:task {"acceptance":["The four built-in Top 20 tables match the pinned IRE source revision in rank, family, eligibility, selected provider route, and ask prices.","The Windows offline first-20 frontier fallback and shared route-map fixture match the pinned IRE source revision.","Existing table and route-mapping checks pass in required pull request CI.","No seat or shim routing, fixed fallback chain, live proxy, or secret changes."],"depends_on":[],"goal":"Refresh the built-in Top 20 and Windows offline frontier tables from IRE's October 7 source revision.","id":"CCL-0081","issue_url":"https://github.com/Pukujan/claude-code-launcher/issues/107","next_action":"Open the linked pull request, verify required CI, and enable auto-merge only after the final push.","owner":"Alex; Codex implements","priority":"P2","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"active","why":"IRE's current source differs from the October 6 built-in snapshot in model eligibility, selected provider routes, and frontier data."} -->
+<!-- continuity:task {"acceptance":["The four built-in Top 20 tables match the pinned IRE source revision in rank, family, eligibility, selected provider route, and ask prices.","The Windows offline first-20 frontier fallback and shared route-map fixture match the pinned IRE source revision.","When IRE changes a model family's selected provider, Windows defaults and picker highlights use the current listed route for that same family; an existing saved custom route is preserved until the user changes it.","Table, route-mapping, and picker checks pass in required pull request CI.","No seat or shim routing, fixed fallback chain, live proxy, or secret changes."],"depends_on":[],"goal":"Refresh the built-in model tables from IRE and keep Windows picker defaults on the same model family when its selected provider changes.","id":"CCL-0081","issue_url":"https://github.com/Pukujan/claude-code-launcher/issues/107","next_action":"Commit the picker correction and updated expectations, push the checkpoint, and verify required CI on PR #108.","owner":"Alex; Codex implements","priority":"P2","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"active","why":"IRE's current source changes model eligibility and selected provider routes; those route changes can leave Windows picker defaults pointing outside the current list."} -->
 
 - Status: active
 - Owner: Alex; Codex implements
@@ -11,11 +11,11 @@
 
 ## Goal
 
-Refresh the built-in Top 20 and Windows offline frontier tables from IRE's October 7 source revision.
+Refresh the built-in Top 20 and Windows offline frontier tables from IRE's October 7 source revision, and keep Windows picker defaults on the same model family when IRE changes its selected provider.
 
 ## Why
 
-IRE's current source differs from the October 6 built-in snapshot in model eligibility, selected provider routes, and frontier data.
+IRE's current source differs from the October 6 built-in snapshot in model eligibility, selected provider routes, and frontier data. A provider change can also leave a Windows first-run slot default unavailable in the refreshed list.
 
 ## Allowed files
 
@@ -24,30 +24,35 @@ IRE's current source differs from the October 6 built-in snapshot in model eligi
 - `windows/launch-claude-inferhub.ps1`
 - `mac/Launch Claude InferHub.command`
 - `tests/fixtures/ire/top20-frontier-route-map.json`
-- `tests/test_top20_tables.py` and `tests/test_pkg_settings_sync.py`
+- `tests/test_top20_tables.py`, `tests/test_pkg_settings_sync.py`, `tests/test_ckff_off.py`, `tests/test_ladder.py`, and `tests/test_ultracode_windows_wizard.py`
+- `.coord/boss_claim.json`
 - `tasks/` and `checkpoints/CURRENT.md`
 
 ## Human outcome
 
-When IRE cannot be reached, the Windows launcher will offer the same current model eligibility and selected provider routes as IRE's pinned list.
+When IRE cannot be reached, the Windows launcher will offer IRE's current model eligibility and selected routes, and first-run slot defaults will stay on the same model family when a provider prefix changes.
 
 ## Scope and boundaries
 
-- In scope: regenerate the four built-in Top 20 tables, Windows's offline first-20 frontier fallback, and their route-map fixture from IRE commit `c80166a2e827c3e0ed1f311735d9596c2ef5ddbc`; update affected table expectations.
-- Out of scope: the full lab roster in issue #100 and PR #101, IRE changes, live frontier import behavior, seat/shim routing, fixed fallback chains, live proxy activity, and user-local settings.
+- In scope: regenerate the four built-in Top 20 tables, Windows's offline first-20 frontier fallback, and their route-map fixture from IRE commit `c80166a2e827c3e0ed1f311735d9596c2ef5ddbc`; map Windows default highlights to the current listed route for the same model family when IRE changes its provider; use current routes when an unusable saved CKFF-only slot falls back to defaults; update affected expectations. Existing saved custom routes remain as saved unless the user edits that slot.
+- Out of scope: the full lab roster in issue #100 and PR #101, IRE changes, live frontier import behavior, seat/shim routing, the shared fixed fallback configuration, saved custom routes, live proxy activity, and user-local settings.
 - Dependencies/uncertainty: none. The current IRE source revision is pinned for this increment; future drift belongs to the reviewed refresh workflow.
 
 ## Acceptance criteria
 
 - [ ] The shared CSV, shared JSON defaults, Windows table, and Mac table match IRE's 20 rows at the pinned source revision in rank/order, model family, eligibility, selected provider route, and ask prices.
 - [ ] The Windows offline first-20 frontier fallback and route-map fixture match the same pinned IRE bundle.
-- [ ] Existing table-equality and route-mapping checks pass in required pull request CI.
+- [ ] When a default route is no longer listed but its model family remains, the Windows picker highlights IRE's current route for that family, including when the user edits a saved slot.
+- [ ] A saved custom route is preserved unless the user chooses a replacement; a CKFF-only slot falls back to current IRE defaults.
+- [ ] Table, route-mapping, and picker checks pass in required pull request CI.
 - [ ] No seat or shim routing, fixed fallback chain, live proxy, or secret changes.
 - [ ] A linked pull request passes required CI and is set to auto-merge only after its final push.
 
 ## Evidence and sources
 
 Observed at launcher `main` revision `27f951e`: `shared/ire/defaults.json` records an October 6 snapshot. The IRE `main` source commit [c80166a2e827c3e0ed1f311735d9596c2ef5ddbc](https://github.com/Pukujan/inference-recommendation-engine/commit/c80166a2e827c3e0ed1f311735d9596c2ef5ddbc) was published 2026-10-07 17:48:43 UTC. A row comparison found 9 of 20 rows with changed eligibility or first provider route. For rank 1, IRE says DeepSeek V4.1 Flash is not eligible and selects `cb/deepseek-v4.1-flash`; local defaults say eligible and start with `alicn/deepseek-v4.1-flash`. The user's desktop entry point forwards to the repository's Windows launcher.
+
+At PR #108 head `6d7fb069`, required Python CI failed because route, eligibility, and ordering expectations still reflected the prior snapshot. It also showed that Windows picker defaults such as `cb/gpt-6-astra` no longer appear in the refreshed list, even though IRE lists the same family at `cx/gpt-6-astra`. The remaining required CI checks passed at that head, and the supplemental Windows installer check passed. No tests were run locally. The picker-only scope corrections are recorded in [issue comment 6045504469](https://github.com/Pukujan/claude-code-launcher/issues/107#issuecomment-6045504469) and [issue comment 6046443651](https://github.com/Pukujan/claude-code-launcher/issues/107#issuecomment-6046443651).
 
 ## Reproduction details (only when needed)
 
@@ -57,7 +62,8 @@ Starting revision, material inputs/configuration, runtime, exact command or prom
 
 - Leaf owning issue: #107; parent: none; dependencies: none.
 - Primary writer: Codex; branch: `codex/ccl-0081-ire-oct7-model-refresh`; source issue #107 is OPEN as of 2026-10-07.
-- Related issue: #96, which introduced the generated-table workflow; source revision: IRE `main` `c80166a2e827c3e0ed1f311735d9596c2ef5ddbc`; scope correction: [issue comment 6045326197](https://github.com/Pukujan/claude-code-launcher/issues/107#issuecomment-6045326197). No PR, CI evidence, or push receipt yet.
+- Related issue: #96, which introduced the generated-table workflow; source revision: IRE `main` `c80166a2e827c3e0ed1f311735d9596c2ef5ddbc`; scope corrections: [comment 6045326197](https://github.com/Pukujan/claude-code-launcher/issues/107#issuecomment-6045326197), [comment 6045504469](https://github.com/Pukujan/claude-code-launcher/issues/107#issuecomment-6045504469), and [comment 6046443651](https://github.com/Pukujan/claude-code-launcher/issues/107#issuecomment-6046443651).
+- Review PR: [#108](https://github.com/Pukujan/claude-code-launcher/pull/108), open at head `6d7fb069`; initial required Python CI failed and needs a corrective push. All other required checks and the supplemental Windows installer check passed at that head.
 
 ## Checkpoint log
 
