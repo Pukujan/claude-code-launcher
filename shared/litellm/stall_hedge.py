@@ -235,9 +235,17 @@ async def _read_body(receive) -> bytes:
 def _replay(body: bytes):
     pending = {"body": body}
 
+    forever = asyncio.Event()
+
     async def receive():
-        body = pending.pop("body", b"")
-        return {"type": "http.request", "body": body, "more_body": False}
+        if "body" in pending:
+            body = pending.pop("body")
+            return {"type": "http.request", "body": body, "more_body": False}
+        # The body is already delivered. LiteLLM then loops on receive() waiting for
+        # http.disconnect; returning at once here spun the event loop at 100% CPU and
+        # froze the whole proxy. Block instead (the request task cancels this when it ends).
+        await forever.wait()
+        return {"type": "http.disconnect"}
 
     return receive
 
