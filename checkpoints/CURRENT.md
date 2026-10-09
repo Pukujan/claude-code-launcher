@@ -1,12 +1,12 @@
 # Current Repository Checkpoint
 
-<!-- continuity:current {"active_task":"CCL-0079","active_task_file":"tasks/TASK-CCL-0079-inferhub-route-sync.md","protocol_version":"0.1.0-draft","schema":"project-continuity.current.v1"} -->
+<!-- continuity:current {"active_task":"CCL-0081","active_task_file":"tasks/TASK-CCL-0081-ire-oct7-model-refresh.md","protocol_version":"0.1.0-draft","schema":"project-continuity.current.v1"} -->
 
 This is an as-of projection; live GitHub issues own progression. Link the owning leaf, parent ancestry and dependencies for active work.
 
 ## Program state
 
-Phase: the launcher's built-in picker tables track IRE's current Top 20, and the launcher has a first-class Linux entry point and installer on `main`.
+Phase: the scheduled IRE refresh path is in place. The October 7 snapshot is in PR #108; its first required Python CI run failed on stale route expectations and an unavailable picker default. The scoped correction is ready locally on the CCL-0081 branch; `main` remains on the earlier snapshot pending a corrective push, passing PR checks and merge. The launcher also has a first-class Linux entry point and installer on `main`.
 
 ## Completed
 
@@ -27,10 +27,13 @@ Phase: the launcher's built-in picker tables track IRE's current Top 20, and the
 - **CCL-0076**: a first-class Linux entry point and installer in a new `linux/` folder, so a Linux user gets the same one-command start without Docker. `linux/launch-claude-inferhub.sh` and `linux/stop-litellm.sh` are thin entries over the Linux-proven shared launcher body, and `linux/setup.sh` is a distro-aware, shell-rc-aware installer with `--check`/`--uninstall` ([issue #88](https://github.com/Pukujan/claude-code-launcher/issues/88), PR #89, merge `a903844`).
 - `linux-dry-run` is a required status check on `main` (repository settings, 2026-10-07). The job already existed and passed; it is now enforced next to `gates`, `lint`, `mac-dry-run`, `python-tests` and `bash 3.2 compatibility`.
 - **CCL-0077**: the shared launcher body gets the Windows launcher's model-slots step, so Mac and Linux can set all four [CC] slots (sonnet, opus, fable, haiku), each a first model and up to two fallbacks, instead of only sonnet's and fable's first models. Merged with `lint`, `gates`, `mac-dry-run`, `linux-dry-run`, `python-tests` and `bash 3.2 compatibility` all passing ([issue #91](https://github.com/Pukujan/claude-code-launcher/issues/91), PR #92, merge `82169e1`).
+- **CCL-0079**: built-in model routes now match IRE's pinned data, Linux/macOS model pickers show 20 Top 20 and 20 frontier routes, and the Linux picker preserves the user's CB DeepSeek choice ([issue #96](https://github.com/Pukujan/claude-code-launcher/issues/96), PRs #97/#98/#99, merges `7891c11`/`d67e0c9`/`5070ced`; all six required checks passed on PR #99). Issue #96 is CLOSED. A later source refresh is tracked separately under #107.
+- **CCL-0080**: the port 4000 house rule read "Never connect to, restart, stop or bind `127.0.0.1:4000`", which an agent followed literally and so refused to probe the live proxy, reporting routing as unproven. The rule now forbids changing 4000, keeps read-only probing allowed, and names the copy-proxy-then-merge path, in `AGENTS.md`, `PROJECT.md` and `README.md`. Merged with all six required checks passing ([issue #102](https://github.com/Pukujan/claude-code-launcher/issues/102), PR #105, merge `081970f`).
 
 ## Active
 
-- **CCL-0079**: the table refresh and Linux/macOS model-picker fix merged in PRs #97 and #98, but issue #96 was reopened after the user found a provider mismatch ([issue #96](https://github.com/Pukujan/claude-code-launcher/issues/96), parent: none, dependencies: none, active branch `codex/ccl-0079-ire-provider-roster`). The full local picker now has 20 Top 20 and 20 frontier choices; a user-local CB preference selects `cb/deepseek-v4.1-flash`. Latest IRE main still selects `alicn` for that family, conflicting with IRE issue #94 closure evidence. The preference persistence is under CI review; after merge, file the requested IRE issue log.
+- **CCL-0081**: regenerated the four built-in Top 20 tables and Windows offline frontier fallback from pinned IRE commit `c80166a2`. PR #108 is open; required Python CI failed at its first head, while the other required checks and Windows installer check passed. The issue also covers routing Windows picker defaults, including CKFF-only saved slots, to IRE's current route for the same model family when provider prefixes change ([issue #107](https://github.com/Pukujan/claude-code-launcher/issues/107), scope corrections: [comment 6045326197](https://github.com/Pukujan/claude-code-launcher/issues/107#issuecomment-6045326197), [comment 6045504469](https://github.com/Pukujan/claude-code-launcher/issues/107#issuecomment-6045504469), and [comment 6046443651](https://github.com/Pukujan/claude-code-launcher/issues/107#issuecomment-6046443651), parent: none, dependencies: none, branch `codex/ccl-0081-ire-oct7-model-refresh`).
+- **CCL-0082**: when the first model in a slot stays silent, hold the Claude Code stream and race the next rung on the same prompt; the quiet model is benched and leads again on a later real call after that bench ends ([issue #109](https://github.com/Pukujan/claude-code-launcher/issues/109), parent [#53](https://github.com/Pukujan/claude-code-launcher/issues/53), dependencies: none, branch `ccl-0082-stall-hedge`, [PR #110](https://github.com/Pukujan/claude-code-launcher/pull/110)). Thresholds are the proposed starting values. The live proxy on port 4000 is unchanged. Unit tests pass locally; required CI on the pull request is still open.
 
 ## Queued
 
@@ -38,8 +41,8 @@ Phase: the launcher's built-in picker tables track IRE's current Top 20, and the
 
 ## Blockers
 
-- None.
+- PR #108's first required Python CI run failed; the picker and stale expectations are corrected locally and await a checkpoint push and new CI run.
 
 ## Next atomic action
 
-Commit and checkpoint local provider-preference persistence, verify and merge its required checks, then file the user-requested IRE issue log.
+Push the picker correction and synchronized checkpoint, then verify required CI on PR #108 before enabling auto-merge.

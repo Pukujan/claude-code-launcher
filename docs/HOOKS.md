@@ -130,6 +130,16 @@ In short:
   no text and no tool call is retried once on the same model; a second empty
   reply from that model moves the request to the slot's next model. Empty
   replies never bench a model. Streaming replies are not checked.
+- **Silent model race (issue #109).** A streaming `POST /v1/messages` holds
+  `message_start` until the first text or thinking token. If the slot's first
+  model stays quiet past its own recent time-to-first-token (20 s when it has
+  no history, at most 90 s), the next rung is started on the same prompt. The
+  first model to write is the only stream Claude Code sees. The quiet model is
+  benched, starting at 30 s and doubling up to 10 minutes, then it is first
+  again on a later real call. The last rung is never benched. After the reply
+  has started, a 120 s gap ends that turn; another model is not spliced onto
+  the partial answer. `CCL_STALL_HEDGE=0` turns the race off. Saved slot order
+  is unchanged. `shared/litellm/stall_hedge.py`, installed from `sitecustomize.py`.
 - **Advisor.** LiteLLM runs Claude Code's advisor tool itself for
   non-Anthropic providers, and it sends the advisor model the agent's history
   with its tool calls and tool results still in it, no system prompt and no

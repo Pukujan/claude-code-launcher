@@ -23,11 +23,11 @@ class Defaults(unittest.TestCase):
         self.b = ire_bundle()
         os.environ.pop("CCL_OPT_IN_MODELS", None)
 
-    def test_stock_chains_when_nothing_blocks(self):
-        # Current IRE marks cbcn/deepseek-v4-flash eligible, so the fixed chain
-        # keeps that provider route after Qwen Flash.
+    def test_stock_chains_replace_newly_gated_rungs(self):
+        # IRE now gates cbcn/deepseek-v4-flash, so the default uses the next
+        # eligible Top 20 route while the configured fixed chain stays unchanged.
         self.assertEqual(L.default_ladder(self.b, "main", "cb/deepseek-v4.1-flash"),
-                         ["ali/qwen3.8-flash", "cbcn/deepseek-v4-flash"])
+                         ["ali/qwen3.8-flash", "mm/MiniMax-M3"])
         self.assertEqual(L.default_ladder(self.b, "advisor", "cbcn/glm-5.3-flash"), ["cbcn/minimax-m3"])
 
     def test_fixed_chains_are_the_builtin_defaults(self):
@@ -239,9 +239,9 @@ class Picker(unittest.TestCase):
         it = iter(["1"])
         row = L.prompt_primary(b, "main", inp=lambda _: next(it), out=io.StringIO())
         self.assertEqual(row["id"], "cx/gpt-6.1-sol")
-        it = iter(["t", "7"])   # 7th Top 20 row after the reorder
+        it = iter(["t", "7"])   # 7th Top 20 row after the IRE refresh
         row = L.prompt_primary(b, "main", inp=lambda _: next(it), out=io.StringIO())
-        self.assertEqual(row["id"], "cbcn/deepseek-v4-pro")
+        self.assertEqual(row["id"], "cbcn/kimi-k2.7")
         it = iter(["o"])
         self.assertEqual(L.prompt_primary(b, "advisor", allow_off=True, inp=lambda _: next(it),
                                           out=io.StringIO())["id"], "")
@@ -277,13 +277,14 @@ class HandPickedSharedVendors(unittest.TestCase):
                                       capture_output=True, text=True, env=env, check=True)
 
             cat = [c["id"] for c in L.catalog(I.builtin_inputs()) if c["id"] != "cb/deepseek-v4.1-flash"]
-            # main hand-picks a cbcn rung; advisor then picks a cbcn primary and a cb rung by hand
+            # Main hand-picks a cbcn rung; the advisor's cb fallback shares the
+            # main primary's provider and must be kept with a warning.
             choose("main", "cb/deepseek-v4.1-flash", str(cat.index("cbcn/deepseek-v4-flash") + 1))
             cat_a = [c["id"] for c in L.catalog(I.builtin_inputs()) if c["id"] != "cbcn/glm-5.3-flash"]
-            r = choose("advisor", "cbcn/glm-5.3-flash", str(cat_a.index("cb/gpt-6-luna") + 1))
+            r = choose("advisor", "cbcn/glm-5.3-flash", str(cat_a.index("cb/deepseek-v4.1-flash") + 1))
             state = json.loads(st.read_text())
         self.assertEqual(state["main"]["fallbacks"], ["cbcn/deepseek-v4-flash"])
-        self.assertEqual(state["advisor"]["fallbacks"], ["cb/gpt-6-luna"])
+        self.assertEqual(state["advisor"]["fallbacks"], ["cb/deepseek-v4.1-flash"])
         self.assertIn("shares vendor 'cb/'", r.stderr)
 
 
@@ -416,7 +417,7 @@ class Cli(unittest.TestCase):
                                     "--role", role, "--primary", prim], input="\n", text=True, capture_output=True)
                 self.assertEqual(r.returncode, 0, r.stderr)
             s = json.loads(st.read_text())
-            self.assertEqual(s["main"]["fallbacks"], ["ali/qwen3.8-flash"])
+            self.assertEqual(s["main"]["fallbacks"], ["ali/qwen3.8-flash", "mm/MiniMax-M3"])
             self.assertEqual(s["advisor"]["fallbacks"], ["cbcn/minimax-m3"])
             main_v = {L.prefix(s["main"]["primary"])} | {L.prefix(r) for r in s["main"]["fallbacks"]}
             adv_v = {L.prefix(s["advisor"]["primary"])} | {L.prefix(r) for r in s["advisor"]["fallbacks"]}
