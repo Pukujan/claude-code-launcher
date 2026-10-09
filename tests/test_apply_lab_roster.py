@@ -1,7 +1,6 @@
 """The lab roster's tokens per second reach the picker table and the bundle."""
 import json
 import sys
-from pathlib import Path
 
 from conftest import REPO
 
