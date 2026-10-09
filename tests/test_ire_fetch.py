@@ -470,6 +470,17 @@ def test_cli_writes_the_picker_table_and_top20_csv(env, tmp_path):
     assert rows[0]["best_route_min_ask_out_usdc_per_1m"] == "0.0006"
 
 
+def test_shell_table_appends_tokens_per_second_only_when_the_row_has_it():
+    row = dict(F.load_defaults()["top20"][0])
+    bare = F.shell_table({"top20": [row]})
+    assert bare.strip().count("|") == 5
+    row["tps"] = 114.8
+    with_speed = F.shell_table({"top20": [row]}).strip()
+    assert with_speed.endswith("|114.8")
+    row["tps"] = 45
+    assert F.shell_table({"top20": [row]}).strip().endswith("|45")
+
+
 def test_builtin_table_matches_the_mac_launcher_fallback():
     # The Mac launcher's built-in MODELS is what it shows when ire_fetch.py can't run at all.
     text = (REPO / "mac" / "Launch Claude InferHub.command").read_text(encoding="utf-8")

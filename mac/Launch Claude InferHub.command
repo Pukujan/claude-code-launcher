@@ -83,8 +83,9 @@ OVR_FILE="$LITELLM_DIR/requirements-overrides.txt"
 REQUIREMENTS="$(cat "$REQ_FILE" 2>/dev/null)"
 OVERRIDES="$(cat "$OVR_FILE" 2>/dev/null)"
 
-# HOOK(ire-models): the built-in picker table, rank|name|id|eligible|in|out.
-# load_ire_table replaces it with the live IRE Top 20 when shared/ire answers.
+# HOOK(ire-models): the built-in picker table, rank|name|id|eligible|in|out
+# and, when the list has a speed, |tps. load_ire_table replaces it with the
+# live IRE Top 20 when shared/ire answers.
 # This copy is the last resort; it matches shared/litellm/config/top20-builtin.csv,
 # the Windows table and shared/ire/defaults.json (tests check all of them).
 # The two prices are the best route's cheapest listed asks per 1M tokens.
@@ -369,7 +370,7 @@ fetch_ire() {
   # Writes:
   #   $STATE_DIR/ire.json           the bundle for the ladder picker (CCL_IRE_JSON);
   #                                 its "frontier" key is empty if IRE has none
-  #   $STATE_DIR/ire-table.txt      rank|name|id|eligible|cost for the picker
+  #   $STATE_DIR/ire-table.txt      rank|name|id|eligible|in|out|tps for the picker
   #   shared/litellm/config/top20.csv  the Top 20 for sync_inferhub_top20.py
   local py line
   IRE_JSON="$STATE_DIR/ire.json"
@@ -393,6 +394,18 @@ fetch_ire() {
       log "IRE: local provider preferences could not be applied; using IRE's current routes"
     fi
   fi
+  # Lab roster, when present, replaces the fetched lists. A failure keeps them.
+  if [ -f "$HOME/.config/inferhub/lab-roster.json" ]; then
+    if line="$("$py" "$REPO_ROOT/shared/ire/apply_lab_roster.py" \
+        --roster "$HOME/.config/inferhub/lab-roster.json" \
+        --bundle "$IRE_JSON" --table "$IRE_TABLE" \
+        --top20-csv "$LITELLM_DIR/config/top20.csv" 2>&1 >/dev/null)"; then
+      [ -n "$line" ] && log "IRE: ${line#\[ire\] }"
+    else
+      [ -n "$line" ] && printf '%s\n' "$line" >> "$LOG_FILE"
+      log "IRE: the lab roster could not be applied; keeping the fetched lists"
+    fi
+  fi
   [ -f "$IRE_JSON" ] && export CCL_IRE_JSON="$IRE_JSON"
   load_ire_table
   return 0
@@ -405,8 +418,10 @@ load_ire_table() {
   [ -n "${IRE_TABLE:-}" ] && [ -s "$IRE_TABLE" ] || return 0
   table="$(cat "$IRE_TABLE")"
   n="$(printf '%s\n' "$table" | grep -c '|')"
+  # Field 7, tokens per second, is optional. A table from before speed was
+  # shown still loads. A non-numeric speed is rejected with the rest of a bad line.
   if [ "$n" -lt 1 ] || printf '%s\n' "$table" \
-      | grep -vqE '^[0-9]+\|[^|]+\|[a-z0-9]+(/[A-Za-z0-9._-]+)+\|(true|false)\|[0-9.]*\|[0-9.]*$'; then
+      | grep -vqE '^[0-9]+\|[^|]+\|[a-z0-9]+(/[A-Za-z0-9._-]+)+\|(true|false)\|[0-9.]*\|[0-9.]*(\|[0-9.]*)?$'; then
     log "IRE: the fetched model table looks wrong; using the built-in one"
     return 0
   fi
@@ -512,27 +527,30 @@ ensure_proxy() {
 }
 
 # ---- pickers ----------------------------------------------------------------
-model_field() {  # model_field INDEX(1-based) FIELD(1-6)
+model_field() {  # model_field INDEX(1-based) FIELD(1-7; 7 is tok/s when present)
   printf '%s\n' "$MODELS" | awk -F'|' -v i="$1" -v f="$2" 'NR == i {print $f}'
 }
 
 print_models() {  # print_models with_off
-  local rank name id elig cost cout judge tag star over
+  local rank name id elig cost cout tps judge tag star over speed over_bit
   if [ "$1" = "1" ]; then
     printf '   0  OFF  (disable advisor tool / seat aliases fall back to main)\n' >&2
   fi
-  while IFS='|' read -r rank name id elig cost cout; do
+  while IFS='|' read -r rank name id elig cost cout tps; do
     if [ "$elig" = "true" ]; then tag="eligible"; else tag="gated"; fi
     star=" "
     if [ "$1" != "1" ] && [ "$id" = "$DEFAULT_MODEL_ID" ]; then star="*"; fi
     # The $0.10 cap is judged on the output ask when the table carries one.
     judge="$cout"; [ -n "$judge" ] || judge="$cost"
     over=""; awk -v c="$judge" 'BEGIN { exit !(c + 0 >= 0.10) }' && over="OVER \$0.10"
+    speed=""; [ -n "$tps" ] && speed="  ${tps} tok/s"
+    over_bit=""; [ -n "$over" ] && over_bit=" $over"
     if [ -n "$cout" ]; then
-      printf '%s%3d  %-28s %-42s %-8s  ~%s in/%s out per 1M %s\n' \
-        "$star" "$rank" "$name" "$id" "$tag" "$cost" "$cout" "$over" >&2
+      printf '%s%3d  %-28s %-42s %-8s  ~%s in/%s out per 1M%s%s\n' \
+        "$star" "$rank" "$name" "$id" "$tag" "$cost" "$cout" "$speed" "$over_bit" >&2
     else
-      printf '%s%3d  %-28s %-42s %-8s  ~%s/1M %s\n' "$star" "$rank" "$name" "$id" "$tag" "$cost" "$over" >&2
+      printf '%s%3d  %-28s %-42s %-8s  ~%s/1M%s%s\n' \
+        "$star" "$rank" "$name" "$id" "$tag" "$cost" "$speed" "$over_bit" >&2
     fi
   done <<EOF
 $MODELS
@@ -564,9 +582,14 @@ pick_main() {
     log "Choose MAIN model (IRE Top 20). Default DeepSeek V4.1 Flash."
     log "MAIN executor (maps to alias sonnet/main). gated = ranked but not currently recommendation-eligible."
     print_models 0
-    ask "Main model number [Enter = 1, f = IRE frontier list, q = quit]: " || die "Cancelled."
+    ask "Main model number [Enter = 1, f = frontier order, u = utility, q = quit]: " || die "Cancelled."
     REPLY="$(trim "$REPLY")"
-    case "$REPLY" in q|Q) die "Cancelled." ;; '') REPLY=1 ;; f|F) pick_frontier main && return 0; continue ;; esac
+    case "$REPLY" in
+      q|Q) die "Cancelled." ;;
+      '') REPLY=1 ;;
+      f|F) pick_frontier main frontier && return 0; continue ;;
+      u|U) pick_frontier main utility && return 0; continue ;;
+    esac
     if idx="$(resolve_model "$REPLY")"; then
       MAIN_ID="$(model_field "$idx" 3)"; MAIN_NAME="$(model_field "$idx" 2)"; return 0
     fi
@@ -586,11 +609,12 @@ pick_advisor() {
     log "Choose ADVISOR model (IRE Top 20) or OFF."
     log "ADVISOR maps to alias opus/advisor. Mid-session use /advisor opus or /advisor sonnet (aliases), not raw InferHub ids."
     print_models 1
-    ask "Advisor number [Enter = 0 OFF, f = IRE frontier list, q = quit]: " || die "Cancelled."
+    ask "Advisor number [Enter = 0 OFF, f = frontier order, u = utility, q = quit]: " || die "Cancelled."
     REPLY="$(trim "$REPLY")"
     case "$REPLY" in
       q|Q) die "Cancelled." ;;
-      f|F) pick_frontier advisor && return 0; continue ;;
+      f|F) pick_frontier advisor frontier && return 0; continue ;;
+      u|U) pick_frontier advisor utility && return 0; continue ;;
       ''|0|off|OFF) ADVISOR_ID=""; ADVISOR_NAME=""; return 0 ;;
     esac
     if idx="$(resolve_model "$REPLY")"; then
@@ -979,8 +1003,8 @@ chain_set() {
 }
 
 # The pickable routes as TSV, read once per launch: id, name, rank, eligible,
-# price_in, price_out, list. ladder_cli.py catalog is the shared source (Top 20
-# plus opted-in extras), so the editor and the ladder picker cannot drift.
+# price_in, price_out, list, tps. ladder_cli.py catalog is the shared source
+# (Top 20 plus opted-in extras), so the editor and the ladder picker cannot drift.
 slot_catalog_load() {
   SLOT_CATALOG="$("$SLOTS_PY" "$LADDER_CLI" catalog 2>/dev/null | "$SLOTS_PY" -c '
 import json, sys
@@ -988,12 +1012,21 @@ try:
     rows = json.load(sys.stdin)
 except Exception:
     rows = []
+def speed(value):
+    if value in (None, ""):
+        return ""
+    try:
+        return f"{float(value):.1f}".rstrip("0").rstrip(".")
+    except (TypeError, ValueError):
+        return ""
+
 for r in rows:
     print("\t".join([
         str(r.get("id", "")), str(r.get("name", "")), str(r.get("rank", "")),
         "1" if r.get("eligible") else "0",
         str(r.get("price_in", "")), str(r.get("price_out", "")),
         str(r.get("list", "")),
+        speed(r.get("tps")),
     ]))
 ' 2>/dev/null)"
 }
@@ -1004,24 +1037,25 @@ for r in rows:
 slot_rung_pick() {
   # slot_rung_pick <slot> <rung> <want> <taken> <allow_same>
   local slot="$1" rung="$2" want="$3" taken="$4" allow_same="$5"
-  local idx=0 key i n tab id name rank elig pin pout list tag star line
+  local idx=0 key i n tab id name rank elig pin pout list tps tag star line speed
   tab="$(printf '\t')"
   SLOT_IDS=(); PICKER_LINES=()
   if [ "$allow_same" = "1" ]; then
     SLOT_IDS[0]="@sonnet"
     PICKER_LINES[0]="   same chain as sonnet: $(slot_chain_text sonnet)"
   fi
-  while IFS="$tab" read -r id name rank elig pin pout list; do
+  while IFS="$tab" read -r id name rank elig pin pout list tps; do
     [ -n "$id" ] || continue
     [ "$list" = "$SLOT_LIST" ] || continue
     case " $taken " in *" $id "*) continue ;; esac
     if [ "$elig" = "1" ]; then tag="eligible"; else tag="gated"; fi
     star=" "
     [ "$id" = "$want" ] && star="*"
+    speed=""; [ -n "$tps" ] && speed="  ${tps} tok/s"
     n=${#SLOT_IDS[@]}
     SLOT_IDS[n]="$id"
-    PICKER_LINES[n]="$(printf '%s%3s  %-28s %-42s %-8s  ~%s in/%s out per 1M' \
-      "$star" "$rank" "$name" "$id" "$tag" "$pin" "$pout")"
+    PICKER_LINES[n]="$(printf '%s%3s  %-28s %-42s %-8s  ~%s in/%s out per 1M%s' \
+      "$star" "$rank" "$name" "$id" "$tag" "$pin" "$pout" "$speed")"
   done <<EOF
 $SLOT_CATALOG
 EOF
@@ -1041,8 +1075,8 @@ EOF
       *) line="3rd model (fallback 2) after $(chain_at "$(slot_chain "$slot")" 2)" ;;
     esac
     show_picker "${#SLOT_IDS[@]}" "$idx" "Slot $(slot_title "$slot"): $line   now: $(slot_chain_text "$slot")" \
-      "Up/Down move. Enter picks. Left = back a step. t = Top 20, f = frontier. Esc quits." \
-      "Prices are per 1M tokens. gated = ranked but not currently recommendation-eligible. list: $SLOT_LIST"
+      "Up/Down move. Enter picks. Left = back a step. t = Top 20, f = frontier, u = pictures. Esc quits." \
+      "Prices are per 1M tokens. Speed, when shown, is tok/s. gated = ranked but not currently recommendation-eligible. list: $SLOT_LIST"
     key="$(read_menu_key)"
     case "$key" in
       UP|DOWN|PGUP|PGDN|HOME|END) idx="$(move_index "$idx" "${#SLOT_IDS[@]}" "$key" 10)" ;;
@@ -1050,6 +1084,7 @@ EOF
       LEFT) return 1 ;;
       t) SLOT_LIST="top20"; return 2 ;;
       f) SLOT_LIST="frontier"; return 2 ;;
+      u) SLOT_LIST="utility"; return 2 ;;
       ESC) die "Cancelled." ;;
     esac
   done
@@ -1272,13 +1307,14 @@ pick_ladder() {
     || log "warning: ladder picker failed for $role; the stock chains stay"
 }
 
-# Seat primary from the IRE frontier list (or back to the Top 20) via the
+# Seat primary from one IRE list (frontier by default, or utility) via the
 # shared picker; sets MAIN_ID/MAIN_NAME or ADVISOR_ID/ADVISOR_NAME.
 pick_frontier() {
-  local role="$1" out="$STATE_DIR/primary-pick.txt" id name off=()
+  # pick_frontier <role> [frontier|utility|top20]
+  local role="$1" list="${2:-frontier}" out="$STATE_DIR/primary-pick.txt" id name off=()
   [ "$role" = "advisor" ] && off=(--allow-off)
   rm -f "$out"
-  "$VENV_PY" "$LADDER_CLI" primary --role "$role" --out "$out" ${off[@]+"${off[@]}"} || return 1
+  "$VENV_PY" "$LADDER_CLI" primary --role "$role" --list "$list" --out "$out" ${off[@]+"${off[@]}"} || return 1
   IFS="$(printf '\t')" read -r id name < "$out" || return 1
   if [ "$role" = "main" ]; then MAIN_ID="$id"; MAIN_NAME="$name"; else ADVISOR_ID="$id"; ADVISOR_NAME="$name"; fi
 }
@@ -1341,11 +1377,14 @@ for row in os.environ["MODELS_TABLE"].splitlines():
         continue
     rank, name, mid, elig = fields[:4]
     provider = mid.split("/", 1)[0]
+    description = ("IRE Top 20 #" + rank + "; " + ("eligible" if elig == "true" else "gated")
+                   + " - direct, no slot chain")
+    if len(fields) >= 7 and fields[6].strip():
+        description += f"; {fields[6].strip()} tok/s"
     options.append({
         "model": "ih/" + mid,
         "label": f"{name} — {provider} (IRE Top 20 #{rank})",
-        "description": "IRE Top 20 #" + rank + "; " + ("eligible" if elig == "true" else "gated")
-                       + " - direct, no slot chain",
+        "description": description,
         "behavesAs": "claude-sonnet-5",
     })
 ire_path = os.environ.get("CCL_IRE_JSON")
@@ -1353,26 +1392,56 @@ if ire_path and os.path.isfile(ire_path):
     try:
         with open(ire_path, encoding="utf-8") as f:
             ire = json.load(f)
+        lab = bool(ire.get("lab_roster"))
+        seen = set()
+        if lab:
+            for opt in options:
+                model = str(opt.get("model") or "")
+                if model.startswith("ih/"):
+                    seen.add(model[3:])
+
+        def direct_rows(rows, label):
+            for row in rows:
+                mid = str(row.get("route") or "")
+                if "/" not in mid:
+                    continue
+                if lab and mid in seen:
+                    continue
+                rank = int(row["rank"])
+                name = str(row.get("name") or mid)
+                eligible = bool(row.get("eligible"))
+                provider = mid.split("/", 1)[0]
+                description = (f"IRE {label} #{rank}; "
+                                + ("eligible" if eligible else "gated")
+                                + " - direct, no slot chain")
+                speed = row.get("tps")
+                if speed not in (None, ""):
+                    try:
+                        text = f"{float(speed):.1f}".rstrip("0").rstrip(".")
+                        description += f"; {text} tok/s"
+                    except (TypeError, ValueError):
+                        pass
+                options.append({
+                    "model": "ih/" + mid,
+                    "label": f"{name} — {provider} (IRE {label} #{rank})",
+                    "description": description,
+                    "behavesAs": "claude-sonnet-5",
+                })
+                if lab:
+                    seen.add(mid)
+
         frontier = [r for r in ire.get("frontier", [])
                     if isinstance(r, dict) and r.get("best_route")
-                    and str(r.get("rank", "")).isdigit() and int(r["rank"]) <= 20]
+                    and str(r.get("rank", "")).isdigit()
+                    and (lab or int(r["rank"]) <= 20)]
         frontier.sort(key=lambda r: (int(r["rank"]), str(r.get("route", ""))))
-        for row in frontier:
-            mid = str(row.get("route") or "")
-            if "/" not in mid:
-                continue
-            rank = int(row["rank"])
-            name = str(row.get("name") or mid)
-            eligible = bool(row.get("eligible"))
-            provider = mid.split("/", 1)[0]
-            options.append({
-                "model": "ih/" + mid,
-                "label": f"{name} — {provider} (IRE Frontier #{rank})",
-                "description": f"IRE Frontier #{rank}; "
-                               + ("eligible" if eligible else "gated")
-                               + " - direct, no slot chain",
-                "behavesAs": "claude-sonnet-5",
-            })
+        direct_rows(frontier, "Frontier")
+        if lab:
+            utility = [r for r in ire.get("utility", [])
+                       if isinstance(r, dict) and r.get("route")
+                       and str(r.get("rank", "")).isdigit()]
+            utility.sort(key=lambda r: (int(r["rank"]), str(r.get("route", ""))))
+            direct_rows(utility, "Utility")
     except (OSError, ValueError, TypeError):
         pass
 with open(path, encoding="utf-8") as f:

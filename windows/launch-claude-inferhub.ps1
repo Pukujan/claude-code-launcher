@@ -373,7 +373,11 @@ function Format-OldModelLine {
   param($m, [string]$Star = " ")
   $tag = $(if ($m.Eligible) { "eligible" } else { "gated" })
   $out = $(if ($m.CostOut) { " (out ~" + $m.CostOut + "/Mtok)" } else { "" })
-  "{0}{1,2}  {2,-28} {3,-42} {4}  ~{5}/Mtok{6}" -f $Star, $m.Rank, $m.Name, $m.Id, $tag, $m.Cost, $out
+  # Tps is tokens per second. The built-in table has no speed, so the suffix
+  # stays off until a row carries one.
+  $speed = ""
+  if ($null -ne $m.Tps -and "$($m.Tps)" -ne "") { $speed = "  " + $m.Tps + " tok/s" }
+  "{0}{1,2}  {2,-28} {3,-42} {4}  ~{5}/Mtok{6}{7}" -f $Star, $m.Rank, $m.Name, $m.Id, $tag, $m.Cost, $out, $speed
 }
 
 function Get-LastPicksPath {
