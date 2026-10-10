@@ -1,12 +1,12 @@
 # Current Repository Checkpoint
 
-<!-- continuity:current {"active_task":"CCL-0081","active_task_file":"tasks/TASK-CCL-0081-ire-oct7-model-refresh.md","protocol_version":"0.1.0-draft","schema":"project-continuity.current.v1"} -->
+<!-- continuity:current {"active_task":"CCL-0078","active_task_file":"tasks/TASK-CCL-0078-platform-label.md","protocol_version":"0.1.0-draft","schema":"project-continuity.current.v1"} -->
 
 This is an as-of projection; live GitHub issues own progression. Link the owning leaf, parent ancestry and dependencies for active work.
 
 ## Program state
 
-Phase: the scheduled IRE refresh path is in place. The October 7 snapshot is in PR #108; its first required Python CI run failed on stale route expectations and an unavailable picker default. The scoped correction is ready locally on the CCL-0081 branch; `main` remains on the earlier snapshot pending a corrective push, passing PR checks and merge. The launcher also has a first-class Linux entry point and installer on `main`.
+Phase: the launcher's built-in picker tables track IRE's October 7 Top 20, the stall-hedge replay fix is on `main`, and the launcher has a first-class Linux entry point and installer on `main`. The IRE refresh and the stall hedge both merged, but their issue and projection reconciliation is still owed. The platform-label fix is the one open pull request.
 
 ## Completed
 
@@ -32,8 +32,20 @@ Phase: the scheduled IRE refresh path is in place. The October 7 snapshot is in 
 
 ## Active
 
-- **CCL-0081**: regenerated the four built-in Top 20 tables and Windows offline frontier fallback from pinned IRE commit `c80166a2`. PR #108 is open; required Python CI failed at its first head, while the other required checks and Windows installer check passed. The issue also covers routing Windows picker defaults, including CKFF-only saved slots, to IRE's current route for the same model family when provider prefixes change ([issue #107](https://github.com/Pukujan/claude-code-launcher/issues/107), scope corrections: [comment 6045326197](https://github.com/Pukujan/claude-code-launcher/issues/107#issuecomment-6045326197), [comment 6045504469](https://github.com/Pukujan/claude-code-launcher/issues/107#issuecomment-6045504469), and [comment 6046443651](https://github.com/Pukujan/claude-code-launcher/issues/107#issuecomment-6046443651), parent: none, dependencies: none, branch `codex/ccl-0081-ire-oct7-model-refresh`).
-- **CCL-0082**: when the first model in a slot stays silent, hold the Claude Code stream and race the next rung on the same prompt; the quiet model is benched and leads again on a later real call after that bench ends ([issue #109](https://github.com/Pukujan/claude-code-launcher/issues/109), parent [#53](https://github.com/Pukujan/claude-code-launcher/issues/53), dependencies: none, branch `ccl-0082-stall-hedge`, [PR #110](https://github.com/Pukujan/claude-code-launcher/pull/110)). Thresholds are the proposed starting values. The live proxy on port 4000 is unchanged. Unit tests pass locally; required CI on the pull request is still open.
+- **CCL-0078**: the shared launcher body names the platform it is actually running on. The
+  startup banner and the `need_curl()` failure message hardcoded "macOS", a leftover from when
+  the body was the macOS-only launcher, so `claude-acs` on Linux printed
+  `=== Launch Claude InferHub (macOS) ... ===` and wrote the same line to the launcher log.
+  `OS_LABEL` (Darwin -> `macOS`, else `uname -s`) now feeds both. Pull request #95 is open; its
+  `gates` check failed only because this task file used a `## Log` heading instead of the
+  protocol's `## Checkpoint log`, which is now corrected ([issue #94](https://github.com/Pukujan/claude-code-launcher/issues/94), branch `ccl-0094-platform-label`).
+- **CCL-0081**: regenerated the four built-in Top 20 tables and the Windows offline frontier
+  fallback from pinned IRE commit `c80166a2`, and routes Windows picker defaults, including
+  CKFF-only saved slots, to IRE's current route for the same model family when provider prefixes
+  change. The code is merged as `6130d2d` ([PR #108](https://github.com/Pukujan/claude-code-launcher/pull/108)); the issue #107 reconciliation is still owed ([issue #107](https://github.com/Pukujan/claude-code-launcher/issues/107), parent: none, dependencies: none).
+- **CCL-0082**: when the first model in a slot stays silent, hold the [CC] stream and race the
+  next rung on the same prompt; the quiet model is benched and leads again on a later real call
+  after that bench ends. The code is merged as `3c7d973` ([PR #110](https://github.com/Pukujan/claude-code-launcher/pull/110)), with the replay busy-loop follow-up on #111 merged as `2faf4a0` ([PR #112](https://github.com/Pukujan/claude-code-launcher/pull/112)); the issue #109 reconciliation is still owed ([issue #109](https://github.com/Pukujan/claude-code-launcher/issues/109), parent [#53](https://github.com/Pukujan/claude-code-launcher/issues/53), dependencies: none). Thresholds are the proposed starting values. The live proxy on port 4000 is unchanged.
 
 ## Queued
 
@@ -41,8 +53,9 @@ Phase: the scheduled IRE refresh path is in place. The October 7 snapshot is in 
 
 ## Blockers
 
-- PR #108's first required Python CI run failed; the picker and stale expectations are corrected locally and await a checkpoint push and new CI run.
+- None.
 
 ## Next atomic action
 
-Push the picker correction and synchronized checkpoint, then verify required CI on PR #108 before enabling auto-merge.
+Push the checkpoint fix on `ccl-0094-platform-label` and verify the required checks on PR #95
+before enabling auto-merge; then reconcile the #107 and #109 issue and projection records.
