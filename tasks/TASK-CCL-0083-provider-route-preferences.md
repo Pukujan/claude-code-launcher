@@ -1,8 +1,8 @@
 # TASK CCL-0083: Propagate IRE's fixed route lists into the built-in tables
 
-<!-- continuity:task {"acceptance":["The five built-in tables lead every GLM family with a cb/cbcn route and every Qwen policy family with an ali/alicn route, matching IRE's post-fix list at d7014326.","Pull request 117 lands the nightly workflow's regenerated branch c72c409 plus the aligned test expectations, with five-way parity and prices that move with the route.","Issue 113 records the scope revision: the launcher-side pin is dropped because IRE #111 fixed the selector at the source.","The nightly PR-creation failure is filed as issue 115 with an owner decision requested."],"depends_on":["CCL-0081"],"goal":"Deliver the owner's route policy (cb/cbcn for GLM, ali/alicn for Qwen Flash/Max) by propagating IRE's post-fix route lists into the five built-in tables, after IRE #111 fixed the thin-supply selector at the source.","id":"CCL-0083","issue_url":"https://github.com/Pukujan/claude-code-launcher/issues/113","next_action":"Verify required CI on PR 117, merge, close #113 from the merged state.","owner":"Alex; executor agent implements","priority":"P1","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"active","why":"IRE's route ordering put the cheapest listed ask first, a thin-supply route, at the head of the GLM and Qwen families (IRE #110, #105). The owner set the policy on 2026-10-09: cb/cbcn for GLM, ali/alicn for Qwen Flash/Max. IRE merged the selector fix (d7014326, IRE #111) and closed #110 on 2026-10-10, so the launcher's job changed from pinning a local override to propagating IRE's fixed list."} -->
+<!-- continuity:task {"acceptance":["The five built-in tables lead every GLM family with a cb/cbcn route and every Qwen policy family with an ali/alicn route, matching IRE's post-fix list at d7014326.","Pull request 117 lands the nightly workflow's regenerated branch c72c409 plus the aligned test expectations, with five-way parity and prices that move with the route.","Issue 113 records the scope revision: the launcher-side pin is dropped because IRE #111 fixed the selector at the source.","The nightly PR-creation failure is filed as issue 115 with an owner decision requested."],"depends_on":["CCL-0081"],"goal":"Deliver the owner's route policy (cb/cbcn for GLM, ali/alicn for Qwen Flash/Max) by propagating IRE's post-fix route lists into the five built-in tables, after IRE #111 fixed the thin-supply selector at the source.","id":"CCL-0083","issue_url":"https://github.com/Pukujan/claude-code-launcher/issues/113","next_action":"None for this task. Issue 115 waits on the owner's decision on the nightly PR-creation setting; issues 53 and 41 are owner/human-blocked.","owner":"Alex; executor agent implements","priority":"P1","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"completed","why":"IRE's route ordering put the cheapest listed ask first, a thin-supply route, at the head of the GLM and Qwen families (IRE #110, #105). The owner set the policy on 2026-10-09: cb/cbcn for GLM, ali/alicn for Qwen Flash/Max. IRE merged the selector fix (d7014326, IRE #111) and closed #110 on 2026-10-10, so the launcher's job changed from pinning a local override to propagating IRE's fixed list."} -->
 
-- Status: active
+- Status: completed
 - Owner: Alex; executor agent implements
 - Priority: P1
 - Depends on: CCL-0081
@@ -24,10 +24,17 @@ Out of scope: a launcher-side route-preference file (superseded), seat/shim rout
 
 ## Acceptance criteria
 
-- [ ] PR #117 merges with all six required checks passing, landing the post-fix tables.
-- [ ] Every GLM family leads with `cb/`/`cbcn/` and every Qwen policy family with `ali/`/`alicn/` in all five tables at the merged commit, with prices that move with the route (GLM 5.3 shows cb's 0.0154/0.0484, not alicn's 0.0014/0.0044).
-- [ ] Issue #113 records the scope revision and is closed from the merged state.
-- [ ] Issue #115 tracks the nightly PR-creation failure for the owner's decision.
+- [x] PR #117 merged with all six required checks passing, landing the post-fix tables.
+- [x] Every GLM family leads with `cb/`/`cbcn/` and every Qwen policy family with `ali/`/`alicn/` in all five tables at the merged commit, with prices that move with the route (GLM 5.3 shows cb's 0.0154/0.0484, not alicn's 0.0014/0.0044).
+- [x] Issue #113 records the scope revision and is closed from the merged state.
+- [x] Issue #115 tracks the nightly PR-creation failure for the owner's decision.
+
+## Delivery (2026-10-10)
+
+- PR #117 merged to `main` as `91f4d9867fe15b4f0008a4d2dcc2e93c56adb12d` (2026-10-10T01:29:27Z) with all six required checks plus `windows-installer` and `arm auto-merge` passing on head `56e1417`.
+- Policy conformance verified at the merge commit: GLM 5.3 Flash -> `cbcn/glm-5.3-flash`, GLM 5.3 -> `cb/glm-5.3`, GLM 5.2 -> `cb/glm-5.2`, Qwen3.8 Flash -> `alicn/qwen3.8-flash`, Qwen3.8 Max -> `ali/qwen3.8-max`, Qwen3.8 Max 0902 -> `ali/qwen3.8-max-0902`; no violations in the Top 20 or either ladder.
+- Issue #113 closed as completed with the delivery receipt (request ID `e2577b25b5654984a66f33da8d1da988`). The PR body's `Closes #113` produced no GitHub close event, so the close was manual.
+- The one late test fix on PR #117: `tests/test_ckff_off.py` expected `ali/qwen3.8-flash` for the sonnet fallback, but the picker's family resolver maps the `ali/` default to the unique listed `qwen3.8-flash` route `alicn/qwen3.8-flash`.
 
 ## Evidence (2026-10-10)
 
@@ -67,4 +74,4 @@ Blocked/uncertain:
 - none
 
 Next:
-- Verify the six required checks on PR 117 and merge it, then close issue 113 from the merged state and receipt issue 109 (CCL-0082 closeout already merged in f8957ca).
+- None for this task. Issue 115 waits on the owner's decision on the nightly PR-creation setting; issues 53 and 41 are owner/human-blocked.
