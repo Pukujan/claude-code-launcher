@@ -75,3 +75,26 @@ Blocked/uncertain:
 
 Next:
 - None for this task. Issue 115 waits on the owner's decision on the nightly PR-creation setting; issues 53 and 41 are owner/human-blocked.
+
+### 2026-10-10 01:35:29 UTC — executor-agent
+
+<!-- continuity:checkpoint {"agent":"executor-agent","blocked":[],"changed":["none"],"completed":["PR 117 merged to main as 91f4d98 (2026-10-10T01:29:27Z), landing IRE's post-fix route lists in the five built-in tables plus the aligned test expectations; closed issue 113 as completed with the delivery receipt; moved CCL-0083 to Completed in the task projection and checkpoints/CURRENT.md."],"decisions":["Recorded the delivery in a closeout branch (ccl-0083-closeout) off origin/main rather than on the merged task branch, so the projection PR carries only the doc changes."],"evidence":["All six required checks (gates, lint, mac-dry-run, linux-dry-run, python-tests, bash 3.2 compatibility) plus windows-installer and arm auto-merge passed on PR 117 head 56e1417. Policy conformance verified at the merge commit: GLM 5.3 Flash cbcn/glm-5.3-flash, GLM 5.3 cb/glm-5.3, GLM 5.2 cb/glm-5.2, Qwen3.8 Flash alicn/qwen3.8-flash, Qwen3.8 Max ali/qwen3.8-max, Qwen3.8 Max 0902 ali/qwen3.8-max-0902, no violations in the Top 20 or either ladder. continuity validate prints VALID. PR 117's Closes #113 produced no GitHub close event, so issue 113 was closed manually."],"next_action":"None for this task. Issue 115 (nightly refresh cannot open its own PR) waits on the owner's decision; issues 53 and 41 are owner/human-blocked.","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"CCL-0083","timestamp":"2026-10-10T01:35:29Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"4d5f1054168e582e57f88652748323d9cc72e16bfe2bd2f0dff82381898b7fec","request_id":"d0b2f3bbff6b4cc89a5ea48e66c46a63","schema":"project-continuity.checkpoint-operation.v1","task_id":"CCL-0083"} -->
+
+Completed:
+- PR 117 merged to main as 91f4d98 (2026-10-10T01:29:27Z), landing IRE's post-fix route lists in the five built-in tables plus the aligned test expectations; closed issue 113 as completed with the delivery receipt; moved CCL-0083 to Completed in the task projection and checkpoints/CURRENT.md.
+
+Evidence:
+- All six required checks (gates, lint, mac-dry-run, linux-dry-run, python-tests, bash 3.2 compatibility) plus windows-installer and arm auto-merge passed on PR 117 head 56e1417. Policy conformance verified at the merge commit: GLM 5.3 Flash cbcn/glm-5.3-flash, GLM 5.3 cb/glm-5.3, GLM 5.2 cb/glm-5.2, Qwen3.8 Flash alicn/qwen3.8-flash, Qwen3.8 Max ali/qwen3.8-max, Qwen3.8 Max 0902 ali/qwen3.8-max-0902, no violations in the Top 20 or either ladder. continuity validate prints VALID. PR 117's Closes #113 produced no GitHub close event, so issue 113 was closed manually.
+
+Decisions:
+- Recorded the delivery in a closeout branch (ccl-0083-closeout) off origin/main rather than on the merged task branch, so the projection PR carries only the doc changes.
+
+Changed:
+- none
+
+Blocked/uncertain:
+- none
+
+Next:
+- None for this task. Issue 115 (nightly refresh cannot open its own PR) waits on the owner's decision; issues 53 and 41 are owner/human-blocked.
