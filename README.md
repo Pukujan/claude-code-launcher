@@ -221,9 +221,12 @@ routes ask for.
 
 ## Boundaries
 
-- **Port 4000 is the live proxy.** Tests use other ports, and
-  `stop-litellm.ps1` stops only the process `start-litellm.ps1` recorded in
-  `shared/litellm/logs/litellm.pid`, never whatever happens to hold the port.
+- **Port 4000 is the live proxy, so nothing may change it.** No restart, stop,
+  bind, reload or config write. Read-only probing is fine and expected. Test a
+  change on a copy proxy on another port and merge to 4000 only once it is
+  verified there. Tests use other ports, and `stop-litellm.ps1` stops only the
+  process `start-litellm.ps1` recorded in `shared/litellm/logs/litellm.pid`,
+  never whatever happens to hold the port.
 - If a proxy started from the old `litellm-ckff-ops` checkout is still running
   on 4000, the launchers reuse it. It reads its own config files, so seat
   changes made from this repository do not reach it. Stop that one by hand once

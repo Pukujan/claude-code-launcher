@@ -1,21 +1,21 @@
 recommendation_rank,model_family,recommendation_eligible,supply_weighted_median_cost_usdc_per_1m,best_route_min_ask_in_usdc_per_1m,best_route_min_ask_out_usdc_per_1m,model_ids
-1,DeepSeek V4.1 Flash,true,0.025396,0.00015,0.0006,cb/deepseek-v4.1-flash
-2,MiniMax M3,true,0.057632,0.0003,0.0012,cbcn/minimax-m3
-3,GLM 5.3 Flash,true,0.015061,0.00015,0.0005,cbcn/glm-5.3-flash
-4,DeepSeek V4 Flash,false,0.020669,0.0033,0.0099,cbcn/deepseek-v4-flash
-5,GPT 5.6 Luna,false,0.048792,0.0042,0.0252,cx/gpt-5.6-luna
-6,Qwen3.8 Flash,true,0.030293,0.00015,0.00047,ali/qwen3.8-flash
-7,DeepSeek V4 Pro,false,0.038842,0.0099,0.0297,cbcn/deepseek-v4-pro
-8,Kimi K2.7 Code,false,0.071696,0.01425,0.06,ali/kimi-k2.7-code
-9,Qwen3.8 Max 0902,false,0.080072,0.01,0.03,ali/qwen3.8-max-0902
-10,GLM 5.3,true,0.209871,0.0014,0.0044,cbcn/glm-5.3
-11,MiMo V2.5,true,0.065686,0.014,0.028,ocg/mimo-v2.5
-12,Gemini 3.7 Flash,false,0.075028,0.0015,0.0075,ag/gemini-3.7-flash-high
-13,MiniMax M2.7,false,0.023007,0.0003,0.0012,mm/MiniMax-M2.7
-14,Gemini 3.6 Flash,false,0.044259,0.0015,0.0075,ag/gemini-3.6-flash-high
-15,Kimi K2.6,false,0.071575,0.01425,0.06,cbcn/kimi-k2.6
-16,GLM 5.2,true,0.230729,0.0014,0.0044,ali/glm-5.2
-17,GPT 6 Luna,false,0.021868,0.0021,0.0105,cb/gpt-6-luna
-18,Qwen3.8 Omni Flash,false,0.01578,0.00015,0.00047,alicn/qwen3.8-omni-flash
-19,Claude Sonnet 4.6,false,0.068942,0.003,0.015,ag/
-20,Muse Spark 1.3 Contributor,false,0.075786,0.05,0.1,cmc/meta/muse-spark-1.3-contributor
+1,DeepSeek V4.1 Flash,false,0.019659,0.00015,0.0006,cb/deepseek-v4.1-flash; alicn/deepseek-v4.1-flash; cbcn/deepseek-v4.1-flash; ali/deepseek-v4.1-flash; cmc/deepseek/deepseek-v4.1-flash; ocg/deepseek-v4.1-flash; cp/cline-pass/deepseek-v4.1-flash
+2,MiniMax M3,true,0.062843,0.0003,0.0012,mm/MiniMax-M3; cbcn/minimax-m3; mmcn/MiniMax-M3; cb/minimax-m3; ocg/minimax-m3; cp/cline-pass/minimax-m3
+3,GLM 5.3 Flash,true,0.015225,0.00015,0.0005,zai/glm-5.3-flash; cbcn/glm-5.3-flash; ocg/glm-5.3-flash; cp/cline-pass/glm-5.3-flash; cp/zai/glm-5.3-flash
+4,DeepSeek V4 Flash,false,0.02154,0.00352,0.01056,cbcn/deepseek-v4-flash; cmc/deepseek/deepseek-v4-flash; ocg/deepseek-v4-flash
+5,Qwen3.8 Flash,true,0.035574,0.00015,0.00047,alicn/qwen3.8-flash; ali/qwen3.8-flash; ocg/qwen3.8-flash
+6,GPT 5.6 Luna,false,0.053101,0.0032,0.0192,cx/gpt-5.6-luna; cb/gpt-5.6-luna; ocg/gpt-5.6-luna
+7,Kimi K2.7 Code,true,0.071411,0.0152,0.064,cbcn/kimi-k2.7; ali/kimi-k2.7-code; cmc/moonshotai/Kimi-K2.7-Code; ocg/kimi-k2.7-code
+8,DeepSeek V4 Pro,false,0.039822,0.01056,0.03168,cbcn/deepseek-v4-pro; cmc/deepseek/deepseek-v4-pro; cp/cline-pass/deepseek-v4-pro
+9,Qwen3.8 Max 0902,false,0.092556,0.01,0.03,ali/qwen3.8-max-0902
+10,GLM 5.3,true,0.230582,0.0014,0.0044,alicn/glm-5.3; zai/glm-5.3; cbcn/glm-5.3; ali/glm-5.3; cb/glm-5.3; ocg/glm-5.3; cp/cline-pass/glm-5.3
+11,Gemini 3.8 Flash,false,0.028902,0.00075,0.00375,ag/gemini-3.8-flash-high
+12,Gemini 3.7 Flash,false,0.035362,0.00075,0.00375,ag/gemini-3.7-flash-high
+13,MiniMax M2.7,false,0.022633,0.0003,0.0012,mm/MiniMax-M2.7; cbcn/minimax-m2.7; mmcn/MiniMax-M2.7; cmc/MiniMaxAI/MiniMax-M2.7; ocg/minimax-m2.7
+14,Gemini 3.6 Flash,false,0.038975,0.00075,0.00375,ag/gemini-3.6-flash-high
+15,MiMo V2.5,false,0.06707,0.02086,0.04172,cmc/xiaomi/mimo-v2.5; ocg/mimo-v2.5; mimo/mimo-v2.5; cp/cline-pass/mimo-v2.5
+16,Kimi K2.6,false,0.07127,0.0152,0.064,cbcn/kimi-k2.6; cmc/moonshotai/Kimi-K2.6; ocg/kimi-k2.6
+17,GLM 5.2,false,0.24653,0.0014,0.0044,alicn/glm-5.2; cbcn/glm-5.2; cmc/zai-org/GLM-5.2; ali/glm-5.2; cb/glm-5.2
+18,GPT 6 Luna,false,0.023793,0.0016,0.008,cx/gpt-6-luna; cb/gpt-6-luna
+19,Qwen3.8 Omni Flash,false,0.017769,0.00015,0.00047,alicn/qwen3.8-omni-flash; ali/qwen3.8-omni-flash
+20,MiniMax M2.5,false,0.006203,0.0003,0.0012,mm/MiniMax-M2.5; mmcn/MiniMax-M2.5; ocg/minimax-m2.5

@@ -1,6 +1,7 @@
 """Windows launcher: the slot steps and Steps 9 and 10 (UltraCode orchestrator/worker), driven with
 scripted keys in library mode. Needs pwsh and uv; skipped when either is missing
 (GitHub's ubuntu runners have both). Refs #40."""
+import csv
 import json
 import shutil
 import subprocess
@@ -47,7 +48,17 @@ def run(tmp_path, keys):
     return result, json.loads(picks.read_text()), (json.loads(cfg.read_text()) if cfg.exists() else None)
 
 
-# First run (no saved slots): sonnet, opus, fable 3 Enters each (default chains), haiku
+def top20_routes():
+    with (REPO / "shared/litellm/config/top20-builtin.csv").open(encoding="utf-8", newline="") as handle:
+        return [row["model_ids"].split(";")[0].strip() for row in csv.DictReader(handle)]
+
+
+def configured_main_routes():
+    defaults = json.loads((REPO / "shared/ire/defaults.json").read_text(encoding="utf-8"))
+    return set(top20_routes()) | set(defaults["ladders"]["main"])
+
+
+# First run (no saved slots): sonnet, opus, fable 3 Enters each, haiku
 # Enter ("same chain as sonnet"), folder Enter, launch Down+Enter (UltraCode).
 SLOTS_DEFAULT = ",".join(["Enter"] * 10)
 TO_LAUNCH = SLOTS_DEFAULT + ",Enter,DownArrow,Enter"
@@ -64,8 +75,10 @@ def test_ultracode_picks_orchestrator_and_worker(tmp_path):
     assert cfg["proxy"]["listen_port"] == 4241 + 4017
     assert cfg["proxy"]["anthropic_upstream"] == "http://127.0.0.1:4017"
     assert not [m for m in cfg["models"] if "ckff" in m["id"]]
-    assert result["sonnet"] == ["cb/deepseek-v4.1-flash", "ali/qwen3.8-flash", "cbcn/glm-5.3-flash"]
-    assert result["haiku_same"] is True and picks["version"] == 2 and picks["slots"]["opus"][0] == "cb/gpt-6-astra"
+    assert result["sonnet"][0] == top20_routes()[0]
+    assert len(result["sonnet"]) <= 3
+    assert set(result["sonnet"][1:]) <= configured_main_routes()
+    assert result["haiku_same"] is True and picks["version"] == 2 and picks["slots"]["opus"][0] == "cx/gpt-6-astra"
     # Next run: Step 1 Enter keeps the saved slots, then folder, launch, orch, worker Enter.
     result2, _, _ = run(tmp_path, "Enter,Enter,Enter,Enter,Enter")
     assert (result2["orch"], result2["worker"]) == ("claude-ih-main", "claude-ih-fast")
@@ -94,5 +107,5 @@ def test_saved_slots_change_path_and_back_key(tmp_path):
     result, picks, _ = run(tmp_path, "DownArrow,Enter,Enter,LeftArrow,Enter," + ",".join(["Enter"] * 9) + ",Enter,Enter")
     assert result["launch"] == "claude"
     assert any("back" in t for t in result["trace"]), result["trace"]
-    assert picks["slots"]["sonnet"][0] == "cb/deepseek-v4.1-flash"
+    assert picks["slots"]["sonnet"][0] == top20_routes()[0]
     assert len(picks["slots"]["fable"]) == 3

@@ -118,37 +118,57 @@ $VenvPy = Join-Path $VenvDir "Scripts\python.exe"
 # (tests\test_top20_tables.py checks that). An IRE fetch can replace these rows.
 # Cost is the best route's cheapest input ask, CostOut its output ask, both USDC per 1M tokens.
 $Models = @(
-  @{ Rank = 1;  Name = "DeepSeek V4.1 Flash";        Id = "cb/deepseek-v4.1-flash";              Eligible = $true;  Cost = "0.00015"; CostOut = "0.0006" }
-  @{ Rank = 2;  Name = "MiniMax M3";                 Id = "cbcn/minimax-m3";                     Eligible = $true;  Cost = "0.0003";  CostOut = "0.0012" }
-  @{ Rank = 3;  Name = "GLM 5.3 Flash";              Id = "cbcn/glm-5.3-flash";                  Eligible = $true;  Cost = "0.00015"; CostOut = "0.0005" }
-  @{ Rank = 4;  Name = "DeepSeek V4 Flash";          Id = "cbcn/deepseek-v4-flash";              Eligible = $false; Cost = "0.0033";  CostOut = "0.0099" }
-  @{ Rank = 5;  Name = "GPT 5.6 Luna";               Id = "cx/gpt-5.6-luna";                     Eligible = $false; Cost = "0.0042";  CostOut = "0.0252" }
-  @{ Rank = 6;  Name = "Qwen3.8 Flash";              Id = "ali/qwen3.8-flash";                   Eligible = $true;  Cost = "0.00015"; CostOut = "0.00047" }
-  @{ Rank = 7;  Name = "DeepSeek V4 Pro";            Id = "cbcn/deepseek-v4-pro";                Eligible = $false; Cost = "0.0099";  CostOut = "0.0297" }
-  @{ Rank = 8;  Name = "Kimi K2.7 Code";             Id = "ali/kimi-k2.7-code";                  Eligible = $false; Cost = "0.01425"; CostOut = "0.06" }
-  @{ Rank = 9;  Name = "Qwen3.8 Max 0902";           Id = "ali/qwen3.8-max-0902";                Eligible = $false; Cost = "0.01";    CostOut = "0.03" }
-  @{ Rank = 10; Name = "GLM 5.3";                    Id = "cbcn/glm-5.3";                        Eligible = $true;  Cost = "0.0014";  CostOut = "0.0044" }
-  @{ Rank = 11; Name = "MiMo V2.5";                  Id = "ocg/mimo-v2.5";                       Eligible = $true;  Cost = "0.014";   CostOut = "0.028" }
-  @{ Rank = 12; Name = "Gemini 3.7 Flash";           Id = "ag/gemini-3.7-flash-high";            Eligible = $false; Cost = "0.0015";  CostOut = "0.0075" }
-  @{ Rank = 13; Name = "MiniMax M2.7";               Id = "mm/MiniMax-M2.7";                     Eligible = $false; Cost = "0.0003";  CostOut = "0.0012" }
-  @{ Rank = 14; Name = "Gemini 3.6 Flash";           Id = "ag/gemini-3.6-flash-high";            Eligible = $false; Cost = "0.0015";  CostOut = "0.0075" }
-  @{ Rank = 15; Name = "Kimi K2.6";                  Id = "cbcn/kimi-k2.6";                      Eligible = $false; Cost = "0.01425"; CostOut = "0.06" }
-  @{ Rank = 16; Name = "GLM 5.2";                    Id = "ali/glm-5.2";                         Eligible = $true;  Cost = "0.0014";  CostOut = "0.0044" }
-  @{ Rank = 17; Name = "GPT 6 Luna";                 Id = "cb/gpt-6-luna";                       Eligible = $false; Cost = "0.0021";  CostOut = "0.0105" }
-  @{ Rank = 18; Name = "Qwen3.8 Omni Flash";         Id = "alicn/qwen3.8-omni-flash";            Eligible = $false; Cost = "0.00015"; CostOut = "0.00047" }
-  @{ Rank = 19; Name = "Claude Sonnet 4.6";          Id = "ag/";                                 Eligible = $false; Cost = "0.003";   CostOut = "0.015" }
-  @{ Rank = 20; Name = "Muse Spark 1.3 Contributor"; Id = "cmc/meta/muse-spark-1.3-contributor"; Eligible = $false; Cost = "0.05";    CostOut = "0.1" }
+  @{ Rank = 1; Name = "DeepSeek V4.1 Flash"; Id = "cb/deepseek-v4.1-flash"; Eligible = $false; Cost = "0.00015"; CostOut = "0.0006" }
+  @{ Rank = 2; Name = "MiniMax M3"; Id = "mm/MiniMax-M3"; Eligible = $true; Cost = "0.0003"; CostOut = "0.0012" }
+  @{ Rank = 3; Name = "GLM 5.3 Flash"; Id = "zai/glm-5.3-flash"; Eligible = $true; Cost = "0.00015"; CostOut = "0.0005" }
+  @{ Rank = 4; Name = "DeepSeek V4 Flash"; Id = "cbcn/deepseek-v4-flash"; Eligible = $false; Cost = "0.00352"; CostOut = "0.01056" }
+  @{ Rank = 5; Name = "Qwen3.8 Flash"; Id = "alicn/qwen3.8-flash"; Eligible = $true; Cost = "0.00015"; CostOut = "0.00047" }
+  @{ Rank = 6; Name = "GPT 5.6 Luna"; Id = "cx/gpt-5.6-luna"; Eligible = $false; Cost = "0.0032"; CostOut = "0.0192" }
+  @{ Rank = 7; Name = "Kimi K2.7 Code"; Id = "cbcn/kimi-k2.7"; Eligible = $true; Cost = "0.0152"; CostOut = "0.064" }
+  @{ Rank = 8; Name = "DeepSeek V4 Pro"; Id = "cbcn/deepseek-v4-pro"; Eligible = $false; Cost = "0.01056"; CostOut = "0.03168" }
+  @{ Rank = 9; Name = "Qwen3.8 Max 0902"; Id = "ali/qwen3.8-max-0902"; Eligible = $false; Cost = "0.01"; CostOut = "0.03" }
+  @{ Rank = 10; Name = "GLM 5.3"; Id = "alicn/glm-5.3"; Eligible = $true; Cost = "0.0014"; CostOut = "0.0044" }
+  @{ Rank = 11; Name = "Gemini 3.8 Flash"; Id = "ag/gemini-3.8-flash-high"; Eligible = $false; Cost = "0.00075"; CostOut = "0.00375" }
+  @{ Rank = 12; Name = "Gemini 3.7 Flash"; Id = "ag/gemini-3.7-flash-high"; Eligible = $false; Cost = "0.00075"; CostOut = "0.00375" }
+  @{ Rank = 13; Name = "MiniMax M2.7"; Id = "mm/MiniMax-M2.7"; Eligible = $false; Cost = "0.0003"; CostOut = "0.0012" }
+  @{ Rank = 14; Name = "Gemini 3.6 Flash"; Id = "ag/gemini-3.6-flash-high"; Eligible = $false; Cost = "0.00075"; CostOut = "0.00375" }
+  @{ Rank = 15; Name = "MiMo V2.5"; Id = "cmc/xiaomi/mimo-v2.5"; Eligible = $false; Cost = "0.02086"; CostOut = "0.04172" }
+  @{ Rank = 16; Name = "Kimi K2.6"; Id = "cbcn/kimi-k2.6"; Eligible = $false; Cost = "0.0152"; CostOut = "0.064" }
+  @{ Rank = 17; Name = "GLM 5.2"; Id = "alicn/glm-5.2"; Eligible = $false; Cost = "0.0014"; CostOut = "0.0044" }
+  @{ Rank = 18; Name = "GPT 6 Luna"; Id = "cx/gpt-6-luna"; Eligible = $false; Cost = "0.0016"; CostOut = "0.008" }
+  @{ Rank = 19; Name = "Qwen3.8 Omni Flash"; Id = "alicn/qwen3.8-omni-flash"; Eligible = $false; Cost = "0.00015"; CostOut = "0.00047" }
+  @{ Rank = 20; Name = "MiniMax M2.5"; Id = "mm/MiniMax-M2.5"; Eligible = $false; Cost = "0.0003"; CostOut = "0.0012" }
 )
 # Frontier picks (IRE frontier list, InferHub routes, not CKFF) offered under the
 # Top 20 in the slot steps. Cost is the input price per 1M tokens.
 $FrontierModels = @(
-  @{ Rank = "F1"; Name = "GPT 6 Astra (272K ctx)";     Id = "cb/gpt-6-astra";                      Eligible = $true;  Cost = "0.050 in/0.25 out" }
-  @{ Rank = "F2"; Name = "GPT 6.1 Sol";                Id = "cx/gpt-6.1-sol";                      Eligible = $true;  Cost = "0.018 in/0.09 out" }
+  @{ Rank = "F1"; Name = "GPT 6 Astra (272K ctx)"; Id = "cx/gpt-6-astra"; Eligible = $true; Cost = "0.07 in/0.35 out" }
+  @{ Rank = "F2"; Name = "GPT 6.1 Sol (272K ctx)"; Id = "cx/gpt-6.1-sol"; Eligible = $true; Cost = "0.018 in/0.09 out" }
+  @{ Rank = "F3"; Name = "GPT 6 Sol (272K ctx)"; Id = "cx/gpt-6-sol"; Eligible = $true; Cost = "0.016 in/0.08 out" }
+  @{ Rank = "F4"; Name = "Gemini 3.1 Pro (1000K ctx)"; Id = "ag/gemini-pro-agent"; Eligible = $true; Cost = "0.008 in/0.048 out" }
+  @{ Rank = "F5"; Name = "Grok 4.7 (500K ctx)"; Id = "cb/grok-4.7"; Eligible = $true; Cost = "0.036 in/0.108 out" }
+  @{ Rank = "F6"; Name = "Qwen 3.8 Max (1000K ctx)"; Id = "alicn/qwen3.8-max"; Eligible = $true; Cost = "0.002 in/0.006 out" }
+  @{ Rank = "F7"; Name = "Grok 4.6 (500K ctx)"; Id = "cb/grok-4.6"; Eligible = $true; Cost = "0.036 in/0.108 out" }
+  @{ Rank = "F8"; Name = "GLM 5.3 (1000K ctx)"; Id = "alicn/glm-5.3"; Eligible = $true; Cost = "0.0014 in/0.0044 out" }
+  @{ Rank = "F9"; Name = "Claude Fable 5.1"; Id = "cc/claude-fable-5-1"; Eligible = $false; Cost = "2.89 in/14.45 out" }
+  @{ Rank = "F10"; Name = "Claude Fable 5"; Id = "cc/claude-fable-5"; Eligible = $false; Cost = "2.89 in/14.45 out" }
+  @{ Rank = "F11"; Name = "Claude Opus 5.5 (1000K ctx)"; Id = "cc/claude-opus-5-5"; Eligible = $false; Cost = "0.996 in/4.98 out" }
+  @{ Rank = "F12"; Name = "Claude Opus 5 (1000K ctx)"; Id = "cb/claude-opus-5"; Eligible = $false; Cost = "0.05 in/0.25 out" }
+  @{ Rank = "F13"; Name = "GPT 5.5 (272K ctx)"; Id = "cb/gpt-5.5"; Eligible = $false; Cost = "0.045 in/0.27 out" }
+  @{ Rank = "F14"; Name = "Claude Sonnet 5.5 (1000K ctx)"; Id = "cc/claude-sonnet-5-5"; Eligible = $false; Cost = "0.498 in/2.49 out" }
+  @{ Rank = "F15"; Name = "Claude Opus 4.8 (1000K ctx)"; Id = "cc/claude-opus-4-8"; Eligible = $false; Cost = "1.475 in/7.375 out" }
+  @{ Rank = "F16"; Name = "GPT 5.3 Codex (272K ctx)"; Id = "cb/gpt-5.3-codex"; Eligible = $false; Cost = "0.0315 in/0.252 out" }
+  @{ Rank = "F17"; Name = "GPT 5.6 Sol (272K ctx)"; Id = "cx/gpt-5.6-sol"; Eligible = $false; Cost = "0.05 in/0.3 out" }
+  @{ Rank = "F18"; Name = "GPT 5.4 (272K ctx)"; Id = "cb/gpt-5.4"; Eligible = $false; Cost = "0.0225 in/0.135 out" }
+  @{ Rank = "F19"; Name = "Claude Opus 4.7 (1000K ctx)"; Id = "cb/claude-opus-4.7-1m"; Eligible = $false; Cost = "0.09 in/0.45 out" }
+  @{ Rank = "F20"; Name = "Claude Sonnet 5 (1000K ctx)"; Id = "cc/claude-sonnet-5"; Eligible = $false; Cost = "0.498 in/2.49 out" }
 )
 
 # ---- Claude Code slots (issue #53) ----
 # Same defaults as `slots:` in shared\litellm\config\inferhub_fallbacks.yaml
 # (tests\test_slots.py checks that). Each chain is first model, then fallbacks.
+# If IRE changes a model family’s selected provider, the first-run picker maps
+# that old default route to the current listed route without changing the shared chain.
 $SlotOrder = @("sonnet", "opus", "fable", "haiku")
 $SlotDefaults = [ordered]@{
   sonnet = @("cb/deepseek-v4.1-flash", "ali/qwen3.8-flash", "cbcn/glm-5.3-flash")
@@ -353,7 +373,11 @@ function Format-OldModelLine {
   param($m, [string]$Star = " ")
   $tag = $(if ($m.Eligible) { "eligible" } else { "gated" })
   $out = $(if ($m.CostOut) { " (out ~" + $m.CostOut + "/Mtok)" } else { "" })
-  "{0}{1,2}  {2,-28} {3,-42} {4}  ~{5}/Mtok{6}" -f $Star, $m.Rank, $m.Name, $m.Id, $tag, $m.Cost, $out
+  # Tps is tokens per second. The built-in table has no speed, so the suffix
+  # stays off until a row carries one.
+  $speed = ""
+  if ($null -ne $m.Tps -and "$($m.Tps)" -ne "") { $speed = "  " + $m.Tps + " tok/s" }
+  "{0}{1,2}  {2,-28} {3,-42} {4}  ~{5}/Mtok{6}{7}" -f $Star, $m.Rank, $m.Name, $m.Id, $tag, $m.Cost, $out, $speed
 }
 
 function Get-LastPicksPath {
@@ -399,9 +423,13 @@ function Read-SlotPicks {
   try { $j = Get-Content -LiteralPath $p -Raw -Encoding UTF8 | ConvertFrom-Json } catch { return $null }
   if (-not $j -or -not $j.slots) { return $null }
   $out = @{ haiku_same = ($j.slots.haiku_same -eq $true) }
+  $defaults = $null
   foreach ($slot in $SlotOrder) {
     $chain = @($j.slots.$slot | Where-Object { $_ -and -not (Test-CkffModel ([string]$_)) } | ForEach-Object { [string]$_ })
-    if ($chain.Count -eq 0) { $chain = @($SlotDefaults[$slot]) }
+    if ($chain.Count -eq 0) {
+      if ($null -eq $defaults) { $defaults = Get-DefaultSlots }
+      $chain = @($defaults[$slot])
+    }
     $out[$slot] = $chain
   }
   if ($out.haiku_same) { $out.haiku = @($out.sonnet) }
@@ -428,7 +456,12 @@ function Write-LastPicks {
 
 function Get-DefaultSlots {
   $out = @{ haiku_same = $true }
-  foreach ($slot in $SlotOrder) { $out[$slot] = @($SlotDefaults[$slot]) }
+  $choices = @(Get-SlotChoices)
+  foreach ($slot in $SlotOrder) {
+    $out[$slot] = @($SlotDefaults[$slot] | ForEach-Object {
+      Resolve-IreListedRoute -Id ([string]$_) -Choices $choices
+    })
+  }
   if (-not @($out.sonnet)[0]) { $out.sonnet = @($DefaultModelId) }   # rank 1 if the table is ever emptied
   return $out
 }
@@ -457,6 +490,25 @@ function Get-StartPick {
 
 function Get-SlotChoices {
   return @(@($Models) + @($FrontierModels) | Where-Object { -not (Test-CkffModel $_.Id) })
+}
+
+function Resolve-IreListedRoute {
+  # Keep a picker default on the same model family when IRE changes its
+  # preferred provider. Leave unrelated or absent families alone.
+  param([string]$Id, $Choices)
+  if (-not $Id) { return $Id }
+  $exact = @($Choices | Where-Object { [string]$_.Id -ieq $Id } | Select-Object -First 1)
+  if ($exact.Count -gt 0) { return [string]$exact[0].Id }
+  $slash = $Id.IndexOf("/")
+  if ($slash -lt 0) { return $Id }
+  $family = $Id.Substring($slash + 1)
+  $familyRoutes = @($Choices | Where-Object {
+    $candidate = [string]$_.Id
+    $candidateSlash = $candidate.IndexOf("/")
+    $candidateSlash -ge 0 -and $candidate.Substring($candidateSlash + 1) -ieq $family
+  } | Select-Object -ExpandProperty Id -Unique)
+  if ($familyRoutes.Count -eq 1) { return [string]$familyRoutes[0] }
+  return $Id
 }
 
 function Invoke-SlotsChoiceStep {
@@ -489,14 +541,14 @@ function Invoke-SlotStep {
   } else {
     $taken = @($chain[0..($Rung - 1)])
     $choices = @($all | Where-Object { $taken -notcontains $_.Id }) + @(@{ Rank = 0; Name = "none"; Id = ""; Eligible = $true; Cost = "-" })
-    $want = $dflt
+    $want = Resolve-IreListedRoute -Id $dflt -Choices $choices
     $n = $(if ($Rung -eq 1) { "2nd" } else { "3rd" })
-    $title = "Slot " + $SlotInfo[$Slot] + ": " + $n + " model (fallback " + $Rung + ") after " + $chain[$Rung - 1] + "   default: " + $(if ($dflt) { $dflt } else { "none" })
+    $title = "Slot " + $SlotInfo[$Slot] + ": " + $n + " model (fallback " + $Rung + ") after " + $chain[$Rung - 1] + "   default: " + $(if ($want) { $want } else { "none" })
   }
   $lines = @(foreach ($m in $choices) {
     if ($m.Id -eq "@sonnet") { "   same chain as sonnet: " + (Format-SlotChain $S.slots.sonnet) }
     elseif ($m.Id -eq "") { "   none (no further fallback)" }
-    else { Format-OldModelLine $m $(if ($m.Id -eq $dflt) { "*" } else { " " }) }
+    else { Format-OldModelLine $m $(if ($m.Id -eq $want) { "*" } else { " " }) }
   })
   $index = 0
   for ($i = 0; $i -lt $choices.Count; $i++) { if ($choices[$i].Id -eq $want) { $index = $i; break } }
@@ -632,7 +684,7 @@ function Invoke-LaunchStep {
 function Invoke-LaunchWizard {
   # Returns @{ Slots; Folder; Launch; UcOrch; UcWorker }. With saved slots, Step 1
   # offers them (Enter keeps them); otherwise the slot steps run with the defaults
-  # highlighted, so Enter all the way through takes Alex's default chains.
+  # highlighted on current IRE routes when their provider changed.
   $saved = Read-SlotPicks
   $S = @{ slots = $(if ($saved) { $saved } else { Get-DefaultSlots }); uc_orch = $null; uc_worker = $null; change = ($null -eq $saved) }
   $last = Read-LastPicks

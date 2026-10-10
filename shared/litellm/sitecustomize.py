@@ -686,6 +686,20 @@ async def _starlette_call_with_reload(self, scope, receive, send, _o=_prev_starl
         if not _ccl_identity.is_loopback(_wb_client_host(scope)):
             return await _wb_json_response(send, 403, {"error": "loopback only"})
         return await _wb_json_response(send, 200, _ccl_identity.identity_payload(_os.environ))
+    if scope.get("type") == "http" and str(scope.get("path", "")) in ("/v1/messages", "/anthropic/v1/messages"):
+        # Silent first model: hold this stream and race the next rung (issue #109).
+        # Inner attempts call _o directly, so this wrapper does not race again.
+        try:
+            import stall_hedge as _sh
+        except Exception as e:
+            print(f"[sitecustomize] stall hedge skipped: {e}", flush=True)
+        else:
+            try:
+                if await _sh.handle(scope, receive, send, lambda sc, rc, sd: _o(self, sc, rc, sd)):
+                    return
+            except Exception as e:
+                print(f"[sitecustomize] stall hedge failed: {e}", flush=True)
+                return
     return await _o(self, scope, receive, send)
 
 

@@ -1,7 +1,7 @@
 # shared/ire: IRE recommendations at launch
 
 `ire_fetch.py` gives both launchers the current picks from IRE
-(`Pukujan/inference-recommendation-engine`, a private repo). It runs on every launch, is
+(`Pukujan/inference-recommendation-engine`, a public repo). It runs on every launch, is
 standard-library Python 3.8+, and always returns a usable answer, even with no network
 and no GitHub login.
 
@@ -30,14 +30,17 @@ appear, it should look like
 
 The helper first resolves `main` to a commit SHA, then reads every file at that SHA. That
 way the Top 20 and the price policy in one answer always come from the same IRE commit.
+The checked-in offline Top 20 and Windows frontier tables are generated from this output
+by `sync_builtin_tables.py`. A daily GitHub Actions workflow compares them with IRE and
+opens a review pull request when the recommendations change; it never merges that PR.
 
 ## Where the answer comes from
 
 1. **live**: GitHub, with a 5 second budget for the whole fetch. Auth comes from
    `GITHUB_TOKEN` or `GH_TOKEN` if either is set, otherwise from `gh auth token` if `gh` is
-   installed and logged in. With no auth it doesn't try the network at all and goes
-   straight to the cache. A refused token (401/403), a token that can't see the repo, a
-   timeout or a missing Top 20 file all count as a failed live fetch.
+   installed and logged in. Because IRE is public, it still makes an anonymous request
+   when no token is available. A refused token (401/403), a token that can't see the repo,
+   a timeout or a missing Top 20 file all count as a failed live fetch.
 2. **cache**: the last good live answer, stored with the time it was fetched and the IRE
    commit SHA. Only live answers get cached. The cache lives at:
    - Windows: `%LOCALAPPDATA%\claude-code-launcher\ire\ire-cache.json`
@@ -55,6 +58,8 @@ never written to the cache or the output.
 python3 shared/ire/ire_fetch.py                  # JSON on stdout
 python3 shared/ire/ire_fetch.py --out ire.json   # JSON to a file
 python3 shared/ire/ire_fetch.py --offline        # skip GitHub: cache, then defaults
+python3 shared/ire/ire_fetch.py --ref SHA        # read one pinned branch, tag, or commit
+python3 shared/ire/sync_builtin_tables.py --bundle ire.json --source-sha SHA --require-live
   --table-out F        also write rank|name|id|eligible|cost lines (the Mac picker)
   --top20-csv F        also write the Top 20 as CSV for sync_inferhub_top20.py
   --timeout 5          seconds for the whole fetch
@@ -88,8 +93,28 @@ than the default).
   `$env:CCL_IRE_JSON`.
 
 Both print the status line with an `IRE:` prefix. Neither will stop the launch if the
-helper fails. The Mac picker uses the fetched Top 20; the Windows picker still uses its
-built-in table. The ladder picker (issue #5) is the part that reads `CCL_IRE_JSON`.
+helper fails. The Mac picker uses the fetched Top 20; Windows' live picker still uses
+its built-in table, now refreshed through the reviewed scheduled workflow. The ladder
+picker (issue #5) is the part that reads `CCL_IRE_JSON`.
+
+### Local provider preferences (Linux/macOS)
+
+When a preferred provider should be used instead of IRE's current first route, create
+`~/.config/inferhub/model-provider-preferences.json` as a JSON object keyed by the exact
+IRE model-family name. For example:
+
+```json
+{
+  "DeepSeek V4.1 Flash": "cb/deepseek-v4.1-flash"
+}
+```
+
+The launcher checks that each preferred route is still present in IRE's current route
+list for that family. Valid preferences are applied to the local IRE bundle, picker
+table and Top 20 CSV after every fetch, so the full Top 20 and frontier rosters stay
+current while the chosen provider remains selected. Invalid or stale preferences are
+ignored and logged; they never prevent launch. This file is local user configuration
+and must not be committed or include credentials.
 
 ## Output schema
 

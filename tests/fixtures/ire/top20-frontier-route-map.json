@@ -1,0 +1,347 @@
+{
+  "ire_main_sha": "c80166a2e827c3e0ed1f311735d9596c2ef5ddbc",
+  "top20": [
+    {
+      "rank": 1,
+      "name": "DeepSeek V4.1 Flash",
+      "id": "cb/deepseek-v4.1-flash",
+      "eligible": false,
+      "price_in": 0.00015,
+      "price_out": 0.0006
+    },
+    {
+      "rank": 2,
+      "name": "MiniMax M3",
+      "id": "mm/MiniMax-M3",
+      "eligible": true,
+      "price_in": 0.0003,
+      "price_out": 0.0012
+    },
+    {
+      "rank": 3,
+      "name": "GLM 5.3 Flash",
+      "id": "zai/glm-5.3-flash",
+      "eligible": true,
+      "price_in": 0.00015,
+      "price_out": 0.0005
+    },
+    {
+      "rank": 4,
+      "name": "DeepSeek V4 Flash",
+      "id": "cbcn/deepseek-v4-flash",
+      "eligible": false,
+      "price_in": 0.00352,
+      "price_out": 0.01056
+    },
+    {
+      "rank": 5,
+      "name": "Qwen3.8 Flash",
+      "id": "alicn/qwen3.8-flash",
+      "eligible": true,
+      "price_in": 0.00015,
+      "price_out": 0.00047
+    },
+    {
+      "rank": 6,
+      "name": "GPT 5.6 Luna",
+      "id": "cx/gpt-5.6-luna",
+      "eligible": false,
+      "price_in": 0.0032,
+      "price_out": 0.0192
+    },
+    {
+      "rank": 7,
+      "name": "Kimi K2.7 Code",
+      "id": "cbcn/kimi-k2.7",
+      "eligible": true,
+      "price_in": 0.0152,
+      "price_out": 0.064
+    },
+    {
+      "rank": 8,
+      "name": "DeepSeek V4 Pro",
+      "id": "cbcn/deepseek-v4-pro",
+      "eligible": false,
+      "price_in": 0.01056,
+      "price_out": 0.03168
+    },
+    {
+      "rank": 9,
+      "name": "Qwen3.8 Max 0902",
+      "id": "ali/qwen3.8-max-0902",
+      "eligible": false,
+      "price_in": 0.01,
+      "price_out": 0.03
+    },
+    {
+      "rank": 10,
+      "name": "GLM 5.3",
+      "id": "alicn/glm-5.3",
+      "eligible": true,
+      "price_in": 0.0014,
+      "price_out": 0.0044
+    },
+    {
+      "rank": 11,
+      "name": "Gemini 3.8 Flash",
+      "id": "ag/gemini-3.8-flash-high",
+      "eligible": false,
+      "price_in": 0.00075,
+      "price_out": 0.00375
+    },
+    {
+      "rank": 12,
+      "name": "Gemini 3.7 Flash",
+      "id": "ag/gemini-3.7-flash-high",
+      "eligible": false,
+      "price_in": 0.00075,
+      "price_out": 0.00375
+    },
+    {
+      "rank": 13,
+      "name": "MiniMax M2.7",
+      "id": "mm/MiniMax-M2.7",
+      "eligible": false,
+      "price_in": 0.0003,
+      "price_out": 0.0012
+    },
+    {
+      "rank": 14,
+      "name": "Gemini 3.6 Flash",
+      "id": "ag/gemini-3.6-flash-high",
+      "eligible": false,
+      "price_in": 0.00075,
+      "price_out": 0.00375
+    },
+    {
+      "rank": 15,
+      "name": "MiMo V2.5",
+      "id": "cmc/xiaomi/mimo-v2.5",
+      "eligible": false,
+      "price_in": 0.02086,
+      "price_out": 0.04172
+    },
+    {
+      "rank": 16,
+      "name": "Kimi K2.6",
+      "id": "cbcn/kimi-k2.6",
+      "eligible": false,
+      "price_in": 0.0152,
+      "price_out": 0.064
+    },
+    {
+      "rank": 17,
+      "name": "GLM 5.2",
+      "id": "alicn/glm-5.2",
+      "eligible": false,
+      "price_in": 0.0014,
+      "price_out": 0.0044
+    },
+    {
+      "rank": 18,
+      "name": "GPT 6 Luna",
+      "id": "cx/gpt-6-luna",
+      "eligible": false,
+      "price_in": 0.0016,
+      "price_out": 0.008
+    },
+    {
+      "rank": 19,
+      "name": "Qwen3.8 Omni Flash",
+      "id": "alicn/qwen3.8-omni-flash",
+      "eligible": false,
+      "price_in": 0.00015,
+      "price_out": 0.00047
+    },
+    {
+      "rank": 20,
+      "name": "MiniMax M2.5",
+      "id": "mm/MiniMax-M2.5",
+      "eligible": false,
+      "price_in": 0.0003,
+      "price_out": 0.0012
+    }
+  ],
+  "frontier": [
+    {
+      "rank": 1,
+      "name": "GPT 6 Astra",
+      "id": "cx/gpt-6-astra",
+      "eligible": true,
+      "price_in": 0.07,
+      "price_out": 0.35,
+      "context_window": 272000
+    },
+    {
+      "rank": 2,
+      "name": "GPT 6.1 Sol",
+      "id": "cx/gpt-6.1-sol",
+      "eligible": true,
+      "price_in": 0.018,
+      "price_out": 0.09,
+      "context_window": 272000
+    },
+    {
+      "rank": 3,
+      "name": "GPT 6 Sol",
+      "id": "cx/gpt-6-sol",
+      "eligible": true,
+      "price_in": 0.016,
+      "price_out": 0.08,
+      "context_window": 272000
+    },
+    {
+      "rank": 4,
+      "name": "Gemini 3.1 Pro",
+      "id": "ag/gemini-pro-agent",
+      "eligible": true,
+      "price_in": 0.008,
+      "price_out": 0.048,
+      "context_window": 1000000
+    },
+    {
+      "rank": 5,
+      "name": "Grok 4.7",
+      "id": "cb/grok-4.7",
+      "eligible": true,
+      "price_in": 0.036,
+      "price_out": 0.108,
+      "context_window": 500000
+    },
+    {
+      "rank": 6,
+      "name": "Qwen 3.8 Max",
+      "id": "alicn/qwen3.8-max",
+      "eligible": true,
+      "price_in": 0.002,
+      "price_out": 0.006,
+      "context_window": 1000000
+    },
+    {
+      "rank": 7,
+      "name": "Grok 4.6",
+      "id": "cb/grok-4.6",
+      "eligible": true,
+      "price_in": 0.036,
+      "price_out": 0.108,
+      "context_window": 500000
+    },
+    {
+      "rank": 8,
+      "name": "GLM 5.3",
+      "id": "alicn/glm-5.3",
+      "eligible": true,
+      "price_in": 0.0014,
+      "price_out": 0.0044,
+      "context_window": 1000000
+    },
+    {
+      "rank": 9,
+      "name": "Claude Fable 5.1",
+      "id": "cc/claude-fable-5-1",
+      "eligible": false,
+      "price_in": 2.89,
+      "price_out": 14.45,
+      "context_window": null
+    },
+    {
+      "rank": 10,
+      "name": "Claude Fable 5",
+      "id": "cc/claude-fable-5",
+      "eligible": false,
+      "price_in": 2.89,
+      "price_out": 14.45,
+      "context_window": null
+    },
+    {
+      "rank": 11,
+      "name": "Claude Opus 5.5",
+      "id": "cc/claude-opus-5-5",
+      "eligible": false,
+      "price_in": 0.996,
+      "price_out": 4.98,
+      "context_window": 1000000
+    },
+    {
+      "rank": 12,
+      "name": "Claude Opus 5",
+      "id": "cb/claude-opus-5",
+      "eligible": false,
+      "price_in": 0.05,
+      "price_out": 0.25,
+      "context_window": 1000000
+    },
+    {
+      "rank": 13,
+      "name": "GPT 5.5",
+      "id": "cb/gpt-5.5",
+      "eligible": false,
+      "price_in": 0.045,
+      "price_out": 0.27,
+      "context_window": 272000
+    },
+    {
+      "rank": 14,
+      "name": "Claude Sonnet 5.5",
+      "id": "cc/claude-sonnet-5-5",
+      "eligible": false,
+      "price_in": 0.498,
+      "price_out": 2.49,
+      "context_window": 1000000
+    },
+    {
+      "rank": 15,
+      "name": "Claude Opus 4.8",
+      "id": "cc/claude-opus-4-8",
+      "eligible": false,
+      "price_in": 1.475,
+      "price_out": 7.375,
+      "context_window": 1000000
+    },
+    {
+      "rank": 16,
+      "name": "GPT 5.3 Codex",
+      "id": "cb/gpt-5.3-codex",
+      "eligible": false,
+      "price_in": 0.0315,
+      "price_out": 0.252,
+      "context_window": 272000
+    },
+    {
+      "rank": 17,
+      "name": "GPT 5.6 Sol",
+      "id": "cx/gpt-5.6-sol",
+      "eligible": false,
+      "price_in": 0.05,
+      "price_out": 0.3,
+      "context_window": 272000
+    },
+    {
+      "rank": 18,
+      "name": "GPT 5.4",
+      "id": "cb/gpt-5.4",
+      "eligible": false,
+      "price_in": 0.0225,
+      "price_out": 0.135,
+      "context_window": 272000
+    },
+    {
+      "rank": 19,
+      "name": "Claude Opus 4.7",
+      "id": "cb/claude-opus-4.7-1m",
+      "eligible": false,
+      "price_in": 0.09,
+      "price_out": 0.45,
+      "context_window": 1000000
+    },
+    {
+      "rank": 20,
+      "name": "Claude Sonnet 5",
+      "id": "cc/claude-sonnet-5",
+      "eligible": false,
+      "price_in": 0.498,
+      "price_out": 2.49,
+      "context_window": 1000000
+    }
+  ]
+}

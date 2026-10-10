@@ -457,11 +457,28 @@ def test_cli_writes_the_picker_table_and_top20_csv(env, tmp_path):
     assert r.returncode == 0, r.stderr
     assert r.stdout == ""
     lines = (out / "table.txt").read_text().splitlines()
-    assert len(lines) == 20 and lines[0] == "1|DeepSeek V4.1 Flash|cb/deepseek-v4.1-flash|true|0.00015|0.0006"
+    defaults = F.load_defaults()["top20"]
+    first = defaults[0]
+    assert len(lines) == 20 and lines[0] == (
+        f"{first['rank']}|{first['name']}|{first['ids'][0]}|{str(first['eligible']).lower()}|"
+        f"{first['price_in']}|{first['price_out']}"
+    )
     rows = list(csv.DictReader(io.StringIO((out / "top20.csv").read_text())))
-    assert rows[0]["model_ids"].split(";")[0] == "cb/deepseek-v4.1-flash" and len(rows) == 20
+    assert [r["model_ids"].split(";")[0].strip() for r in rows] == [r["ids"][0] for r in defaults]
+    assert len(rows) == 20
     assert rows[0]["best_route_min_ask_in_usdc_per_1m"] == "0.00015"
     assert rows[0]["best_route_min_ask_out_usdc_per_1m"] == "0.0006"
+
+
+def test_shell_table_appends_tokens_per_second_only_when_the_row_has_it():
+    row = dict(F.load_defaults()["top20"][0])
+    bare = F.shell_table({"top20": [row]})
+    assert bare.strip().count("|") == 5
+    row["tps"] = 114.8
+    with_speed = F.shell_table({"top20": [row]}).strip()
+    assert with_speed.endswith("|114.8")
+    row["tps"] = 45
+    assert F.shell_table({"top20": [row]}).strip().endswith("|45")
 
 
 def test_builtin_table_matches_the_mac_launcher_fallback():

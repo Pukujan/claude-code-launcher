@@ -111,8 +111,14 @@ def load_extra_models(include_hidden: bool = False) -> list:
     return [m for m in models if not (m.get("opt_in") and m.get("id") not in opted_in_ids())]
 
 
-LISTS = ("top20", "frontier")
-LIST_LABELS = {"top20": "IRE Top 20", "frontier": "IRE frontier list"}
+LISTS = ("top20", "frontier", "utility")
+LIST_LABELS = {"top20": "IRE Top 20", "frontier": "IRE frontier list",
+               "utility": "Pictures and video"}
+_LIST_KEYS = {"t": "top20", "f": "frontier", "u": "utility"}
+
+
+def _list_key(ans: str) -> str | None:
+    return _LIST_KEYS.get(ans.lower())
 
 
 def catalog(bundle: dict, which: str = "top20") -> list:
@@ -120,12 +126,13 @@ def catalog(bundle: dict, which: str = "top20") -> list:
 
     which="top20": IRE Top 20 (first route of each family) + extras.
     which="frontier": IRE frontier list, one row per route (empty if IRE has none).
+    which="utility": picture and omni routes, one row per route.
     Each item: {id, name, rank, eligible, cost_per_mtok, cheap, placeholder, note, list}
     """
     cap = float(bundle["price_policy"]["max_cost_per_mtok"])
     out, seen = [], set()
-    if which == "frontier":
-        for m in bundle.get("frontier") or []:
+    if which in ("frontier", "utility"):
+        for m in bundle.get(which) or []:
             rid = m.get("route")
             if not rid or rid in seen:
                 continue
@@ -134,16 +141,18 @@ def catalog(bundle: dict, which: str = "top20") -> list:
             out.append({"id": rid, "name": m.get("name") or rid, "rank": m.get("rank"),
                         "eligible": bool(m.get("eligible")), "cost_per_mtok": cost,
                         "price_in": m.get("price_in"), "price_out": m.get("price_out"),
+                        "tps": m.get("tps"),
                         "cheap": cap_price(m) is not None and float(cap_price(m)) < cap,
                         "placeholder": False,
                         "extra": False, "opt_in": False, "note": m.get("health") or "",
-                        "list": "frontier"})
+                        "list": which})
         return out
     for m in bundle.get("top20") or []:
         rid = m["ids"][0]
         cost = m.get("cost_per_mtok")
         out.append({"id": rid, "name": m["name"], "rank": m["rank"], "eligible": bool(m.get("eligible")),
                     "cost_per_mtok": cost, "price_in": m.get("price_in"), "price_out": m.get("price_out"),
+                    "tps": m.get("tps"),
                     "cheap": cap_price(m) is not None and float(cap_price(m)) < cap,
                     "placeholder": False, "extra": False, "opt_in": False, "note": "", "list": "top20"})
         seen.add(rid)
@@ -154,6 +163,7 @@ def catalog(bundle: dict, which: str = "top20") -> list:
         out.append({"id": x["id"], "name": x.get("name", x["id"]), "rank": None,
                     "eligible": ok, "cost_per_mtok": x.get("cost_per_mtok"),
                     "output_cost_per_mtok": x.get("output_cost_per_mtok"),
+                    "tps": x.get("tps"),
                     # opted-in extras are judged by their own cap hook, not the IRE cap
                     "cheap": ok, "extra": True, "opt_in": bool(x.get("opt_in")),
                     "placeholder": bool(x.get("placeholder")), "note": why or x.get("price_note", ""),
@@ -167,12 +177,13 @@ def _route_index(bundle: dict) -> dict:
     for m in bundle.get("top20") or []:
         for rid in m["ids"]:
             idx.setdefault(rid, m)
-    for m in bundle.get("frontier") or []:
-        if m.get("route"):
-            idx.setdefault(m["route"], {"eligible": bool(m.get("eligible")), "frontier": True,
-                                        "cost_per_mtok": m.get("cost_per_mtok"),
-                                        "price_in": m.get("price_in"), "price_out": m.get("price_out"),
-                                        "name": m.get("name")})
+    for key in ("frontier", "utility"):
+        for m in bundle.get(key) or []:
+            if m.get("route"):
+                idx.setdefault(m["route"], {"eligible": bool(m.get("eligible")), key: True,
+                                            "cost_per_mtok": m.get("cost_per_mtok"),
+                                            "price_in": m.get("price_in"), "price_out": m.get("price_out"),
+                                            "name": m.get("name")})
     for x in load_extra_models():
         idx.setdefault(x["id"], {"eligible": extra_allowed(x)[0], "extra": True,
                                  "cost_per_mtok": x.get("cost_per_mtok"), "name": x.get("name")})
@@ -299,9 +310,20 @@ def _fmt_cost(c):
     return "   ?  " if c is None else f"{c:g}".rjust(6)
 
 
+def _fmt_speed(value) -> str:
+    """'114.8 tok/s', or '' when the route has no tokens-per-second figure."""
+    if value is None or value == "":
+        return ""
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return ""
+    return f"{n:.1f}".rstrip("0").rstrip(".") + " tok/s"
+
+
 def format_row(i: int, c: dict, cap: float, blocked=()) -> str:
-    """One picker row: number, route, price per 1M, name, flags. Rows at or over
-    the cap are marked 'OVER $0.10'."""
+    """One picker row: number, route, price per 1M, name, tok/s, flags. Rows at
+    or over the cap are marked 'OVER $0.10'."""
     flags = []
     judge = cap_price(c)
     over = judge is None or float(judge) >= cap
@@ -319,7 +341,9 @@ def format_row(i: int, c: dict, cap: float, blocked=()) -> str:
     if is_cx(c["id"]):
         flags.append("cx: Responses mode")
     mark = f"OVER ${cap:.2f}" if over else ""
-    return (f"  {i:2d}. {c['id']:<40} ~{_fmt_cost(c['cost_per_mtok'])}/1M {mark:<10} {c['name']}"
+    speed = _fmt_speed(c.get("tps"))
+    tail = f"  {speed}" if speed else ""
+    return (f"  {i:2d}. {c['id']:<40} ~{_fmt_cost(c['cost_per_mtok'])}/1M {mark:<10} {c['name']}{tail}"
             + (f"  [{'; '.join(flags)}]" if flags else ""))
 
 
@@ -341,7 +365,8 @@ def _parse_choice(ans: str, cands: list) -> list | None:
 
 def _show_list(p, bundle, which, exclude, blocked, cap):
     cands = [c for c in catalog(bundle, which) if c["id"] not in exclude]
-    p(f"-- {LIST_LABELS[which]} (price is per 1M tokens; 't' = Top 20, 'f' = frontier list) --")
+    p(f"-- {LIST_LABELS[which]} (price is per 1M tokens; speed, when shown, is tok/s; "
+      f"'t' = Top 20, 'f' = frontier, 'u' = pictures and video) --")
     if not cands:
         p("  (empty: IRE has no frontier list on this machine yet)" if which == "frontier" else "  (empty)")
     for i, c in enumerate(cands, 1):
@@ -383,7 +408,7 @@ def prompt_ladder(bundle: dict, role: str, primary: str, blocked_prefixes=(), *,
     if blocked:
         p(f"  vendors left out of the default because the other seat uses them: {', '.join(sorted(set(blocked)))}")
     p()
-    p("Enter = accept, 0 = no fallbacks, t / f = show the Top 20 / frontier list,")
+    p("Enter = accept, 0 = no fallbacks, t / f / u = Top 20 / frontier / pictures and video,")
     p("or type up to 3 numbers from the list shown (or route ids), in order.")
     cands = _show_list(p, bundle, which, {primary}, blocked, cap)
     while True:
@@ -395,13 +420,14 @@ def prompt_ladder(bundle: dict, role: str, primary: str, blocked_prefixes=(), *,
             return {"fallbacks": dflt, "source": "default"}
         if ans == "0":
             return {"fallbacks": [], "source": "none"}
-        if ans.lower() in ("t", "f"):
-            which = "top20" if ans.lower() == "t" else "frontier"
+        nxt = _list_key(ans)
+        if nxt:
+            which = nxt
             cands = _show_list(p, bundle, which, {primary}, blocked, cap)
             continue
         picks = _parse_choice(ans, cands)
         if not picks:
-            p("  Type list numbers separated by spaces, e.g. '3 1', t or f to switch lists, or Enter.")
+            p("  Type list numbers separated by spaces, e.g. '3 1', t, f, or u to switch lists, or Enter.")
             continue
         probs = validate_picks(bundle, primary, picks)
         if probs:
@@ -423,7 +449,8 @@ def prompt_primary(bundle: dict, role: str, *, default: str | None = None, allow
         print(s, file=out, flush=True)
 
     p()
-    p(f"Choose the {role.upper()} model. t / f switch between the Top 20 and the frontier list."
+    p(f"Choose the {role.upper()} model. t / f / u switch the Top 20, the frontier list, "
+      "and pictures and video."
       + (" o = OFF." if allow_off else "") + " q = cancel.")
     cands = _show_list(p, bundle, which, set(), (), cap)
     while True:
@@ -434,8 +461,9 @@ def prompt_primary(bundle: dict, role: str, *, default: str | None = None, allow
         low = ans.lower()
         if low == "q":
             return None
-        if low in ("t", "f"):
-            which = "top20" if low == "t" else "frontier"
+        nxt = _list_key(low)
+        if nxt:
+            which = nxt
             cands = _show_list(p, bundle, which, set(), (), cap)
             continue
         if allow_off and low in ("o", "off"):
@@ -444,7 +472,7 @@ def prompt_primary(bundle: dict, role: str, *, default: str | None = None, allow
             ans = default
         picks = _parse_choice(ans, cands)
         if not picks or len(picks) != 1:
-            p("  Type one number from the list shown, t or f to switch lists, or q.")
+            p("  Type one number from the list shown, t, f, or u to switch lists, or q.")
             continue
         rid = picks[0]
         probs = [x for x in validate_picks(bundle, "", [rid]) if "appears twice" not in x]
@@ -453,8 +481,8 @@ def prompt_primary(bundle: dict, role: str, *, default: str | None = None, allow
             continue
         for w in pick_warnings(bundle, [rid]):
             p(f"  warning: {w}")
-        row = next((c for c in catalog(bundle, "top20") + catalog(bundle, "frontier") if c["id"] == rid),
-                   {"id": rid, "name": rid})
+        pools = catalog(bundle, "top20") + catalog(bundle, "frontier") + catalog(bundle, "utility")
+        row = next((c for c in pools if c["id"] == rid), {"id": rid, "name": rid})
         return row
 
 

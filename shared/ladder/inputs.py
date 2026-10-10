@@ -125,6 +125,7 @@ def normalize(raw) -> dict | None:
 
     shared/ire gives {source, top20, price_policy{free_below_per_mtok},
     ladders{main: [primary, ...], advisor: [...]}, retries, cooldown_s}.
+    A lab roster also carries utility[] and lab_roster.
     """
     if not isinstance(raw, dict) or not raw.get("top20"):
         return None
@@ -148,6 +149,8 @@ def normalize(raw) -> dict | None:
     out = {"source": {"kind": "ire", "detail": str(detail)},
            "price_policy": {"max_cost_per_mtok": cap},
            "top20": raw["top20"], "frontier": list(raw.get("frontier") or []),
+           "utility": list(raw.get("utility") or []),
+           "lab_roster": bool(raw.get("lab_roster")),
            "ladders": lad, "retry": retry}
     return out if _usable(out) else None
 

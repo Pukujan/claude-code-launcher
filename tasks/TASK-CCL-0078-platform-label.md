@@ -48,9 +48,12 @@ CLAUDE_IH_SETUP_ONLY=1 script -qec "bash 'mac/Launch Claude InferHub.command'" /
 
 The last command prints the real banner; it must say Linux on Linux.
 
-## Log
+## Checkpoint log
 
 - 2026-10-07: filed #94; added `OS_LABEL` (Darwin -> macOS, else `uname -s`), pointed the banner
   and `need_curl()` at it, corrected the header comment, added 7 unit assertions.
 - 2026-10-07: verified — banner and log both print `(Linux)`; shellcheck clean; unit tests 113
   passed with only the pre-existing ultracode arrow-pick failure; ruff clean; pytest 373 passed.
+- 2026-10-10: the `gates` check failed on this file for a missing `## Checkpoint log` heading
+  (this section, which had been written as `## Log`); renamed to match the protocol and merged
+  `main` in.

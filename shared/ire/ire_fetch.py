@@ -228,6 +228,21 @@ def _fmt_price(v) -> str:
     return "" if v is None else f"{float(v):g}"
 
 
+def _fmt_tps(v) -> str:
+    """Tokens per second for the picker table. Empty when the row has no speed.
+
+    One decimal, with a trailing .0 dropped, and never scientific notation, so
+    the launcher's table check can keep treating the field as a plain number.
+    """
+    if v is None or v == "":
+        return ""
+    try:
+        n = float(v)
+    except (TypeError, ValueError):
+        return ""
+    return f"{n:.1f}".rstrip("0").rstrip(".")
+
+
 def _parse_utc(text) -> dt.datetime | None:
     """A UTC datetime from an IRE timestamp ("...Z" or a bare date), or None."""
     if not isinstance(text, str) or not text.strip():
@@ -505,9 +520,9 @@ def fetch_frontier(gh: GitHub, repo: str, sha: str) -> list:
     return []
 
 
-def write_cache(directory: Path, bundle: dict, sha: str, fetched_at: str) -> None:
+def write_cache(directory: Path, bundle: dict, sha: str, fetched_at: str, ref: str = IRE_REF) -> None:
     directory.mkdir(parents=True, exist_ok=True)
-    record = {"fetched_at": fetched_at, "source_sha": sha, "repo": IRE_REPO, "ref": IRE_REF,
+    record = {"fetched_at": fetched_at, "source_sha": sha, "repo": IRE_REPO, "ref": ref,
               "bundle": bundle}
     fd, tmp = tempfile.mkstemp(dir=str(directory), prefix=".ire-", suffix=".tmp")
     try:
@@ -537,7 +552,7 @@ def now_utc() -> str:
 
 
 def get_recommendations(offline: bool = False, timeout: float = DEFAULT_TIMEOUT,
-                        directory: Path | None = None) -> dict:
+                        directory: Path | None = None, ref: str | None = None) -> dict:
     """The one entry point. Always returns a valid bundle; never raises for network trouble."""
     directory = directory or cache_dir()
     if offline or os.environ.get("CCL_IRE_OFFLINE") == "1":
@@ -548,10 +563,11 @@ def get_recommendations(offline: bool = False, timeout: float = DEFAULT_TIMEOUT,
             # No token (issue #61): the IRE repo is public, so read it anonymously.
             where = f"no token, anonymous ({where})"
         try:
-            bundle, sha = fetch_live(GitHub(token, timeout))
+            source_ref = ref or IRE_REF
+            bundle, sha = fetch_live(GitHub(token, timeout), ref=source_ref)
             log(f"source=live  IRE {IRE_REPO}@{sha[:10]} via {where}")
             try:
-                write_cache(directory, bundle, sha, now_utc())
+                write_cache(directory, bundle, sha, now_utc(), source_ref)
             except OSError as e:
                 log(f"could not write the cache ({type(e).__name__}); continuing")
             return bundle
@@ -591,8 +607,9 @@ def top20_csv(bundle: dict) -> str:
 
 def shell_table(bundle: dict) -> str:
     """rank|name|id|eligible|in|out lines for the Mac picker (first InferHub id per
-    row). The two prices are the best route's cheapest listed asks per 1M tokens;
-    a list with no ask columns leaves them empty so a reader falls back to the blend."""
+    row), plus |tps when the row has a tokens-per-second figure. The two prices
+    are the best route's cheapest listed asks per 1M tokens; a list with no ask
+    columns leaves them empty so a reader falls back to the blend."""
     lines = []
     for r in bundle["top20"]:
         name = r["name"].replace("|", "/").replace("\n", " ") or r["ids"][0]
@@ -600,8 +617,12 @@ def shell_table(bundle: dict) -> str:
         in_p = r.get("price_in")
         if in_p is None:
             in_p = r.get("cost_per_mtok")
-        lines.append(f"{r['rank']}|{name}|{r['ids'][0]}|{'true' if r['eligible'] else 'false'}|"
-                     f"{_fmt_price(in_p)}|{_fmt_price(r.get('price_out'))}")
+        line = (f"{r['rank']}|{name}|{r['ids'][0]}|{'true' if r['eligible'] else 'false'}|"
+                f"{_fmt_price(in_p)}|{_fmt_price(r.get('price_out'))}")
+        tps = _fmt_tps(r.get("tps"))
+        if tps:
+            line += f"|{tps}"
+        lines.append(line)
     return "\n".join(lines) + "\n"
 
 
@@ -615,8 +636,10 @@ def main(argv=None) -> int:
                     help="also write rank|name|id|eligible|in|out lines (the Mac picker table)")
     ap.add_argument("--top20-csv", type=Path, default=None,
                     help="also write the Top 20 as a CSV for sync_inferhub_top20.py")
+    ap.add_argument("--ref", default=None,
+                    help="read IRE files at this branch, tag, or commit instead of resolving main")
     a = ap.parse_args(argv)
-    bundle = get_recommendations(offline=a.offline, timeout=a.timeout, directory=a.cache_dir)
+    bundle = get_recommendations(offline=a.offline, timeout=a.timeout, directory=a.cache_dir, ref=a.ref)
     text = json.dumps(bundle, indent=2) + "\n"
     if a.out:
         a.out.parent.mkdir(parents=True, exist_ok=True)

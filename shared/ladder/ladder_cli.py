@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Launcher entry point for fallback ladders (Windows and Mac call the same thing).
 
-  catalog  [--bundle B]                       pickable routes as JSON (Top 20 + opted-in extras)
+  catalog  [--bundle B]                       pickable routes as JSON (Top 20, then frontier, then utility)
   choose   --state S --role main --primary ID [--bundle B]
   choose   --state S --role advisor --primary ID              ('' = advisor OFF)
-  primary  --role main|advisor [--allow-off] [--list frontier|top20] --out F
-                                              pick a seat primary from either IRE list;
+  primary  --role main|advisor [--allow-off] [--list frontier|top20|utility] --out F
+                                              pick a seat primary from an IRE list;
                                               writes "id<TAB>name" to F (exit 2 = cancelled)
   apply    --state S [--base-url http://127.0.0.1:4000]       push to the running proxy
   show     [--base-url ...]                                   read back what the proxy has
@@ -66,7 +66,10 @@ def get_inputs(a, st=None):
 
 def cmd_catalog(a):
     b = get_inputs(a)
-    print(json.dumps(L.catalog(b), indent=2))
+    rows = []
+    for which in L.LISTS:
+        rows.extend(L.catalog(b, which))
+    print(json.dumps(rows, indent=2))
     return 0
 
 
