@@ -1,12 +1,12 @@
 # TASK CCL-0081: Refresh the built-in model picker from IRE's October 7 list
 
-<!-- continuity:task {"acceptance":["The four built-in Top 20 tables match the pinned IRE source revision in rank, family, eligibility, selected provider route, and ask prices.","The Windows offline first-20 frontier fallback and shared route-map fixture match the pinned IRE source revision.","When IRE changes a model family's selected provider, Windows defaults and picker highlights use the current listed route for that same family; an existing saved custom route is preserved until the user changes it.","Table, route-mapping, and picker checks pass in required pull request CI.","No seat or shim routing, fixed fallback chain, live proxy, or secret changes."],"depends_on":[],"goal":"Refresh the built-in model tables from IRE and keep Windows picker defaults on the same model family when its selected provider changes.","id":"CCL-0081","issue_url":"https://github.com/Pukujan/claude-code-launcher/issues/107","next_action":"Commit the picker correction and updated expectations, push the checkpoint, and verify required CI on PR #108.","owner":"Alex; Codex implements","priority":"P2","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"active","why":"IRE's current source changes model eligibility and selected provider routes; those route changes can leave Windows picker defaults pointing outside the current list."} -->
+<!-- continuity:task {"acceptance":["The four built-in Top 20 tables match the pinned IRE source revision in rank, family, eligibility, selected provider route, and ask prices.","The Windows offline first-20 frontier fallback and shared route-map fixture match the pinned IRE source revision.","When IRE changes a model family's selected provider, Windows defaults and picker highlights use the current listed route for that same family; an existing saved custom route is preserved until the user changes it.","Table, route-mapping, and picker checks pass in required pull request CI.","No seat or shim routing, fixed fallback chain, live proxy, or secret changes."],"depends_on":[],"goal":"Refresh the built-in model tables from IRE and keep Windows picker defaults on the same model family when its selected provider changes.","id":"CCL-0081","issue_url":"https://github.com/Pukujan/claude-code-launcher/issues/107","next_action":"none; issue #107 closed after PR #108 merged as 6130d2d with all required checks green.","owner":"Alex; Codex implements","priority":"P2","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"completed","why":"IRE's current source changes model eligibility and selected provider routes; those route changes can leave Windows picker defaults pointing outside the current list."} -->
 
-- Status: active
+- Status: completed
 - Owner: Alex; Codex implements
 - Priority: P2
 - Depends on: none
-- Leaf issue: [#107](https://github.com/Pukujan/claude-code-launcher/issues/107); parent: none; dependencies: none
+- Leaf issue: [#107](https://github.com/Pukujan/claude-code-launcher/issues/107) (closed); parent: none; dependencies: none
 - Primary writer: Codex; branch: `codex/ccl-0081-ire-oct7-model-refresh`
 
 ## Goal
@@ -40,13 +40,13 @@ When IRE cannot be reached, the Windows launcher will offer IRE's current model 
 
 ## Acceptance criteria
 
-- [ ] The shared CSV, shared JSON defaults, Windows table, and Mac table match IRE's 20 rows at the pinned source revision in rank/order, model family, eligibility, selected provider route, and ask prices.
-- [ ] The Windows offline first-20 frontier fallback and route-map fixture match the same pinned IRE bundle.
-- [ ] When a default route is no longer listed but its model family remains, the Windows picker highlights IRE's current route for that family, including when the user edits a saved slot.
-- [ ] A saved custom route is preserved unless the user chooses a replacement; a CKFF-only slot falls back to current IRE defaults.
-- [ ] Table, route-mapping, and picker checks pass in required pull request CI.
-- [ ] No seat or shim routing, fixed fallback chain, live proxy, or secret changes.
-- [ ] A linked pull request passes required CI and is set to auto-merge only after its final push.
+- [x] The shared CSV, shared JSON defaults, Windows table, and Mac table match IRE's 20 rows at the pinned source revision in rank/order, model family, eligibility, selected provider route, and ask prices.
+- [x] The Windows offline first-20 frontier fallback and route-map fixture match the same pinned IRE bundle.
+- [x] When a default route is no longer listed but its model family remains, the Windows picker highlights IRE's current route for that family, including when the user edits a saved slot.
+- [x] A saved custom route is preserved unless the user chooses a replacement; a CKFF-only slot falls back to current IRE defaults.
+- [x] Table, route-mapping, and picker checks pass in required pull request CI.
+- [x] No seat or shim routing, fixed fallback chain, live proxy, or secret changes.
+- [x] A linked pull request passes required CI and is set to auto-merge only after its final push.
 
 ## Evidence and sources
 
@@ -61,9 +61,9 @@ Starting revision, material inputs/configuration, runtime, exact command or prom
 ## Related records
 
 - Leaf owning issue: #107; parent: none; dependencies: none.
-- Primary writer: Codex; branch: `codex/ccl-0081-ire-oct7-model-refresh`; source issue #107 is OPEN as of 2026-10-07.
+- Primary writer: Codex; branch: `codex/ccl-0081-ire-oct7-model-refresh`; source issue #107 was OPEN during the work and is closed at this projection.
 - Related issue: #96, which introduced the generated-table workflow; source revision: IRE `main` `c80166a2e827c3e0ed1f311735d9596c2ef5ddbc`; scope corrections: [comment 6045326197](https://github.com/Pukujan/claude-code-launcher/issues/107#issuecomment-6045326197), [comment 6045504469](https://github.com/Pukujan/claude-code-launcher/issues/107#issuecomment-6045504469), and [comment 6046443651](https://github.com/Pukujan/claude-code-launcher/issues/107#issuecomment-6046443651).
-- Review PR: [#108](https://github.com/Pukujan/claude-code-launcher/pull/108), open at head `6d7fb069`; initial required Python CI failed and needs a corrective push. All other required checks and the supplemental Windows installer check passed at that head.
+- Review PR: [#108](https://github.com/Pukujan/claude-code-launcher/pull/108), MERGED as `6130d2dbe669f9cfc3e4b481d46b8446f283b202` on 2026-10-07T20:53:49Z. All six required checks and the supplemental Windows installer check passed on final head `78050429e37bea932b02d86e91e111dd3705d063`.
 
 ## Checkpoint log
 
@@ -180,6 +180,29 @@ Blocked/uncertain:
 
 Next:
 - Verify required CI on PR #108's exact pushed head and enable auto-merge after this final push; then confirm merge, issue status, and accepted history.
+
+### Closeout — 2026-10-10
+
+Completed:
+- Reconciled this projection with accepted history: the refresh and the picker-default correction are both on `main`, so the task moves from active to completed.
+- Recorded that the later route-policy overlay for the GLM and Qwen families is a separate task, CCL-0083, so a reader does not read this completed refresh as the final word on those routes.
+
+Evidence:
+- PR [#108](https://github.com/Pukujan/claude-code-launcher/pull/108) merged as `6130d2dbe669f9cfc3e4b481d46b8446f283b202` on 2026-10-07T20:53:49Z.
+- On the final head `78050429e37bea932b02d86e91e111dd3705d063` every required check passed (`gates`, `lint`, `mac-dry-run`, `linux-dry-run`, `python-tests`, `bash 3.2 compatibility`), and the supplemental `windows-installer` check passed too.
+- The earlier `python-tests` failure on head `6d7fb069` was corrected before the merge; it is not an open defect.
+
+Decisions:
+- Close the task on the merged commit rather than on the pre-merge checkpoints; the merge record is what owns delivery.
+
+Changed:
+- `tasks/TASK-CCL-0081-ire-oct7-model-refresh.md`, `checkpoints/CURRENT.md`.
+
+Blocked/uncertain:
+- The review-gate question recorded during this task (PR #108 merged with no submitted review while an approving review had been reported required) is resolved as a settings fact, not a code fact: `main`'s branch protection now requires the six status checks and no review, and no rulesets exist. Nothing on this issue's acceptance list depended on it.
+
+Next:
+- None for this task. Preserve this record; the GLM and Qwen route policy continues under CCL-0083.
 
 ## Handoff
 
