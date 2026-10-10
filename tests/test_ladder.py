@@ -27,7 +27,7 @@ class Defaults(unittest.TestCase):
         # IRE now gates cbcn/deepseek-v4-flash, so the default uses the next
         # eligible Top 20 route while the configured fixed chain stays unchanged.
         self.assertEqual(L.default_ladder(self.b, "main", "cb/deepseek-v4.1-flash"),
-                         ["ali/qwen3.8-flash", "mm/MiniMax-M3"])
+                         ["ali/qwen3.8-flash", "cbcn/glm-5.3-flash"])
         self.assertEqual(L.default_ladder(self.b, "advisor", "cbcn/glm-5.3-flash"), ["cbcn/minimax-m3"])
 
     def test_fixed_chains_are_the_builtin_defaults(self):
@@ -178,7 +178,7 @@ class Picker(unittest.TestCase):
         catalog = L.catalog(b)
         ids = [c["id"] for c in catalog if c["id"] != "cb/deepseek-v4.1-flash"]
         glm = next(c["id"] for c in catalog if c["name"] == "GLM 5.2")
-        gemini = next(c["id"] for c in catalog if c["name"] == "Gemini 3.7 Flash")
+        gemini = next(c["id"] for c in catalog if c["name"] == "Gemini 3.6 Flash")
         out = io.StringIO()
         it = iter([f"{ids.index(glm) + 1} {ids.index(gemini) + 1}"])
         res = L.prompt_ladder(b, "main", "cb/deepseek-v4.1-flash", (), inp=lambda _: next(it), out=out)
@@ -241,7 +241,7 @@ class Picker(unittest.TestCase):
         self.assertEqual(row["id"], "cx/gpt-6.1-sol")
         it = iter(["t", "7"])   # 7th Top 20 row after the IRE refresh
         row = L.prompt_primary(b, "main", inp=lambda _: next(it), out=io.StringIO())
-        self.assertEqual(row["id"], "cbcn/kimi-k2.7")
+        self.assertEqual(row["id"], "cbcn/deepseek-v4-pro")
         it = iter(["o"])
         self.assertEqual(L.prompt_primary(b, "advisor", allow_off=True, inp=lambda _: next(it),
                                           out=io.StringIO())["id"], "")
@@ -417,7 +417,8 @@ class Cli(unittest.TestCase):
                                     "--role", role, "--primary", prim], input="\n", text=True, capture_output=True)
                 self.assertEqual(r.returncode, 0, r.stderr)
             s = json.loads(st.read_text())
-            self.assertEqual(s["main"]["fallbacks"], ["ali/qwen3.8-flash", "mm/MiniMax-M3"])
+            # the advisor's cbcn primary drops the cbcn rung from main's ladder
+            self.assertEqual(s["main"]["fallbacks"], ["ali/qwen3.8-flash"])
             self.assertEqual(s["advisor"]["fallbacks"], ["cbcn/minimax-m3"])
             main_v = {L.prefix(s["main"]["primary"])} | {L.prefix(r) for r in s["main"]["fallbacks"]}
             adv_v = {L.prefix(s["advisor"]["primary"])} | {L.prefix(r) for r in s["advisor"]["fallbacks"]}
