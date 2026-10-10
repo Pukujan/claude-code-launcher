@@ -45,3 +45,26 @@ Post-fix, Qwen3.8 Flash still leads with `alicn/qwen3.8-flash` (3 sellers, 8 lis
 - 2026-10-10: created this task projection from issue #113 with the pinning design; reconciled against a live IRE fetch (all six preferred routes present in the Top 20 `ids` lists).
 - 2026-10-10: superseded the pinning design after IRE merged the selector fix (IRE #111, `d7014326`) and its regenerated lists proved policy-conformant; opened PR #114 to land the nightly run's stranded branch `c72c409`; filed issue #115 for the nightly PR-creation failure; recorded the revision on #113.
 - 2026-10-10: #114 failed the required `python-tests` check (7 stale test expectations). Opened PR #117 with the same tables plus the test alignment; closed #114. Local suite shows no new failures versus `main` (same 23 mac/posix-only failures on Windows).
+
+### 2026-10-10 01:18:58 UTC — executor-agent
+
+<!-- continuity:checkpoint {"agent":"executor-agent","blocked":[],"changed":["windows/launch-claude-inferhub.ps1, mac/Launch Claude InferHub.command, shared/litellm/config/top20-builtin.csv, shared/ire/defaults.json, tests/fixtures/ire/top20-frontier-route-map.json, tests/test_ladder.py, tests/test_ckff_off.py, tests/test_ire_fetch.py, tests/test_ultracode_windows_wizard.py, tasks/TASK-CCL-0083-provider-route-preferences.md, checkpoints/CURRENT.md"],"completed":["Propagated IRE's post-fix route lists into the five built-in picker tables and aligned the tests that hardcoded the old routes; opened PR 117 (tables + tests + the CCL-0083 projection); recorded the scope revision on issue 113; filed issue 115 for the nightly PR-creation failure; opened and then closed PR 114, which carried the tables alone and failed python-tests."],"decisions":["Dropped the launcher-side route pin: IRE fixed the selector at the source, so a local pin would be a divergent second source of truth. The deliverable is propagation of IRE's list."],"evidence":["IRE fix d7014326 (IRE #111) closed IRE #110; IRE main's list leads every policy family with cb/cbcn or ali/alicn. Nightly run 38011099347 pushed c72c409 to codex/ire-model-tables-refresh then failed on PR creation (repo setting can_approve_pull_request_reviews false). Five-way parity on c72c409: no mismatches. tests/test_top20_tables.py 6 passed; ruff clean; local suite same 23 mac/posix-only failures as main, no new ones. PR 117 head a279c0c."],"next_action":"Verify the six required checks on PR 117 and merge it, then close issue 113 from the merged state and receipt issue 109 (CCL-0082 closeout already merged in f8957ca).","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"CCL-0083","timestamp":"2026-10-10T01:18:58Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"8d1e382f6e06087c4e0d8db1346c164b8d47b0ae20f2e46c6145fa931db268e2","request_id":"e2577b25b5654984a66f33da8d1da988","schema":"project-continuity.checkpoint-operation.v1","task_id":"CCL-0083"} -->
+
+Completed:
+- Propagated IRE's post-fix route lists into the five built-in picker tables and aligned the tests that hardcoded the old routes; opened PR 117 (tables + tests + the CCL-0083 projection); recorded the scope revision on issue 113; filed issue 115 for the nightly PR-creation failure; opened and then closed PR 114, which carried the tables alone and failed python-tests.
+
+Evidence:
+- IRE fix d7014326 (IRE #111) closed IRE #110; IRE main's list leads every policy family with cb/cbcn or ali/alicn. Nightly run 38011099347 pushed c72c409 to codex/ire-model-tables-refresh then failed on PR creation (repo setting can_approve_pull_request_reviews false). Five-way parity on c72c409: no mismatches. tests/test_top20_tables.py 6 passed; ruff clean; local suite same 23 mac/posix-only failures as main, no new ones. PR 117 head a279c0c.
+
+Decisions:
+- Dropped the launcher-side route pin: IRE fixed the selector at the source, so a local pin would be a divergent second source of truth. The deliverable is propagation of IRE's list.
+
+Changed:
+- windows/launch-claude-inferhub.ps1, mac/Launch Claude InferHub.command, shared/litellm/config/top20-builtin.csv, shared/ire/defaults.json, tests/fixtures/ire/top20-frontier-route-map.json, tests/test_ladder.py, tests/test_ckff_off.py, tests/test_ire_fetch.py, tests/test_ultracode_windows_wizard.py, tasks/TASK-CCL-0083-provider-route-preferences.md, checkpoints/CURRENT.md
+
+Blocked/uncertain:
+- none
+
+Next:
+- Verify the six required checks on PR 117 and merge it, then close issue 113 from the merged state and receipt issue 109 (CCL-0082 closeout already merged in f8957ca).
