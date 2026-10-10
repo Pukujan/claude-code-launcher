@@ -6,7 +6,7 @@ This is an as-of projection; live GitHub issues own progression. Link the owning
 
 ## Program state
 
-Phase: every merged increment through the platform-label fix is reconciled in this projection. The owner's provider-route policy is being delivered by propagation: IRE fixed its thin-supply selector at the source (IRE #111, `d7014326`, #110 closed), the nightly refresh regenerated the five built-in tables from the post-fix list, and PR #114 lands that regenerated branch. The nightly workflow could not open its own PR (repo Actions setting), which is filed as #115 for an owner decision. The built-in tables on `main` still carry IRE's pre-fix picks until PR #114 merges.
+Phase: every merged increment through the platform-label fix is reconciled in this projection. The owner's provider-route policy is being delivered by propagation: IRE fixed its thin-supply selector at the source (IRE #111, `d7014326`, #110 closed), the nightly refresh regenerated the five built-in tables from the post-fix list, and PR #117 lands that regenerated branch. The nightly workflow could not open its own PR (repo Actions setting), which is filed as #115 for an owner decision. The built-in tables on `main` still carry IRE's pre-fix picks until PR #117 merges.
 
 ## Completed
 
@@ -40,8 +40,9 @@ Phase: every merged increment through the platform-label fix is reconciled in th
   The original pinning design was superseded on 2026-10-10 after IRE merged its selector
   fix (IRE #111, `d7014326`; #110 closed) and its regenerated list proved policy-conformant
   for all six families. The nightly run regenerated the tables and pushed them to
-  `codex/ire-model-tables-refresh` (`c72c409`) but could not open a PR; PR #114 lands that
-  branch, and #115 tracks the nightly PR-creation failure. Leaf issue
+  `codex/ire-model-tables-refresh` (`c72c409`) but could not open a PR; PR #117 lands that
+  branch with the aligned test expectations (PR #114 carried the tables alone and failed
+  `python-tests`; it is closed as superseded), and #115 tracks the nightly PR-creation failure. Leaf issue
   [#113](https://github.com/Pukujan/claude-code-launcher/issues/113); parent: none;
   dependencies: none; branch `ccl-0083-provider-route-preferences`; owner Alex; executor
   agent implements.
@@ -58,7 +59,7 @@ Phase: every merged increment through the platform-label fix is reconciled in th
 
 ## Next atomic action
 
-Verify the six required checks on PR #114 and merge it, then close #113 from the merged
+Verify the six required checks on PR #117 and merge it, then close #113 from the merged
 state and confirm every GLM family leads with `cb/`/`cbcn/` and every Qwen policy family
 with `ali/`/`alicn/` at the merge commit. Issue #115 (nightly refresh cannot open its own
 PR) waits on the owner's choice between enabling the Actions setting and switching to a PAT.
