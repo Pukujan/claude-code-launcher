@@ -1,12 +1,12 @@
 # Current Repository Checkpoint
 
-<!-- continuity:current {"active_task":"CCL-0078","active_task_file":"tasks/TASK-CCL-0078-platform-label.md","protocol_version":"0.1.0-draft","schema":"project-continuity.current.v1"} -->
+<!-- continuity:current {"active_task":"CCL-0083","active_task_file":"tasks/TASK-CCL-0083-provider-route-preferences.md","protocol_version":"0.1.0-draft","schema":"project-continuity.current.v1"} -->
 
 This is an as-of projection; live GitHub issues own progression. Link the owning leaf, parent ancestry and dependencies for active work.
 
 ## Program state
 
-Phase: the launcher's built-in picker tables track IRE's October 7 Top 20, the stall-hedge replay fix is on `main`, and the launcher has a first-class Linux entry point and installer on `main`. The IRE refresh and the stall hedge both merged, but their issue and projection reconciliation is still owed. The platform-label fix is the one open pull request.
+Phase: every merged increment through the platform-label fix is reconciled in this projection. The owner's provider-route policy is being delivered by propagation: IRE fixed its thin-supply selector at the source (IRE #111, `d7014326`, #110 closed), the nightly refresh regenerated the five built-in tables from the post-fix list, and PR #114 lands that regenerated branch. The nightly workflow could not open its own PR (repo Actions setting), which is filed as #115 for an owner decision. The built-in tables on `main` still carry IRE's pre-fix picks until PR #114 merges.
 
 ## Completed
 
@@ -29,27 +29,28 @@ Phase: the launcher's built-in picker tables track IRE's October 7 Top 20, the s
 - **CCL-0077**: the shared launcher body gets the Windows launcher's model-slots step, so Mac and Linux can set all four [CC] slots (sonnet, opus, fable, haiku), each a first model and up to two fallbacks, instead of only sonnet's and fable's first models. Merged with `lint`, `gates`, `mac-dry-run`, `linux-dry-run`, `python-tests` and `bash 3.2 compatibility` all passing ([issue #91](https://github.com/Pukujan/claude-code-launcher/issues/91), PR #92, merge `82169e1`).
 - **CCL-0079**: built-in model routes now match IRE's pinned data, Linux/macOS model pickers show 20 Top 20 and 20 frontier routes, and the Linux picker preserves the user's CB DeepSeek choice ([issue #96](https://github.com/Pukujan/claude-code-launcher/issues/96), PRs #97/#98/#99, merges `7891c11`/`d67e0c9`/`5070ced`; all six required checks passed on PR #99). Issue #96 is CLOSED. A later source refresh is tracked separately under #107.
 - **CCL-0080**: the port 4000 house rule read "Never connect to, restart, stop or bind `127.0.0.1:4000`", which an agent followed literally and so refused to probe the live proxy, reporting routing as unproven. The rule now forbids changing 4000, keeps read-only probing allowed, and names the copy-proxy-then-merge path, in `AGENTS.md`, `PROJECT.md` and `README.md`. Merged with all six required checks passing ([issue #102](https://github.com/Pukujan/claude-code-launcher/issues/102), PR #105, merge `081970f`).
+- **CCL-0078**: the shared launcher body names the platform it is actually running on. `OS_LABEL` (Darwin -> `macOS`, else `uname -s`) feeds the startup banner and the `need_curl()` failure message, so a Linux user no longer reads `(macOS)` in the first line or the launcher log. Merged with all six required checks and the supplemental `windows-installer` check passing ([issue #94](https://github.com/Pukujan/claude-code-launcher/issues/94), PR #95, merge `5665284`).
+- **CCL-0081**: regenerated the four built-in Top 20 tables and the Windows offline frontier fallback from pinned IRE commit `c80166a2`, and routed Windows picker defaults, including CKFF-only saved slots, to IRE's current route for the same model family when provider prefixes change. Merged with all six required checks and the supplemental `windows-installer` check passing ([issue #107](https://github.com/Pukujan/claude-code-launcher/issues/107), PR #108, merge `6130d2d`).
+- **CCL-0082**: when a slot's first model stays silent, the [CC] stream is held and the next rung is raced on the same prompt; the quiet model is benched with a doubling delay and leads again on a later real call. Merged as `3c7d973` ([issue #109](https://github.com/Pukujan/claude-code-launcher/issues/109), PR #110), and the replay busy-loop follow-up from #111 merged as `2faf4a0` ([PR #112](https://github.com/Pukujan/claude-code-launcher/pull/112)); all six required checks passed on both. Thresholds stay the proposed starting values and the live proxy on port 4000 was not touched.
 
 ## Active
 
-- **CCL-0078**: the shared launcher body names the platform it is actually running on. The
-  startup banner and the `need_curl()` failure message hardcoded "macOS", a leftover from when
-  the body was the macOS-only launcher, so `claude-acs` on Linux printed
-  `=== Launch Claude InferHub (macOS) ... ===` and wrote the same line to the launcher log.
-  `OS_LABEL` (Darwin -> `macOS`, else `uname -s`) now feeds both. Pull request #95 is open; its
-  `gates` check failed only because this task file used a `## Log` heading instead of the
-  protocol's `## Checkpoint log`, which is now corrected ([issue #94](https://github.com/Pukujan/claude-code-launcher/issues/94), branch `ccl-0094-platform-label`).
-- **CCL-0081**: regenerated the four built-in Top 20 tables and the Windows offline frontier
-  fallback from pinned IRE commit `c80166a2`, and routes Windows picker defaults, including
-  CKFF-only saved slots, to IRE's current route for the same model family when provider prefixes
-  change. The code is merged as `6130d2d` ([PR #108](https://github.com/Pukujan/claude-code-launcher/pull/108)); the issue #107 reconciliation is still owed ([issue #107](https://github.com/Pukujan/claude-code-launcher/issues/107), parent: none, dependencies: none).
-- **CCL-0082**: when the first model in a slot stays silent, hold the [CC] stream and race the
-  next rung on the same prompt; the quiet model is benched and leads again on a later real call
-  after that bench ends. The code is merged as `3c7d973` ([PR #110](https://github.com/Pukujan/claude-code-launcher/pull/110)), with the replay busy-loop follow-up on #111 merged as `2faf4a0` ([PR #112](https://github.com/Pukujan/claude-code-launcher/pull/112)); the issue #109 reconciliation is still owed ([issue #109](https://github.com/Pukujan/claude-code-launcher/issues/109), parent [#53](https://github.com/Pukujan/claude-code-launcher/issues/53), dependencies: none). Thresholds are the proposed starting values. The live proxy on port 4000 is unchanged.
+- **CCL-0083**: deliver the owner's provider-route policy (cb/cbcn for GLM, ali/alicn for
+  Qwen Flash/Max) by propagating IRE's post-fix route lists into the five built-in tables.
+  The original pinning design was superseded on 2026-10-10 after IRE merged its selector
+  fix (IRE #111, `d7014326`; #110 closed) and its regenerated list proved policy-conformant
+  for all six families. The nightly run regenerated the tables and pushed them to
+  `codex/ire-model-tables-refresh` (`c72c409`) but could not open a PR; PR #114 lands that
+  branch, and #115 tracks the nightly PR-creation failure. Leaf issue
+  [#113](https://github.com/Pukujan/claude-code-launcher/issues/113); parent: none;
+  dependencies: none; branch `ccl-0083-provider-route-preferences`; owner Alex; executor
+  agent implements.
 
 ## Queued
 
-- Re-sync `windows/launch-claude-inferhub.ps1` from the PC after the pending fixes there.
+- None. The former "re-sync the Windows picker from the PC" item is resolved by CCL-0083: the
+  PC's uncommitted `fix-glm-deep-route` edit and this task pursue the same route policy, and
+  this task replaces that edit.
 
 ## Blockers
 
@@ -57,5 +58,7 @@ Phase: the launcher's built-in picker tables track IRE's October 7 Top 20, the s
 
 ## Next atomic action
 
-Push the checkpoint fix on `ccl-0094-platform-label` and verify the required checks on PR #95
-before enabling auto-merge; then reconcile the #107 and #109 issue and projection records.
+Verify the six required checks on PR #114 and merge it, then close #113 from the merged
+state and confirm every GLM family leads with `cb/`/`cbcn/` and every Qwen policy family
+with `ali/`/`alicn/` at the merge commit. Issue #115 (nightly refresh cannot open its own
+PR) waits on the owner's choice between enabling the Actions setting and switching to a PAT.
