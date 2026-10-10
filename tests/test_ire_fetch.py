@@ -466,8 +466,8 @@ def test_cli_writes_the_picker_table_and_top20_csv(env, tmp_path):
     rows = list(csv.DictReader(io.StringIO((out / "top20.csv").read_text())))
     assert [r["model_ids"].split(";")[0].strip() for r in rows] == [r["ids"][0] for r in defaults]
     assert len(rows) == 20
-    assert rows[0]["best_route_min_ask_in_usdc_per_1m"] == "0.00015"
-    assert rows[0]["best_route_min_ask_out_usdc_per_1m"] == "0.0006"
+    assert rows[0]["best_route_min_ask_in_usdc_per_1m"] == "0.0015"
+    assert rows[0]["best_route_min_ask_out_usdc_per_1m"] == "0.006"
 
 
 def test_shell_table_appends_tokens_per_second_only_when_the_row_has_it():

@@ -78,7 +78,7 @@ def test_ultracode_picks_orchestrator_and_worker(tmp_path):
     assert result["sonnet"][0] == top20_routes()[0]
     assert len(result["sonnet"]) <= 3
     assert set(result["sonnet"][1:]) <= configured_main_routes()
-    assert result["haiku_same"] is True and picks["version"] == 2 and picks["slots"]["opus"][0] == "cx/gpt-6-astra"
+    assert result["haiku_same"] is True and picks["version"] == 2 and picks["slots"]["opus"][0] == "cb/gpt-6-astra"
     # Next run: Step 1 Enter keeps the saved slots, then folder, launch, orch, worker Enter.
     result2, _, _ = run(tmp_path, "Enter,Enter,Enter,Enter,Enter")
     assert (result2["orch"], result2["worker"]) == ("claude-ih-main", "claude-ih-fast")
