@@ -1,6 +1,6 @@
 {
   "_note": "Built-in defaults used when GitHub is unavailable and no cache exists. Top 20 matches shared/litellm/config/top20-builtin.csv and both launchers. Each ids list is ordered with IRE's selected best provider route first. The shown price is that route's cheapest listed ask; fixed seat ladders remain unchanged.",
-  "_as_of": "2026-10-10T00:44:51Z",
+  "_as_of": "2026-10-10T02:13:18Z",
   "source": "defaults",
   "top20": [
     {
