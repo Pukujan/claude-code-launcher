@@ -12,7 +12,7 @@
 $RepoRoot = Split-Path -Parent $PSScriptRoot           # this repository
 $LiteLLMRoot = Join-Path $RepoRoot "shared\litellm"     # proxy config + scripts
 $LiteLLMOps = Join-Path $PSScriptRoot "litellm"         # start/stop scripts
-$DefaultModelId = "cb/deepseek-v4.1-flash"
+$DefaultModelId = "ali/deepseek-v4.1-flash"
 
 # ---- packaged mode (issue #61, docs/specs/windows-package.md) ----
 # On when CCL_HOME is set (the claude-inferhub shim sets it) or install.json sits in
@@ -118,50 +118,50 @@ $VenvPy = Join-Path $VenvDir "Scripts\python.exe"
 # (tests\test_top20_tables.py checks that). An IRE fetch can replace these rows.
 # Cost is the best route's cheapest input ask, CostOut its output ask, both USDC per 1M tokens.
 $Models = @(
-  @{ Rank = 1; Name = "DeepSeek V4.1 Flash"; Id = "cb/deepseek-v4.1-flash"; Eligible = $false; Cost = "0.0015"; CostOut = "0.006" }
-  @{ Rank = 2; Name = "GLM 5.3 Flash"; Id = "cbcn/glm-5.3-flash"; Eligible = $true; Cost = "0.00225"; CostOut = "0.0075" }
-  @{ Rank = 3; Name = "MiniMax M3"; Id = "cbcn/minimax-m3"; Eligible = $true; Cost = "0.006"; CostOut = "0.024" }
-  @{ Rank = 4; Name = "Qwen3.8 Flash"; Id = "alicn/qwen3.8-flash"; Eligible = $true; Cost = "0.00015"; CostOut = "0.00047" }
-  @{ Rank = 5; Name = "GPT 5.6 Luna"; Id = "cb/gpt-5.6-luna"; Eligible = $false; Cost = "0.0022"; CostOut = "0.0132" }
-  @{ Rank = 6; Name = "DeepSeek V4 Flash"; Id = "cbcn/deepseek-v4-flash"; Eligible = $false; Cost = "0.0033"; CostOut = "0.0099" }
-  @{ Rank = 7; Name = "DeepSeek V4 Pro"; Id = "cbcn/deepseek-v4-pro"; Eligible = $false; Cost = "0.00924"; CostOut = "0.02772" }
-  @{ Rank = 8; Name = "DeepSeek V4 Pro 0813"; Id = "ali/deepseek-v4-pro-0813"; Eligible = $false; Cost = "0.0132"; CostOut = "0.0396" }
-  @{ Rank = 9; Name = "Kimi K2.7 Code"; Id = "cbcn/kimi-k2.7"; Eligible = $true; Cost = "0.01425"; CostOut = "0.06" }
-  @{ Rank = 10; Name = "DeepSeek V4 Flash 0731"; Id = "ali/deepseek-v4-flash-0731"; Eligible = $false; Cost = "0.0066"; CostOut = "0.0198" }
-  @{ Rank = 11; Name = "GLM 5.3"; Id = "cb/glm-5.3"; Eligible = $true; Cost = "0.0154"; CostOut = "0.0484" }
-  @{ Rank = 12; Name = "Gemini 3.6 Flash"; Id = "ag/gemini-3.6-flash-high"; Eligible = $false; Cost = "0.00075"; CostOut = "0.00375" }
-  @{ Rank = 13; Name = "Qwen3.8 Max 0902"; Id = "ali/qwen3.8-max-0902"; Eligible = $false; Cost = "0.01"; CostOut = "0.03" }
-  @{ Rank = 14; Name = "MiniMax M2.7"; Id = "mmcn/MiniMax-M2.7"; Eligible = $false; Cost = "0.0027"; CostOut = "0.0108" }
-  @{ Rank = 15; Name = "Qwen 3.8 Max"; Id = "ali/qwen3.8-max"; Eligible = $true; Cost = "0.016"; CostOut = "0.048" }
-  @{ Rank = 16; Name = "MiMo V2.5"; Id = "cmc/xiaomi/mimo-v2.5"; Eligible = $false; Cost = "0.02002"; CostOut = "0.04004" }
-  @{ Rank = 17; Name = "GPT 6 Luna"; Id = "cb/gpt-6-luna"; Eligible = $false; Cost = "0.0011"; CostOut = "0.0055" }
-  @{ Rank = 18; Name = "GLM 5.2"; Id = "cb/glm-5.2"; Eligible = $true; Cost = "0.0154"; CostOut = "0.0484" }
-  @{ Rank = 19; Name = "Qwen3.8 Omni Flash"; Id = "alicn/qwen3.8-omni-flash"; Eligible = $false; Cost = "0.00015"; CostOut = "0.00047" }
-  @{ Rank = 20; Name = "Muse Spark 1.3 Contributor"; Id = "cmc/meta/muse-spark-1.3-contributor"; Eligible = $false; Cost = "0.0499"; CostOut = "0.0998" }
+  @{ Rank = 1; Name = "DeepSeek V4.1 Flash"; Id = "ali/deepseek-v4.1-flash"; Eligible = $false; Cost = "0.0156"; CostOut = "0.0624" }
+  @{ Rank = 2; Name = "Muse Spark 1.3 Contributor"; Id = "mai/muse-spark-1.3-contributor"; Eligible = $false; Cost = "0.0019"; CostOut = "0.0038" }
+  @{ Rank = 3; Name = "Muse Spark 1.2 Contributor"; Id = "mai/muse-spark-1.2-contributor"; Eligible = $false; Cost = "0.0019"; CostOut = "0.0038" }
+  @{ Rank = 4; Name = "GPT 5.6 Luna"; Id = "kiro/gpt-5.6-luna"; Eligible = $false; Cost = "0.004"; CostOut = "0.024" }
+  @{ Rank = 5; Name = "Qwen3.8 Max 0902"; Id = "ali/qwen3.8-max-0902"; Eligible = $false; Cost = "0.002"; CostOut = "0.006" }
+  @{ Rank = 6; Name = "GLM 5.3"; Id = "ali/glm-5.3"; Eligible = $true; Cost = "0.0112"; CostOut = "0.0352" }
+  @{ Rank = 7; Name = "Qwen3.8 Flash"; Id = "ali/qwen3.8-flash"; Eligible = $true; Cost = "0.01575"; CostOut = "0.04935" }
+  @{ Rank = 8; Name = "Gemini 3.8 Flash"; Id = "ag/gemini-3.8-flash-high"; Eligible = $false; Cost = "0.003"; CostOut = "0.015" }
+  @{ Rank = 9; Name = "GLM 5.3 Flash"; Id = "cbcn/glm-5.3-flash"; Eligible = $true; Cost = "0.03585"; CostOut = "0.1195" }
+  @{ Rank = 10; Name = "DeepSeek V4 Pro 0813"; Id = "ali/deepseek-v4-pro-0813"; Eligible = $false; Cost = "0.00066"; CostOut = "0.00198" }
+  @{ Rank = 11; Name = "Claude Sonnet 4.6"; Id = "ag/claude-sonnet-4-6"; Eligible = $false; Cost = "0.021"; CostOut = "0.105" }
+  @{ Rank = 12; Name = "GPT 6 Luna"; Id = "cx/gpt-6-luna"; Eligible = $false; Cost = "0.0013"; CostOut = "0.0065" }
+  @{ Rank = 13; Name = "Qwen3.8 2.4T-A95B"; Id = "ali/qwen3.8-2.4t-a95b"; Eligible = $false; Cost = "0.002"; CostOut = "0.006" }
+  @{ Rank = 14; Name = "Qwen3.8 27B"; Id = "ali/qwen3.8-27b"; Eligible = $false; Cost = "0.0035"; CostOut = "0.021" }
+  @{ Rank = 15; Name = "Qwen3.8 Omni Flash"; Id = "ali/qwen3.8-omni-flash"; Eligible = $false; Cost = "0.0357"; CostOut = "0.11186" }
+  @{ Rank = 16; Name = "DeepSeek V4 Flash 0731"; Id = "ali/deepseek-v4-flash-0731"; Eligible = $false; Cost = "0.11"; CostOut = "0.33" }
+  @{ Rank = 17; Name = "GPT 6.1 Terra"; Id = "cx/gpt-6.1-terra"; Eligible = $false; Cost = "0.013"; CostOut = "0.065" }
+  @{ Rank = 18; Name = "MiMo V2.6 Flash"; Id = "mimotp/mimo-v2.6-flash"; Eligible = $false; Cost = "0.035"; CostOut = "0.07" }
+  @{ Rank = 19; Name = "Claude Haiku 5.5"; Id = "cc/claude-haiku-5-5"; Eligible = $false; Cost = "0.0084"; CostOut = "0.042" }
+  @{ Rank = 20; Name = "MiniMax M3.1 Flash Preview"; Id = "mmcn/MiniMax-M3.1-Flash-Preview"; Eligible = $false; Cost = "0.027"; CostOut = "0.108" }
 )
 # Frontier picks (IRE frontier list, InferHub routes, not CKFF) offered under the
 # Top 20 in the slot steps. Cost is the input price per 1M tokens.
 $FrontierModels = @(
-  @{ Rank = "F1"; Name = "GPT 6 Astra (272K ctx)"; Id = "cb/gpt-6-astra"; Eligible = $true; Cost = "0.11 in/0.55 out" }
-  @{ Rank = "F2"; Name = "Claude Fable 5"; Id = "cc/claude-fable-5"; Eligible = $true; Cost = "1.48 in/7.4 out" }
-  @{ Rank = "F3"; Name = "Claude Opus 5.5 (1000K ctx)"; Id = "cc/claude-opus-5-5"; Eligible = $true; Cost = "0.592 in/2.96 out" }
-  @{ Rank = "F4"; Name = "GPT 6.1 Sol (272K ctx)"; Id = "cx/gpt-6.1-sol"; Eligible = $true; Cost = "0.02 in/0.1 out" }
-  @{ Rank = "F5"; Name = "GPT 6 Sol (272K ctx)"; Id = "cb/gpt-6-sol"; Eligible = $true; Cost = "0.022 in/0.11 out" }
-  @{ Rank = "F6"; Name = "Gemini 3.1 Pro (1000K ctx)"; Id = "cb/gemini-3.1-pro"; Eligible = $true; Cost = "0.024 in/0.144 out" }
-  @{ Rank = "F7"; Name = "Claude Opus 4.7 (1000K ctx)"; Id = "cb/claude-opus-4.7-1m"; Eligible = $true; Cost = "0.055 in/0.275 out" }
-  @{ Rank = "F8"; Name = "Grok 4.7 (500K ctx)"; Id = "cb/grok-4.7"; Eligible = $true; Cost = "0.022 in/0.066 out" }
-  @{ Rank = "F9"; Name = "Qwen 3.8 Max (1000K ctx)"; Id = "ali/qwen3.8-max-0902"; Eligible = $true; Cost = "0.01 in/0.03 out" }
-  @{ Rank = "F10"; Name = "Grok 4.6 (500K ctx)"; Id = "cb/grok-4.6"; Eligible = $true; Cost = "0.022 in/0.066 out" }
-  @{ Rank = "F11"; Name = "GLM 5.3 (1000K ctx)"; Id = "cb/glm-5.3"; Eligible = $true; Cost = "0.0154 in/0.0484 out" }
-  @{ Rank = "F12"; Name = "GLM 5.2 (1000K ctx)"; Id = "cb/glm-5.2"; Eligible = $true; Cost = "0.0154 in/0.0484 out" }
-  @{ Rank = "F13"; Name = "GLM 5 (200K ctx)"; Id = "kiro/glm-5"; Eligible = $true; Cost = "0.5 in/1.6 out" }
-  @{ Rank = "F14"; Name = "Claude Fable 5.1"; Id = "cc/claude-fable-5-1"; Eligible = $false; Cost = "1.48 in/7.4 out" }
-  @{ Rank = "F15"; Name = "Claude Opus 5 (1000K ctx)"; Id = "cc/claude-opus-5"; Eligible = $false; Cost = "0.74 in/3.7 out" }
-  @{ Rank = "F16"; Name = "GPT 5.5 (272K ctx)"; Id = "cb/gpt-5.5"; Eligible = $false; Cost = "0.045 in/0.27 out" }
-  @{ Rank = "F17"; Name = "Claude Sonnet 5.5 (1000K ctx)"; Id = "ag/claude-sonnet-5-5"; Eligible = $false; Cost = "0.044 in/0.22 out" }
-  @{ Rank = "F18"; Name = "Claude Opus 4.8 (1000K ctx)"; Id = "cc/claude-opus-4-8"; Eligible = $false; Cost = "0.74 in/3.7 out" }
-  @{ Rank = "F19"; Name = "GPT 5.3 Codex (272K ctx)"; Id = "cb/gpt-5.3-codex"; Eligible = $false; Cost = "0.01925 in/0.154 out" }
-  @{ Rank = "F20"; Name = "GPT 5.6 Sol (272K ctx)"; Id = "cx/gpt-5.6-sol"; Eligible = $false; Cost = "0.05 in/0.3 out" }
+  @{ Rank = "F1"; Name = "GPT 6 Astra (272K ctx)"; Id = "cx/gpt-6-astra"; Eligible = $true; Cost = "0.07 in/0.35 out" }
+  @{ Rank = "F2"; Name = "GPT 6.1 Sol (500K ctx)"; Id = "cx/gpt-6.1-sol"; Eligible = $true; Cost = "0.026 in/0.13 out" }
+  @{ Rank = "F3"; Name = "Claude Sonnet 5.5 (1000K ctx)"; Id = "kiro/claude-sonnet-5.5"; Eligible = $true; Cost = "0.048 in/0.24 out" }
+  @{ Rank = "F4"; Name = "GPT 6.1 Terra (500K ctx)"; Id = "cx/gpt-6.1-terra"; Eligible = $true; Cost = "0.013 in/0.065 out" }
+  @{ Rank = "F5"; Name = "Grok 4.7 (500K ctx)"; Id = "grok/grok-4.7-build-fast"; Eligible = $true; Cost = "0.032 in/0.096 out" }
+  @{ Rank = "F6"; Name = "Qwen 3.8 Max (1000K ctx)"; Id = "ali/qwen3.8-max-0902"; Eligible = $true; Cost = "0.002 in/0.006 out" }
+  @{ Rank = "F7"; Name = "Grok 4.6 (500K ctx)"; Id = "grok/grok-4.6"; Eligible = $true; Cost = "0.032 in/0.096 out" }
+  @{ Rank = "F8"; Name = "Kimi K3 (1000K ctx)"; Id = "ali/kimi-k3"; Eligible = $true; Cost = "0.597 in/2.985 out" }
+  @{ Rank = "F9"; Name = "DeepSeek V4 Pro (1000K ctx)"; Id = "ali/deepseek-v4-pro-0813"; Eligible = $true; Cost = "0.00066 in/0.00198 out" }
+  @{ Rank = "F10"; Name = "GLM 5.3 (1000K ctx)"; Id = "ali/glm-5.3"; Eligible = $true; Cost = "0.0112 in/0.0352 out" }
+  @{ Rank = "F11"; Name = "GLM 5 (200K ctx)"; Id = "kiro/glm-5"; Eligible = $true; Cost = "0.019 in/0.0608 out" }
+  @{ Rank = "F12"; Name = "Claude Fable 5.1 (1000K ctx)"; Id = "cc/claude-fable-5-1"; Eligible = $false; Cost = "0.9 in/4.5 out" }
+  @{ Rank = "F13"; Name = "Claude Fable 5 (1000K ctx)"; Id = "cc/claude-fable-5"; Eligible = $false; Cost = "0.9 in/4.5 out" }
+  @{ Rank = "F14"; Name = "Claude Opus 5.5 (1000K ctx)"; Id = "kiro/claude-opus-5.5"; Eligible = $false; Cost = "0.04 in/0.2 out" }
+  @{ Rank = "F15"; Name = "Claude Opus 5 (1000K ctx)"; Id = "kiro/claude-opus-5"; Eligible = $false; Cost = "0.1 in/0.5 out" }
+  @{ Rank = "F16"; Name = "GPT 6 Sol (272K ctx)"; Id = "cx/gpt-6-sol"; Eligible = $false; Cost = "0.026 in/0.13 out" }
+  @{ Rank = "F17"; Name = "Gemini 3.1 Pro (1000K ctx)"; Id = "cb/gemini-3.1-pro"; Eligible = $false; Cost = "0.6 in/3.6 out" }
+  @{ Rank = "F18"; Name = "GPT 5.4 (272K ctx)"; Id = "cb/gpt-5.4"; Eligible = $false; Cost = "? in/? out" }
+  @{ Rank = "F19"; Name = "GPT 5.5 (272K ctx)"; Id = "cb/gpt-5.5"; Eligible = $false; Cost = "? in/? out" }
+  @{ Rank = "F20"; Name = "Claude Opus 4.8 (1000K ctx)"; Id = "kiro/claude-opus-4.8"; Eligible = $false; Cost = "0.09 in/0.45 out" }
 )
 
 # ---- Claude Code slots (issue #53) ----
