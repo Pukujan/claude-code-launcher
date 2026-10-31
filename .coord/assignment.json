@@ -1,7 +1,7 @@
 {
   "schema_version": "0.1.0",
   "project": "Claude Code Launcher ACS adopter",
-  "recorded_at": "2026-10-03T23:45:00Z",
+  "recorded_at": "2026-10-31T17:47:45+00:00",
   "notes": "ACS multi-agent-hotload adopter state. Live join/continue order wins; the seed list is a hint only. FULL PCM (4e23854, CLI 0.6.0) + FULL CGM 0.5.12 (6831f91e, eight modules) + OIO 0.1.0 are pinned. Boss lease is minutes (default 30, range 15-120); the watchdog is agent-less and liveness-only. The decision-boss seat is vacant until the first live continuer claims it.",
   "role_fill": {
     "mode": "join_continue_order",
@@ -76,9 +76,9 @@
       "revision": "38f8f52e8d210db3ce258bf911ebb560c6e0fe4c"
     },
     "pcm": {
-      "repo": "https://github.com/Pukujan/project-continuity-modules",
-      "revision": "4e2385474b4af9249ca009cbdcb38c4498932475",
-      "cli_version": "0.6.0",
+      "repo": "https://github.com/Pukujan/agent-stack-train",
+      "revision": "edfe418a5463332d4509771a068e9bc991b045d7",
+      "cli_version": "0.7.0",
       "protocol": "0.1.0-draft",
       "role": "full_stack",
       "required_features": [
@@ -91,12 +91,12 @@
         "fail_closed_on_missing_gates",
         "leaf_parent_dependency_receipts"
       ],
-      "notes": "Full PCM for adopters. Continuity/checkpoints yes; still NOT the proposal/ACCEPT layer (that stays GitHub + PROPOSALS.md). Pin commit SHA; do not silently follow moving main."
+      "notes": "Full PCM for adopters: continuity/checkpoints plus PR-only, required CI gates, protection/auto-merge preference, fail-closed gates, leaf/parent receipts. The revision is the agent-stack-train commit it was installed from. Do not vendor PCM source."
     },
     "cgm": {
-      "repo": "https://github.com/Pukujan/content-generation-modules",
-      "revision": "6831f91e165b62d719c05eb492f7375fa932b560",
-      "version": "0.5.12",
+      "repo": "https://github.com/Pukujan/agent-stack-train",
+      "revision": "edfe418a5463332d4509771a068e9bc991b045d7",
+      "version": "0.5.13",
       "role": "full_stack",
       "modules": [
         "brand-foundation",
@@ -138,7 +138,7 @@
         "generated_artifact_filenames": "human-output-naming / hon (MUST; basenames + legends)",
         "contract": "docs/writing-routing.json + docs/ACS_VERIFY.md; application=must_load; acs_prompt_inject after VALID"
       },
-      "notes": "FULL CGM 0.5.12 required for ACS and all hotloader adopters. Eight modules including human-output-naming. Not HSW+writing-direction only. Validate with scripts/validate_content_system.py (full adapter); then apply acs_prompt_inject."
+      "notes": "FULL CGM required for ACS and every hotloader adopter: all eight modules including human-output-naming. The revision is the agent-stack-train commit it was installed from. Validate with CGM's validate_content_system.py; then apply acs_prompt_inject. Do not vendor CGM source."
     }
   },
   "ticket_links": {
