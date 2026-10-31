@@ -1,7 +1,7 @@
 {
   "schema_version": "0.1.0",
   "project": "Claude Code Launcher ACS adopter",
-  "recorded_at": "2026-10-31T17:47:45+00:00",
+  "recorded_at": "2026-10-31T18:02:59+00:00",
   "notes": "ACS multi-agent-hotload adopter state. Live join/continue order wins; the seed list is a hint only. FULL PCM (4e23854, CLI 0.6.0) + FULL CGM 0.5.12 (6831f91e, eight modules) + OIO 0.1.0 are pinned. Boss lease is minutes (default 30, range 15-120); the watchdog is agent-less and liveness-only. The decision-boss seat is vacant until the first live continuer claims it.",
   "role_fill": {
     "mode": "join_continue_order",
@@ -77,7 +77,7 @@
     },
     "pcm": {
       "repo": "https://github.com/Pukujan/agent-stack-train",
-      "revision": "edfe418a5463332d4509771a068e9bc991b045d7",
+      "revision": "2e32f2c5ef010e784a28253e88e4aeeadf9cba5f",
       "cli_version": "0.7.0",
       "protocol": "0.1.0-draft",
       "role": "full_stack",
@@ -95,7 +95,7 @@
     },
     "cgm": {
       "repo": "https://github.com/Pukujan/agent-stack-train",
-      "revision": "edfe418a5463332d4509771a068e9bc991b045d7",
+      "revision": "2e32f2c5ef010e784a28253e88e4aeeadf9cba5f",
       "version": "0.5.13",
       "role": "full_stack",
       "modules": [
