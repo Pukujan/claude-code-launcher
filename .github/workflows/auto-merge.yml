@@ -4,6 +4,12 @@ name: auto-merge
 # opens or updates a PR needs no manual merge step and no review approval.
 # Fork pull requests are skipped: their workflow runs get a read-only token that
 # cannot arm auto-merge, and this job never needs to run for them.
+#
+# Only trusted authors get it (Pukujan/agent-stack-train#91): the repository's
+# admins (the owner, and the owner's agents, which act as the owner) and logins
+# listed in the repository variable AUTO_MERGE_AUTHORS (comma-separated).
+# Anyone else's pull request waits for the owner's review, and a push by an
+# untrusted account turns auto-merge off again.
 
 on:
   pull_request:
@@ -26,11 +32,28 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          PUSHER: ${{ github.actor }}
+          TRUSTED: ${{ vars.AUTO_MERGE_AUTHORS }}
         shell: bash
         run: |
           set -euo pipefail
           armed=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" \
             --json autoMergeRequest --jq 'if .autoMergeRequest then "yes" else "no" end')
+          trusted() {
+            printf '%s\n' "${TRUSTED:-}" | tr ', ' '\n\n' | grep -qixF -- "$1" && return 0
+            [ "$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$1/permission" --jq .permission 2>/dev/null || true)" = admin ]
+          }
+          for who in "$AUTHOR" "$PUSHER"; do
+            if ! trusted "$who"; then
+              echo "::notice title=Not armed::#$PR involves $who, who is not trusted to merge without review; the owner reviews it."
+              if [ "$armed" = "yes" ]; then
+                gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --disable-auto
+                echo "Turned auto-merge off for PR #$PR."
+              fi
+              exit 0
+            fi
+          done
           if [ "$armed" = "yes" ]; then
             echo "Auto-merge is already armed for PR #$PR."
             exit 0
