@@ -50,7 +50,7 @@ NODE_MAJOR="${CLAUDE_IH_NODE_MAJOR:-24}"
 UV_INSTALLER_URL="${UV_INSTALLER_URL:-https://astral.sh/uv/install.sh}"
 CLAUDE_INSTALLER_URL="${CLAUDE_INSTALLER_URL:-https://claude.ai/install.sh}"
 
-DEFAULT_MODEL_ID="cb/deepseek-v4.1-flash"
+DEFAULT_MODEL_ID="cb/glm-5.3-flash"
 SEAT_ALIAS="sonnet"
 # Claude Code's auto-compact window: GPT 6 Astra (the opus slot's first model) has 272K.
 AUTO_COMPACT_WINDOW="272000"
@@ -99,26 +99,26 @@ OVERRIDES="$(cat "$OVR_FILE" 2>/dev/null)"
 # This copy is the last resort; it matches shared/litellm/config/top20-builtin.csv,
 # the Windows table and shared/ire/defaults.json (tests check all of them).
 # The two prices are the best route's cheapest listed asks per 1M tokens.
-MODELS='1|DeepSeek V4.1 Flash|cb/deepseek-v4.1-flash|false|0.0015|0.006
-2|GLM 5.3 Flash|cbcn/glm-5.3-flash|true|0.00225|0.0075
-3|MiniMax M3|cbcn/minimax-m3|true|0.006|0.024
-4|Qwen3.8 Flash|alicn/qwen3.8-flash|true|0.00015|0.00047
-5|GPT 5.6 Luna|cb/gpt-5.6-luna|false|0.0022|0.0132
-6|DeepSeek V4 Flash|cbcn/deepseek-v4-flash|false|0.0033|0.0099
-7|DeepSeek V4 Pro|cbcn/deepseek-v4-pro|false|0.00924|0.02772
-8|DeepSeek V4 Pro 0813|ali/deepseek-v4-pro-0813|false|0.0132|0.0396
-9|Kimi K2.7 Code|cbcn/kimi-k2.7|true|0.01425|0.06
-10|DeepSeek V4 Flash 0731|ali/deepseek-v4-flash-0731|false|0.0066|0.0198
-11|GLM 5.3|cb/glm-5.3|true|0.0154|0.0484
-12|Gemini 3.6 Flash|ag/gemini-3.6-flash-high|false|0.00075|0.00375
-13|Qwen3.8 Max 0902|ali/qwen3.8-max-0902|false|0.01|0.03
-14|MiniMax M2.7|mmcn/MiniMax-M2.7|false|0.0027|0.0108
-15|Qwen 3.8 Max|ali/qwen3.8-max|true|0.016|0.048
-16|MiMo V2.5|cmc/xiaomi/mimo-v2.5|false|0.02002|0.04004
-17|GPT 6 Luna|cb/gpt-6-luna|false|0.0011|0.0055
-18|GLM 5.2|cb/glm-5.2|true|0.0154|0.0484
-19|Qwen3.8 Omni Flash|alicn/qwen3.8-omni-flash|false|0.00015|0.00047
-20|Muse Spark 1.3 Contributor|cmc/meta/muse-spark-1.3-contributor|false|0.0499|0.0998'
+MODELS='1|GLM 5.3 Flash|cb/glm-5.3-flash|true|0.0054|0.018
+2|MiniMax M3|cbcn/minimax-m3|true|0.0168|0.0672
+3|DeepSeek V4 Pro|cbcn/deepseek-v4-pro|true|0.0231|0.0693
+4|DeepSeek V4 Flash|cbcn/deepseek-v4-flash|false|0.00924|0.02772
+5|MiniMax M3.1 Flash|cbcn/minimax-m3.1-flash|false|0.0042|0.0168
+6|DeepSeek V4.1 Flash|cb/deepseek-v4.1-flash|true|0.0054|0.0216
+7|GLM 5.3|cb/glm-5.3|true|0.0504|0.1584
+8|Qwen3.8 Flash|ali/qwen3.8-flash|false|0.0672|0.21056
+9|MiniMax M2.7|cbcn/minimax-m2.7|false|0.0075|0.03
+10|Hy4 Preview|cbcn/hy4-preview|false|0.032526|0.097539
+11|Muse Spark 1.2 Contributor|cmc/meta/muse-spark-1.2-contributor|false|0.05|0.1
+12|GPT 5.6 Luna|cx/gpt-5.6-luna|false|0.004|0.024
+13|Muse Spark 1.3 Contributor|mai/muse-spark-1.3-contributor|false|0.0497|0.0994
+14|DeepSeek V4 Pro 0813|ali/deepseek-v4-pro-0813|false|0.00066|0.00198
+15|Kimi K2.7 Code|cb/kimi-k2.7|true|0.03515|0.148
+16|DeepSeek V4 Flash 0731|alicn/deepseek-v4-flash-0731|false|0.02618|0.07854
+17|Hy3|cbcn/hy3|false|0.0014|0.0058
+18|Hy4|cbcn/hy4free|false|0.00834|0.02501
+19|GLM 5.2|cb/glm-5.2|false|0.0518|0.1628
+20|Kimi K2.5|cbcn/kimi-k2.5|false|0.0222|0.111'
 
 MODEL_COUNT="$(printf '%s\n' "$MODELS" | grep -c '|')"
 
